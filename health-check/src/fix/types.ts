@@ -58,4 +58,20 @@ export type PromptRule = {
 /** How risky or skilled a rule's fix is (DECISIONS.md 636). Not the org's complexity score (614). */
 export type FixComplexity = "simple" | "moderate" | "complex";
 
-export type FixRule = { complexity: FixComplexity; hours: HoursRule; prompt: PromptRule };
+/**
+ * What a rule's fix touches, beside its complexity (DECISIONS.md 714). Each one
+ * means the fix is never a quick fix, whatever its hours: it is at least one
+ * that needs planning. Declared here by rule, never read from the text.
+ */
+export type FixTouches = {
+  /** The hours leave out the people's time deciding, or making the change itself: they count only our preparation. */
+  leavesOut?: true;
+  /** The fix changes how an integration or a connected tool is set up. */
+  integration?: true;
+  /** The fix changes automation, or what users can save: flows, routing, escalation, assignment, validation or duplicate rules. */
+  automation?: true;
+  /** The fix turns on a setting we can't confirm can be turned off again (QUESTIONS.md). */
+  mayNotUndo?: true;
+};
+
+export type FixRule = { complexity: FixComplexity; hours: HoursRule; prompt: PromptRule; touches?: FixTouches };

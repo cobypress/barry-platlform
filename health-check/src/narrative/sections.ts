@@ -728,15 +728,15 @@ function executiveSpecs(input: ReportInput, team: Finding[], metrics: Metric[], 
       key: "plan_90_day",
       title: "90-day plan",
       body: plan.later.length
-        ? "Urgent fixes come first, with a short list of quick wins beside them, and each month holds only what a team can take on. The full report has every action, and what comes after 90 days."
-        : "Urgent fixes come first, with a short list of quick wins beside them, and each month holds only what a team can take on. The full report has every action.",
+        ? "Urgent fixes come first, with a short list of small jobs beside them, and each month holds only what a team can take on. The full report has every action, and what comes after 90 days."
+        : "Urgent fixes come first, with a short list of small jobs beside them, and each month holds only what a team can take on. The full report has every action.",
       findingIds: planned.map((f) => f.id),
       sources: [...SUMMARY_SOURCES, PLAN],
       ...(planned.length
         ? {
             brief: {
               purpose:
-                "Introduce the 90-day plan to an executive reader: urgent fixes come first, with quick wins beside them, and each later phase builds on the one before. The phases' actions are listed straight after this text, so don't go through them. If some actions come after the 90 days, say the full report has them.",
+                "Introduce the 90-day plan to an executive reader: urgent fixes come first, with a short list of small jobs beside them, and each later phase builds on the one before. The phases' actions are listed straight after this text, so don't go through them. If some actions come after the 90 days, say the full report has them.",
               sources: [planSource(PLAN, plan), ...planned.map(findingSource)],
               maxWords: WORD_TARGETS.plan_90_day,
             },
@@ -820,14 +820,14 @@ function fullSpecs(input: ReportInput, team: Finding[], metrics: Metric[], surve
     {
       key: "roadmap",
       title: "Roadmap",
-      body: [...plan.map((p) => `Days ${p.from} to ${p.to}, ${p.title}: ${plural(p.findings.length, "action")}.`), ...(quickWins.length ? [`Days 1 to 30, quick wins beside that: ${plural(quickWins.length, "action")}.`] : []), ...(later.length ? [`After 90 days: ${plural(later.length, "action")}.`] : [])].join("\n"),
+      body: [...plan.map((p) => `Days ${p.from} to ${p.to}, ${p.title}: ${plural(p.findings.length, "action")}.`), ...(quickWins.length ? [`Days 1 to 30, small jobs beside that: ${plural(quickWins.length, "action")}.`] : []), ...(later.length ? [`After 90 days: ${plural(later.length, "action")}.`] : [])].join("\n"),
       findingIds: roadmapFindings.map((f) => f.id),
       sources: [...SUMMARY_SOURCES, PLAN],
       ...(roadmapFindings.length
         ? {
             brief: {
               purpose:
-                "Say what shapes the plan: urgent fixes first, quick wins beside them, and why the rest comes in this order. Every action is listed in full after this text, so describe its shape and priorities, not the actions. If anything is left for after the 90 days, say so.",
+                "Say what shapes the plan: urgent fixes first, a short list of small jobs beside them, and why the rest comes in this order. Every action is listed in full after this text, so describe its shape and priorities, not the actions. If anything is left for after the 90 days, say so.",
               sources: [planSource(PLAN, built), ...roadmapFindings.map(findingSource)],
               maxWords: WORD_TARGETS.roadmap,
             },

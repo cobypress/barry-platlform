@@ -8,7 +8,7 @@ import { ORDER_UNCONFIRMED } from "../domains/historic-pipeline/cohort.ts";
 import { currentBody, TOP_ISSUE_COUNT, type BuiltOutput, type BuiltReport } from "../narrative/sections.ts";
 import { VERDICT_WORDS, type ReadinessVerdict } from "../narrative/readiness.ts";
 import { byKind, hasKinds, KIND_HEADINGS, kindOf, noteCounts } from "../narrative/unmeasured.ts";
-import { areasOf, buildPlan, domainLabel, isSetupReview, issuesOf, isThinData, isUnpricedSaving, QUICK_WINS_HEADING, recordAreasLine, scorecard, thinDataLine, topIssues, UNPRICED, verdictOf } from "../narrative/select.ts";
+import { areasOf, buildPlan, domainLabel, isSetupReview, issuesOf, isThinData, isUnpricedSaving, QUICK_WINS_HEADING, QUICK_WINS_NAME, recordAreasLine, scorecard, thinDataLine, topIssues, UNPRICED, verdictOf } from "../narrative/select.ts";
 import type { CustomerWords, Pseudonymiser } from "../privacy/pseudonymiser.ts";
 import { ACCOUNT_ENGAGEMENT_DOMAINS, canRelease, CPQ_DOMAINS, SERVICE_CLOUD_DOMAINS, type Finding, type Metric, type Run } from "../schemas/index.ts";
 import { INVENTORY_COLUMNS, inventoryRows, OBJECT_INVENTORY } from "../domains/configuration/inventory.ts";
@@ -892,7 +892,7 @@ function buildSlides(report: BuiltReport, r: Render, density: Density | null, mo
     <tr><td style="width:24%"><strong>Barometer score</strong></td><td>One score out of 100 for your whole Salesforce, from the area scores, with a grade from A to E.</td></tr>
     <tr><td><strong>Severity</strong></td><td>How much damage this does if it's left alone.</td></tr>
     <tr><td><strong>Confidence</strong></td><td>How sure we are, given what we could read from your org.</td></tr>
-    <tr><td><strong>Difficulty</strong></td><td>How hard the fix is: a quick fix, one that needs planning, or a project. We judge it from the time the fix takes and how risky the change is.</td></tr>
+    <tr><td><strong>Difficulty</strong></td><td>How hard the fix is in Salesforce: a quick fix, one that needs planning, or a project. We judge it from the time the Salesforce change takes and how risky it is. It doesn't count your team's time deciding what to do.</td></tr>
     <tr><td><strong>Impact</strong></td><td>Revenue, licence cost or hours, with its assumptions. Where there's no honest figure to put on it, the risk it carries.</td></tr>
     <tr><td><strong>Not measurable</strong></td><td>The data can't support the figure, so we report that rather than estimate it.</td></tr>
     <tr><td><strong>Reference</strong></td><td>Where the working is in the raw notes that come with this report. <span data-ref>R4.3</span> is the third item in section <span data-ref>R4</span>.</td></tr></tbody></table>`);
@@ -1006,7 +1006,7 @@ function buildSlides(report: BuiltReport, r: Render, density: Density | null, mo
   const quickOnOverview = !dense && planned && quickWins.length > 0;
   const quickPanel = `<div class="quick-panel"><h3>${r.t(QUICK_WINS_HEADING)}</h3><ul class="action-list">${quickWins.map(quickItem).join("")}</ul><p class="small-note">${r.t("What to do for each is on its card in its area.")}</p></div>`;
   const quickBox = quickOnOverview ? quickPanel : "";
-  if (!dense && planned) add(`<div class="eyebrow">Roadmap</div><h2>The first 90 days</h2>${roadmapText}<div class="stat-row">${plan.map((p) => `<div class="stat"><b>${r.t(p.title)}</b><span>Days ${p.from} to ${p.to}</span><p style="margin-top:8px">${p.findings.length} ${p.findings.length === 1 ? "action" : "actions"}</p></div>`).join("")}${quickWins.length ? `<div class="stat"><b>${r.t("Quick wins")}</b><span>Also days 1 to 30</span><p style="margin-top:8px">${quickWins.length} ${quickWins.length === 1 ? "action" : "actions"}</p></div>` : ""}</div>${quickBox}`);
+  if (!dense && planned) add(`<div class="eyebrow">Roadmap</div><h2>The first 90 days</h2>${roadmapText}<div class="stat-row">${plan.map((p) => `<div class="stat"><b>${r.t(p.title)}</b><span>Days ${p.from} to ${p.to}</span><p style="margin-top:8px">${p.findings.length} ${p.findings.length === 1 ? "action" : "actions"}</p></div>`).join("")}${quickWins.length ? `<div class="stat"><b>${r.t(QUICK_WINS_NAME)}</b><span>Also days 1 to 30</span><p style="margin-top:8px">${quickWins.length} ${quickWins.length === 1 ? "action" : "actions"}</p></div>` : ""}</div>${quickBox}`);
   // Quick wins are their own box beside "Stabilise", not part of it (DECISIONS.md 366).
   // Without the overview, the box follows "Stabilise" on its pages, so it takes a slide only when those are full.
   const quickInline = quickWins.length > 0 && !quickOnOverview;

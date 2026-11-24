@@ -193,7 +193,7 @@ function plan(r: Render, report: BuiltReport): string {
   const block = (p: (typeof phases)[number]): string => (p.findings.length ? `<h2>${r.t(`Days ${p.from} to ${p.to}: ${p.title}`)}</h2><ul>${p.findings.map(item).join("")}</ul>` : "");
   const blocks = `${block(phases[0]!)}${quick}${phases.slice(1).map(block).join("")}`;
   const after = later.length ? `<h2>After 90 days</h2><ul>${later.map((f) => `<li>${r.t(f.title)}${r.ref(f.id)}${also(f)}</li>`).join("")}</ul>` : "";
-  return page(`<h1>The plan</h1><p class="muted">${r.t("Urgent fixes come first, with a short list of quick wins beside them, and each month holds only what a team can take on.")}</p>${blocks}${after}`);
+  return page(`<h1>The plan</h1><p class="muted">${r.t("Urgent fixes come first, with a short list of small jobs beside them, and each month holds only what a team can take on.")}</p>${blocks}${after}`);
 }
 
 function compare(r: Render, report: BuiltReport): string {

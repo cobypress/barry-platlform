@@ -3,7 +3,7 @@ import { withAmountNotes } from "./amount-notes.ts";
 import { readinessLine } from "../narrative/readiness.ts";
 import { byKind, hasKinds, kindCounts } from "../narrative/unmeasured.ts";
 import { currentBody, POTENTIAL_REVENUE_RULES, TOP_ISSUE_COUNT, type BuiltReport } from "../narrative/sections.ts";
-import { areasOf, buildPlan, isSetupReview, isThinData, isUnpricedSaving, QUICK_WINS_HEADING, scorecard, thinDataLine, topIssues, UNPRICED, verdictOf, type PlanPhase } from "../narrative/select.ts";
+import { areasOf, buildPlan, isSetupReview, isThinData, isUnpricedSaving, QUICK_WINS_HEADING, QUICK_WINS_NAME, scorecard, thinDataLine, topIssues, UNPRICED, verdictOf, type PlanPhase } from "../narrative/select.ts";
 import type { CustomerWords, Pseudonymiser } from "../privacy/pseudonymiser.ts";
 import { canRelease, type Finding, type Metric } from "../schemas/index.ts";
 import { deliveryOutlookChart, scorecardChart, scorecardOptions, winRateBySegment } from "./charts.ts";
@@ -253,7 +253,7 @@ function executiveHtmlWith(report: BuiltReport, pseudonyms: Pseudonymiser, words
   const top = topIssues(team, TOP_ISSUE_COUNT, report.added);
   const { phases: urgent, alsoFor, quickWins } = buildPlan(team, report.added);
   // Quick wins are their own box beside "Stabilise", not part of it (DECISIONS.md 366).
-  const plan = quickWins.length ? [urgent[0]!, { key: "quick", title: "Quick wins", from: 1, to: 30, findings: quickWins }, ...urgent.slice(1)] : urgent;
+  const plan = quickWins.length ? [urgent[0]!, { key: "quick", title: QUICK_WINS_NAME, from: 1, to: 30, findings: quickWins }, ...urgent.slice(1)] : urgent;
   const customer = intake?.customerName ?? run.customerRef ?? "Customer";
   const notMeasurable = team.filter((f) => f.status === "not_measurable").length;
   const setupReview = isSetupReview(run);

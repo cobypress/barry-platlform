@@ -31,6 +31,18 @@ import type { FixRule, HoursRule, PromptRule } from "./types.ts";
 // attribution links, or analysis and a proposal for people to agree with nothing
 // to trace. It is not the org's complexity score (DECISIONS.md 614).
 //
+// Beside it, `touches` says what else a fix reaches, for the difficulty a reader
+// sees (DECISIONS.md 714): `leavesOut` where the hours count only our preparation
+// and leave out the people deciding or making the change (every PROCESS and PLAN
+// basis, and the two others that say so), `integration` where it changes how an
+// integration or connected tool is set up, `automation` where it changes
+// automation or what users can save (a flow, routing, escalation, assignment, or
+// a validation or duplicate rule, even one built in a sandbox for the owners to
+// turn on), and `mayNotUndo` where it turns on a setting we can't confirm can be
+// turned off. A rule whose prompt `removes` set-up counts as well. Any of these,
+// or a complex fix, is never a quick fix, so a moderate fix that changes
+// automation is "Needs planning" however few hours it takes.
+//
 // Two principles bind every prompt here:
 //
 // A. A fix prompt never asks the assistant to change records. Reassigning
@@ -90,11 +102,13 @@ export const FIX_TABLE: Readonly<Record<string, FixRule>> = {
   },
   "cfg.stage-sprawl": {
     complexity: "complex",
+    touches: { leavesOut: true },
     hours: fixed(4, 7, PROCESS),
     prompt: decide("opportunity stages", ["List each opportunity stage with its probability, forecast category, how many open and closed deals sit in it, and which sales processes use it.", "Propose a shorter set of stages that each mark real buyer progress, with exit criteria for each.", "Map every current stage to one in the proposal, and list what depends on stage names: flows, validation rules, reports and paths."], ["The proposal covers every stage in use, and every dependency on a stage name is listed."]),
   },
   "cfg.picklist-sprawl": {
     complexity: "complex",
+    touches: { leavesOut: true },
     hours: fixed(2, 5, "Preparing the use of each value, a shorter list and the mapping from old values to new for the list's owners; changing the records isn't counted"),
     prompt: decide("picklists", ["For each picklist named, count how often each value is used on records made in the last 12 months.", "Propose a shorter list, and map each old value to a new one.", "List the flows, validation rules, reports and integrations that name a value.", "Prepare the mapping and the plan for the list's owners to agree before any record changes."], ["The mapping covers every value in use, and every dependency on a value is listed."]),
   },
@@ -122,12 +136,14 @@ export const FIX_TABLE: Readonly<Record<string, FixRule>> = {
   },
   "aut.hardcoded-ids-in-flows": {
     complexity: "moderate",
+    touches: { automation: true },
     hours: each(["affected"], "flow with hardcoded values", "flows with hardcoded values", [60, 105], 14),
     prompt: change("flows", ["Open each flow and list every record id and email address typed into it.", "In a sandbox, replace a queue's or public group's id with a lookup of it by its developer name; for a person, use a custom setting, a custom metadata record or a role instead of a user id, and never type a username into the flow; put any other value in a custom label or custom metadata record. Save each as a new flow version.", "Test each path that used a replaced value."], ["No flow version that is active holds a typed record id or email, and each path still reaches the same record, group or person."]),
   },
 
   "aut.flows-without-fault-paths": {
     complexity: "moderate",
+    touches: { automation: true },
     hours: each(["affected"], "flow with no fault path", "flows with no fault path", [60, 105], 21),
     prompt: change("flows", ["In a sandbox, build one subflow that records a failure (the flow, the element and the error message) and tells an admin.", "In each flow, add a fault path from every element that creates, updates or removes records, leading to that subflow, as a new flow version.", "Test by making each save fail, for example with a validation rule in the sandbox."], ["Every data element in these flows has a fault path, and a forced failure is recorded and reaches an admin."]),
   },
@@ -287,6 +303,7 @@ export const FIX_TABLE: Readonly<Record<string, FixRule>> = {
 
   "dq.opps-inactive-owner": {
     complexity: "complex",
+    touches: { leavesOut: true },
     hours: fixed(1, 3, PLAN),
     prompt: decide("deals", ["List open deals owned by inactive users, with the team each sat in.", "Prepare the list for the sales manager to name a new owner for each.", "Draft a step for the leaver checklist so this is handled when someone leaves."], ["Each deal has a proposed new owner for the sales manager to confirm."]),
   },
@@ -309,17 +326,20 @@ export const FIX_TABLE: Readonly<Record<string, FixRule>> = {
 
   "dq.loss-reason-missing": {
     complexity: "moderate",
+    touches: { automation: true },
     hours: fixed(2, 4, "Proposing a short list of reasons and building the rule for the owners to turn on; past deals aren't filled in"),
     prompt: change("lost deals", ["List the loss reason values and how often each is used, and propose a short list for sales to agree.", "In a sandbox, build a validation rule that requires a reason, written so it applies only when a deal's stage changes to closed lost, never to an edit of a record that already lacks the value, and test closing a test deal with and without one.", "Hand the owners the tested rule and a report of the existing records that would fail it; they decide when it is turned on in production."], ["The owners have the agreed list and the tested rule."]),
   },
 
   "dq.records-inactive-owner": {
     complexity: "complex",
+    touches: { leavesOut: true },
     hours: fixed(2, 5, PLAN),
     prompt: decide("records", ["Count accounts, contacts and leads owned by inactive users, by object.", "Prepare the list for the business to name new owners.", "Draft a step for the leaver checklist so this is handled when someone leaves."], ["Each group of records has a proposed new owner for the business to confirm."]),
   },
   "dq.duplicate-rules-missing": {
     complexity: "moderate",
+    touches: { automation: true },
     hours: each(["missing"], "object with no duplicate rule", "objects with no duplicate rule", [120, 210], 11),
     prompt: change("objects", ["In a sandbox, for each object named, build a matching rule on the fields that identify a record, such as name and email.", "Build a duplicate rule that uses it, in alert mode only, so nothing is blocked.", "Test with a known duplicate, then hand the tested rules to the data's owners, who decide when they are turned on in production, in alert mode."], ["In the sandbox, entering a known duplicate shows an alert, and the owners have the tested rules."]),
   },
@@ -341,11 +361,13 @@ export const FIX_TABLE: Readonly<Record<string, FixRule>> = {
   },
   "dq.stale-leads": {
     complexity: "complex",
+    touches: { leavesOut: true },
     hours: fixed(3, 5, "Preparing a follow-up rule by source for agreement; the reps' follow-up time isn't counted"),
     prompt: decide("leads", ["Count open leads with no activity, by source and age.", "Propose a follow-up rule for each source and an age past which leads go back to marketing.", "Prepare the list view or report that would show leads breaking the rule."], ["The proposal covers every lead source."]),
   },
   "dq.contact-completeness": {
     complexity: "complex",
+    touches: { leavesOut: true },
     hours: fixed(3, 5, PLAN),
     prompt: decide("contacts", ["Build reports of contacts with no account and contacts with no email.", "Propose how contacts with no account could be matched to accounts, for example by email domain, as a list for their owners to check.", "Propose how missing emails get filled, and whether new contacts should require one."], ["The proposals are ready for the contacts' owners."]),
   },
@@ -369,31 +391,37 @@ export const FIX_TABLE: Readonly<Record<string, FixRule>> = {
   },
   "pipe.calibration-contradicts-org": {
     complexity: "moderate",
+    touches: { leavesOut: true },
     hours: fixed(1, 3, PROCESS),
     prompt: decide("opportunity stages", ["List each stage's closed and won flags as set in Salesforce.", "Set out where the way the business uses a stage differs from those flags.", "Prepare the options: change the stage set-up, or keep it and record why."], ["Each difference has an agreed answer."]),
   },
   "pipe.segment-divergence": {
     complexity: "simple",
+    touches: { leavesOut: true },
     hours: fixed(2, 4, PROCESS),
     prompt: decide("deals", ["For the segment named, compare its deals with the rest: deal size, type, record type, source and stage history.", "Check whether the sample is large enough to draw a conclusion.", "Prepare what's different and the options, without naming anyone."], ["The analysis explains the gap or shows the sample is too small."]),
   },
   "pipe.skipped-stages": {
     complexity: "moderate",
+    touches: { leavesOut: true },
     hours: fixed(4, 7, PROCESS),
     prompt: decide("stages", ["For each stage named, count won deals that skipped it, by team and record type.", "Set out whether it's part of how those teams sell.", "Prepare the options: take the stage off their path, or agree its exit criteria."], ["Each skipped stage has an agreed answer."]),
   },
   "pipe.going-backwards": {
     complexity: "simple",
+    touches: { leavesOut: true },
     hours: fixed(4, 7, PROCESS),
     prompt: decide("stages", ["From opportunity history, count moves back to an earlier stage, by stage and team.", "Draft exit criteria for each stage: what must be true before a deal moves on.", "Prepare a report that would show backward moves for pipeline reviews."], ["The exit criteria and the report are ready for the sales leaders to agree."]),
   },
   "pipe.path-insights": {
     complexity: "simple",
+    touches: { leavesOut: true },
     hours: fixed(2, 4, PROCESS),
     prompt: decide("paths", ["From opportunity history, list the closed deals on the path named and on the usual path, by team and record type.", "Set out what the deals on each path have in common, and what happens in the stage named.", "Prepare the options for the sales leaders: a change to the stage's exit criteria, or to when a stage can be left out."], ["The comparison and the options are ready for the sales leaders to agree."]),
   },
   "pipe.probability-vs-reality": {
     complexity: "simple",
+    touches: { leavesOut: true },
     hours: fixed(2, 4, PROCESS),
     prompt: decide("stage probabilities", ["List each open stage with the probability set on it, how many closed deals reached it and how many of those were won, by record type.", "Set out what each stage's probability is used for: weighted pipeline, forecasts, reports and dashboards.", "Prepare the comparison for the sales leaders, without proposing new values, so they can agree what each probability is meant to say."], ["The comparison is ready for the sales leaders to agree what each probability means."]),
   },
@@ -531,21 +559,25 @@ export const FIX_TABLE: Readonly<Record<string, FixRule>> = {
 
   "cur.account-concentration": {
     complexity: "simple",
+    touches: { leavesOut: true },
     hours: fixed(2, 4, PROCESS),
     prompt: decide("pipeline", ["Show how open pipeline splits across accounts, and how much the largest holds by stage and close date.", "Set out how much of it is likely, from stage and history.", "Prepare options for building pipeline elsewhere."], ["The analysis shows the exposure and the options."]),
   },
   "cur.rep-concentration": {
     complexity: "simple",
+    touches: { leavesOut: true },
     hours: fixed(2, 4, PROCESS),
     prompt: decide("pipeline", ["Show how open pipeline splits across owners, without naming anyone.", "Set out the risk if the largest holder's deals slip.", "Prepare options for spreading coverage."], ["The analysis shows the exposure and the options."]),
   },
   "cur.coverage": {
     complexity: "simple",
+    touches: { leavesOut: true },
     hours: fixed(2, 4, PROCESS),
     prompt: decide("pipeline", ["Show this quarter's quota, won and open pipeline by team.", "Set out the shortfall against the coverage target.", "Prepare the options: build more pipeline, or reset the number."], ["The leaders have the figures and options to decide this month."]),
   },
   "fct.manager-adjustments": {
     complexity: "simple",
+    touches: { leavesOut: true },
     hours: fixed(2, 4, PROCESS),
     prompt: decide("forecast adjustments", ["Summarise the size of hand adjustments to the Commit forecast by period, without naming anyone.", "Compare the adjusted figures with what closed.", "Prepare a simple way to record the reason behind each large adjustment."], ["The analysis and the proposal are ready for the sales leaders."]),
   },
@@ -574,11 +606,13 @@ export const FIX_TABLE: Readonly<Record<string, FixRule>> = {
   },
   "act.deals-without-activity": {
     complexity: "simple",
+    touches: { leavesOut: true },
     hours: fixed(4, 7, PROCESS),
     prompt: decide("deals", ["Show the share of won and lost deals with no activity, by team.", "Propose the few moments worth recording on a deal, or automatic capture of email and calendar.", "Prepare how each would be set up."], ["The proposal is ready for the sales leaders."]),
   },
   "act.won-vs-lost-activity": {
     complexity: "simple",
+    touches: { leavesOut: true },
     hours: fixed(2, 4, PROCESS),
     prompt: decide("deals", ["Compare logged activity on won and lost deals, by team and stage.", "Check whether activity is logged evenly before drawing a conclusion.", "Prepare what the comparison shows and the options."], ["The analysis is ready for the sales leaders."]),
   },
@@ -589,11 +623,13 @@ export const FIX_TABLE: Readonly<Record<string, FixRule>> = {
   },
   "act.unlinked-tasks": {
     complexity: "moderate",
+    touches: { integration: true },
     hours: fixed(2, 4, "Finding which tools make unlinked tasks and fixing their set-up"),
     prompt: change("tasks", ["Find which tools or automations make tasks with no related record.", "In a sandbox, change those that can link to the right record, and test them.", "Prepare a short note on logging against the deal."], ["The share of unlinked tasks falls."]),
   },
   "lead.conversion-by-source": {
     complexity: "simple",
+    touches: { leavesOut: true },
     hours: fixed(2, 4, PROCESS),
     prompt: decide("lead sources", ["For the source named, compare conversion, response time and follow-up with other sources.", "Set out whether the leads are poor or poorly handled.", "Prepare the options."], ["The analysis is ready for marketing and sales."]),
   },
@@ -604,21 +640,25 @@ export const FIX_TABLE: Readonly<Record<string, FixRule>> = {
   },
   "lead.no-first-response": {
     complexity: "moderate",
+    touches: { automation: true },
     hours: fixed(2, 4, "Checking routing and correcting the rules that leave leads unworked"),
     prompt: change("leads", ["List leads with no response, by source, owner type and queue.", "Check the lead assignment rules and queues that hold them.", "In a sandbox, correct the routing for new leads and test it with test leads."], ["New leads are assigned to someone and get a response."]),
   },
   "lead.converted-no-opportunity": {
     complexity: "simple",
+    touches: { leavesOut: true },
     hours: fixed(1, 3, PROCESS),
     prompt: decide("leads", ["Show converted leads with no opportunity, by source and owner type.", "Propose when a lead should be converted, and how tidy-up conversions are kept out of conversion figures."], ["The rule is ready for sales and marketing to agree."]),
   },
   "lead.source-return": {
     complexity: "simple",
+    touches: { leavesOut: true },
     hours: fixed(2, 4, PROCESS),
     prompt: decide("lead sources", ["For the source named, show leads, conversions and won value.", "Check how its leads are handled.", "Prepare the options for keeping or dropping it."], ["The analysis is ready for marketing."]),
   },
   "lead.campaign-return": {
     complexity: "simple",
+    touches: { leavesOut: true },
     hours: fixed(2, 4, PROCESS),
     prompt: decide("campaign types", ["For the campaign type named, show spend against won value.", "Check the attribution: contacts on a campaign whose deals aren't counted.", "Prepare the options for the spend."], ["The analysis is ready for marketing."]),
   },
@@ -626,16 +666,19 @@ export const FIX_TABLE: Readonly<Record<string, FixRule>> = {
   // Revenue opportunities
   "rev.stalled-deals": {
     complexity: "simple",
+    touches: { leavesOut: true },
     hours: fixed(2, 4, PROCESS),
     prompt: decide("deals", ["List the stalled open deals, by owner and amount, without naming anyone.", "Prepare a plan to give each owner a date to re-engage or close them."], ["Each stalled deal has a date."]),
   },
   "rev.win-backs": {
     complexity: "simple",
+    touches: { leavesOut: true },
     hours: fixed(2, 4, PROCESS),
     prompt: decide("lost deals", ["List the lost and no decision deals worth another look, no decision first.", "Summarise why each group stopped, from loss reasons and history.", "Prepare a plan for checking each one."], ["The plan is ready for the sales leaders."]),
   },
   "rev.dormant-accounts": {
     complexity: "complex",
+    touches: { leavesOut: true },
     hours: fixed(2, 4, PROCESS),
     prompt: decide("accounts", ["List past customers with no recent activity, with their last deal and whether their owner is active.", "Prepare a plan for who owns them and how to check in."], ["Each account has an owner and a next step."]),
   },
@@ -643,6 +686,7 @@ export const FIX_TABLE: Readonly<Record<string, FixRule>> = {
   // Service
   "svc.backlog-growth": {
     complexity: "simple",
+    touches: { leavesOut: true },
     hours: fixed(4, 7, PROCESS),
     prompt: decide("cases", ["Show cases opened and closed by month, by priority, queue and type.", "Find where the growth sits and any cause such as a product fault or a missing article.", "Prepare the options: capacity, routing, or fixing the cause."], ["The analysis is ready for the service leaders."]),
   },
@@ -674,17 +718,20 @@ export const FIX_TABLE: Readonly<Record<string, FixRule>> = {
 
   "svc.unassigned-cases": {
     complexity: "moderate",
+    touches: { leavesOut: true },
     hours: fixed(2, 5, PROCESS),
     prompt: decide("queues", ["List each case queue with its members and its oldest open case.", "Propose members for each queue that has none, and routing from busy queues, for the service leaders to agree."], ["Every queue has proposed members the service leaders have agreed."]),
   },
   "svc.origin-missing": {
     complexity: "moderate",
+    touches: { automation: true },
     hours: fixed(2, 4, "Setting Origin automatically for each channel and building the rule for the owners to turn on"),
     prompt: change("cases", ["List each channel cases come in through, and how Origin is set for each.", "In a sandbox, set Origin automatically for new cases from each channel (in the Email-to-Case routing address, the web form's hidden Origin field, and the messaging channel's settings), and test each.", "In the sandbox, build a validation rule that requires Origin, written so it applies only when a case is created, never to an edit of a record that already lacks the value, and test it.", "Hand the owners the tested rule and a report of the existing records that would fail it; they decide when it is turned on in production."], ["New cases in the sandbox all get an Origin, and the owners have the tested rule."]),
   },
 
   "svc.case-classification": {
     complexity: "moderate",
+    touches: { automation: true },
     hours: fixed(2, 4, "Proposing a short list of types or reasons and building the rule for the owners to turn on"),
     prompt: change("cases", ["Show how Type and Reason are used, and their values, and propose a short list for the service leaders to agree.", "In a sandbox, build a validation rule that requires one, written so it applies only when a case's status changes to closed, never to an edit of a record that already lacks the value, and test it.", "Hand the owners the tested rule and a report of the existing records that would fail it; they decide when it is turned on in production."], ["The service leaders have the agreed list and the tested rule."]),
   },
@@ -702,17 +749,20 @@ export const FIX_TABLE: Readonly<Record<string, FixRule>> = {
   },
   "svc.escalation-targets": {
     complexity: "moderate",
+    touches: { automation: true },
     hours: each(["dead"], "escalation action with no one to act", "escalation actions with no one to act", [60, 105], 7),
     prompt: change("escalation actions", ["List escalation actions that point at an inactive user or an empty queue.", "Propose a queue with members for each, for the service leaders to agree.", "In a sandbox, point each at the agreed queue and test it, and draft a line on escalation targets for the leaver checklist."], ["Every escalation in the sandbox reaches someone who can act."]),
   },
 
   "svc.queue-sprawl": {
     complexity: "complex",
+    touches: { leavesOut: true },
     hours: fixed(2, 4, PROCESS),
     prompt: decide("queues", ["List each case queue with its members, open cases and the routing and rules that use it.", "Flag queues nobody works and what routes to them.", "Propose which to keep, which to fold together and who should be a member, for the service leaders to decide."], ["Every queue has a decision from the service leaders."]),
   },
   "svc.omni-routing": {
     complexity: "moderate",
+    touches: { automation: true },
     hours: each(["unrouted"], "case queue Omni-Channel doesn't route", "case queues Omni-Channel doesn't route", [60, 105], 7),
     prompt: change("queues", ["For each case queue without a routing configuration, ask whether Omni-Channel should push its work.", "In a sandbox, give those a routing configuration, and test it.", "List configurations no queue uses for their owner to decide."], ["Every case queue is routed, or left out on purpose."]),
   },
@@ -733,6 +783,7 @@ export const FIX_TABLE: Readonly<Record<string, FixRule>> = {
   },
   "svc.macros-and-quick-text": {
     complexity: "moderate",
+    touches: { leavesOut: true },
     hours: fixed(2, 5, PROCESS),
     prompt: decide("macros and quick text", ["List macros and quick text with when each was last used.", "Flag those unused in a year, and the Classic-only macros that would need rebuilding for Lightning.", "Propose an owner for each, and prepare the list for them to decide."], ["Every macro and quick text has an owner and a decision."]),
   },
@@ -760,6 +811,7 @@ export const FIX_TABLE: Readonly<Record<string, FixRule>> = {
   },
   "cpq.discount-leakage": {
     complexity: "complex",
+    touches: { leavesOut: true },
     hours: fixed(4, 7, PROCESS),
     prompt: decide("discounts", ["Show discount against win rate by deal size, without naming anyone.", "Draft a discount policy with limits by deal size.", "Prepare how deeper discounts would go through approval."], ["The policy is ready for the sales leaders."]),
   },
@@ -784,21 +836,25 @@ export const FIX_TABLE: Readonly<Record<string, FixRule>> = {
   // Marketing handover
   "mkt.unworked-handovers": {
     complexity: "complex",
+    touches: { leavesOut: true },
     hours: fixed(2, 4, PROCESS),
     prompt: decide("leads", ["Build a report of marketing leads handed to sales and not worked, by source and age.", "Propose a follow-up time, and what happens to leads nobody works, for sales and marketing to agree."], ["The proposal is ready for sales and marketing."]),
   },
   "mkt.scoring-grading": {
     complexity: "complex",
+    touches: { leavesOut: true },
     hours: fixed(4, 7, PROCESS),
     prompt: decide("leads", ["Show synced leads with no score or grade.", "Propose a grading profile against the ideal customer profile, and changes to scoring so it rewards real buying signals.", "Prepare it for marketing to agree."], ["The proposal is ready for marketing."]),
   },
   "mkt.unowned-prospects": {
     complexity: "complex",
+    touches: { leavesOut: true },
     hours: fixed(1, 3, PLAN),
     prompt: decide("leads", ["List synced leads in a queue or with an inactive owner.", "Find the assignment rules that left them there.", "Prepare the list, with a proposed owner for each, and the rule changes, for sales and marketing to agree."], ["Each lead has a proposed owner and the rule changes are agreed."]),
   },
   "mkt.campaign-influence": {
     complexity: "simple",
+    touches: { mayNotUndo: true },
     hours: fixed(1, 2, "Turning on one setting and choosing the model to report on"),
     prompt: change("campaign settings", ["In a sandbox, allow influence models from Account Engagement in the campaign influence settings, and check the attribution.", "Propose the model to report on, for marketing to choose, then turn it on in production; it can be turned off again."], ["Opportunities show Account Engagement's attribution."]),
   },
