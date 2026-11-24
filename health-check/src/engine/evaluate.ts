@@ -297,7 +297,8 @@ function noAmountNote(e: Evidence): Evidence {
 
 /** The same for a metric: one in money, or one that says an amount, is not measurable for the plain reason. */
 function metricWithoutCurrency(metric: Metric, reason: Said): Metric {
-  if (metric.unit !== "currency" && !mentionsCurrency(metric, NO_CURRENCY)) return metric;
+  // One already not measurable for its own reason keeps it, unless that reason says an amount.
+  if (metric.status === "not_measurable" ? !mentionsCurrency(metric, NO_CURRENCY) : metric.unit !== "currency" && !mentionsCurrency(metric, NO_CURRENCY)) return metric;
   const { id, domain, label, definition, unit, evidence, exclusions } = metric;
   return { status: "not_measurable", id, domain, label, definition, unit, evidence: evidence.map(noAmountNote), exclusions: exclusions.filter((e) => !mentionsCurrency(e, NO_CURRENCY)), assumptions: [], reason };
 }

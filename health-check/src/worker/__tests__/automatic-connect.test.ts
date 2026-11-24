@@ -3,9 +3,9 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { beginAuthorisation, createConnectLink } from "../../connect/link.ts";
-import { CALIBRATION_UNREADABLE, NO_WON_STAGE, ORG_SETTINGS_CALIBRATOR, STAGES_UNREAD } from "../../connect/auto-calibration.ts";
-import { StoreError } from "../../connect/org-stages.ts";
-import { ORG_CURRENCY_SOQL } from "../../connect/org-currency.ts";
+import { automaticCalibration, CALIBRATION_REFUSED, CALIBRATION_UNREADABLE, NO_WON_STAGE, ORG_SETTINGS_CALIBRATOR, STAGES_UNREAD } from "../../connect/auto-calibration.ts";
+import { orgStages, StoreError } from "../../connect/org-stages.ts";
+import { ORG_CURRENCY_SOQL, ORG_LOCALE_SOQL } from "../../connect/org-currency.ts";
 import { approvedReport, AUTOMATIC_DOCUMENTS_NOT_BUILT } from "../../render/render-released.ts";
 import type { Transport, TransportRequest, TransportResponse } from "../../salesforce/transport.ts";
 import type { ConnectLink } from "../../schemas/connect.ts";
@@ -16,7 +16,7 @@ import { loadAnswers, loadCalibration, loadRecording, ReplayTransport } from "..
 import type { AutomaticSwitch } from "../automatic.ts";
 import { AUTOMATIC_OFF_AT_CONNECT, AUTOMATIC_ORG_AT_CONNECT } from "../connect-job.ts";
 import { sealConnectSecret } from "../connect-crypto.ts";
-import { CALIBRATION_WRITE, HOLD_RUN_SQL, PostgresWorkerStore, REVIEW_MODE_SQL, type SqlClient, type SqlPool, type SqlResult } from "../postgres-store.ts";
+import { CALIBRATION_WRITE, calibrationFromRow, calibrationRow, HOLD_RUN_SQL, PostgresWorkerStore, REVIEW_MODE_SQL, type SqlClient, type SqlPool, type SqlResult } from "../postgres-store.ts";
 import { ORG_SETTINGS_ON_CONSULTANT_RUN } from "../run-job.ts";
 import { ORG_AWAITING_CONNECT } from "../types.ts";
 import { createJobHandler } from "../worker.ts";
@@ -54,7 +54,9 @@ const STAGES = [
 class Org implements Transport {
   readonly requests: TransportRequest[] = [];
   stages: unknown[] | "refused" = STAGES;
-  currency: string | "refused" = "EUR";
+  // "single": no DefaultCurrencyIsoCode, as on every org with one currency, so the locale answers (DECISIONS.md 700).
+  currency: string | "refused" | "single" = "EUR";
+  locale: string | "refused" = "en_GB";
   async send(request: TransportRequest): Promise<TransportResponse> {
     this.requests.push(request);
     const url = new URL(request.url);
@@ -66,7 +68,12 @@ class Org implements Transport {
     // The org's own currency, read for an automatic run's calibration (DECISIONS.md 693).
     if (q === ORG_CURRENCY_SOQL) {
       if (this.currency === "refused") return { status: 400, header: () => null, text: JSON.stringify([{ errorCode: "INSUFFICIENT_ACCESS", message: "no" }]) };
+      if (this.currency === "single") return { status: 400, header: () => null, text: JSON.stringify([{ errorCode: "INVALID_FIELD", message: "No such column 'DefaultCurrencyIsoCode' on entity 'Organization'." }]) };
       return ok({ records: [{ attributes: { type: "Organization" }, DefaultCurrencyIsoCode: this.currency }], totalSize: 1, done: true });
+    }
+    if (q === ORG_LOCALE_SOQL) {
+      if (this.locale === "refused") return { status: 400, header: () => null, text: JSON.stringify([{ errorCode: "INSUFFICIENT_ACCESS", message: "no" }]) };
+      return ok({ records: [{ attributes: { type: "Organization" }, DefaultLocaleSidKey: this.locale }], totalSize: 1, done: true });
     }
     if (/FROM OpportunityStage/.test(q)) {
       if (this.stages === "refused") return { status: 400, header: () => null, text: JSON.stringify([{ errorCode: "INSUFFICIENT_ACCESS", message: "no" }]) };
@@ -569,5 +576,104 @@ describe("the Postgres store's side of it", () => {
     assert.equal(lines.length, 1);
     assert.match(lines[0]!, /SQLSTATE 42703/);
     assert.ok(!lines[0]!.includes(PLANTED));
+  });
+});
+
+describe("an automatic run's currency at connect never holds it (DECISIONS.md 700)", () => {
+  const flagCounts = (f: Flow) => [...f.deps.store.flags.values()].filter((x) => x.runId === RUN_ID).map((x) => ({ kind: x.kind, counts: x.counts }));
+
+  test("a multi-currency org: its own default currency, unmarked, and queued", async () => {
+    const f = await flow();
+    await f.handle(f.job, once);
+    const c = f.deps.store.runs.get(RUN_ID)!.calibration!;
+    assert.equal(c.currency, "EUR");
+    assert.equal(c.currencyFrom, undefined);
+    assert.deepEqual(f.queued, [RUN_ID]);
+  });
+
+  test("a single-currency org's INVALID_FIELD: the currency taken from its locale, marked so, queued, and never held", async () => {
+    const f = await flow();
+    f.org.currency = "single";
+    const outcome = await f.handle(f.job, once);
+    assert.match(outcome.detail, / The run is calibrated from the org's settings and queued\.$/);
+    const c = f.deps.store.runs.get(RUN_ID)!.calibration!;
+    assert.equal(c.currency, "GBP");
+    assert.equal(c.currencyFrom, "locale");
+    assert.deepEqual(f.queued, [RUN_ID]);
+    assert.equal(f.deps.store.held.size, 0);
+    assert.deepEqual(flagCounts(f), []);
+    assert.ok(f.deps.lines.some((l) => /The org has one currency/.test(l)));
+    assert.ok(f.deps.lines.includes(`Automatic run ${RUN_ID}'s currency, GBP, is taken from the org's default locale, and every money figure will say so.`));
+  });
+
+  test("an unmapped locale, or a failed locale read: calibrated with none, queued, never held", async () => {
+    for (const locale of ["en", "refused"] as const) {
+      const f = await flow();
+      f.org.currency = "single";
+      f.org.locale = locale;
+      await f.handle(f.job, once);
+      const c = f.deps.store.runs.get(RUN_ID)!.calibration!;
+      assert.equal(c.currency, "XXX", locale);
+      assert.equal(c.currencyFrom, "none", locale);
+      assert.deepEqual(f.queued, [RUN_ID], locale);
+      assert.equal(f.deps.store.held.size, 0, locale);
+      assert.ok(f.deps.lines.includes(`Automatic run ${RUN_ID} has no currency, so its money figures won't be measured and everything else will.`), locale);
+    }
+  });
+
+  test("redelivered, each case saves once and queues once", async () => {
+    for (const setUp of [(o: Org) => void o, (o: Org) => void (o.currency = "single"), (o: Org) => ((o.currency = "single"), (o.locale = "en")), (o: Org) => void (o.currency = "refused")]) {
+      const f = await flow();
+      setUp(f.org);
+      await f.handle(f.job, once);
+      await f.handle(f.job, once);
+      await f.handle(f.job, { final: true });
+      assert.equal(methods(f, "saveCalibration"), 1);
+      assert.deepEqual(f.queued, [RUN_ID]);
+      assert.equal(f.deps.store.held.size, 0);
+    }
+  });
+
+  test("each remaining hold says its true cause, and its flag counts the stages read and the won ones", async () => {
+    const cases = [
+      { set: (o: Org) => void (o.stages = "refused"), reason: STAGES_UNREAD, log: "no stages could be read", counts: { stages: 0, won: 0 } },
+      { set: (o: Org) => void (o.stages = STAGES.map((x) => ({ ...x, IsWon: false }))), reason: NO_WON_STAGE, log: "no stage is closed and won", counts: { stages: 5, won: 0 } },
+      // A stage listed twice is one the schema refuses.
+      { set: (o: Org) => void (o.stages = [...STAGES, STAGES[1]]), reason: CALIBRATION_REFUSED, log: "the calibration was refused", counts: { stages: 6, won: 1 } },
+    ];
+    for (const c of cases) {
+      const f = await flow();
+      // Whatever the currency: it is never the cause.
+      f.org.currency = "single";
+      c.set(f.org);
+      const outcome = await f.handle(f.job, once);
+      assert.ok(outcome.detail.endsWith(` Held: ${CALIBRATION_UNREADABLE}. ${c.reason}`), outcome.detail);
+      assert.deepEqual(flagCounts(f), [{ kind: CALIBRATION_UNREADABLE, counts: c.counts }]);
+      assert.ok(f.deps.lines.some((l) => l.startsWith(`Automatic run ${RUN_ID} wasn't calibrated or queued: ${CALIBRATION_UNREADABLE} (${c.log}; ${c.counts.stages} stages read, ${c.counts.won} won)`)), c.log);
+      // Redelivered: no second hold, no second flag.
+      await f.handle(f.job, { final: true });
+      assert.equal(methods(f, "raiseFlag"), 1);
+      noStageNames(f, outcome.detail);
+    }
+  });
+
+  test("the Postgres hold writes its counts, numbers only", async () => {
+    const pool = new FakePool();
+    pool.handlers.push((text) => (text === HOLD_RUN_SQL ? { rows: [{ held: 1 }], rowCount: 1 } : undefined));
+    await new PostgresWorkerStore(pool).holdRun(RUN_ID, CALIBRATION_UNREADABLE, NOW.toISOString(), { stages: 14, won: 1, bad: -1, worse: 1.5 } as Record<string, number>);
+    assert.deepEqual(pool.statements[0]!.values, [RUN_ID, CALIBRATION_UNREADABLE, NOW.toISOString(), JSON.stringify({ stages: 14, won: 1 })]);
+  });
+
+  test("the calibration's currency source rides in the fields column, and is read back only from the org's settings", () => {
+    const built = automaticCalibration(orgStages(STAGES), { orgId: FAKE.orgId, at: NOW.toISOString(), currency: { code: "GBP", from: "locale" } });
+    assert.ok(built.ok);
+    const row = calibrationRow(RUN_ID, built.calibration);
+    assert.deepEqual(row.fields, { currencyFrom: "locale" });
+    const { runId: _r, ...back } = row;
+    assert.equal(calibrationFromRow(back).currencyFrom, "locale");
+    // A person's calibration never carries one, whatever its fields hold.
+    assert.equal(calibrationFromRow({ ...back, source: "confirmed" }).currencyFrom, undefined);
+    // One read before 700, with nothing in its fields: the org's own, as before.
+    assert.equal(calibrationFromRow({ ...back, fields: {} }).currencyFrom, undefined);
   });
 });
