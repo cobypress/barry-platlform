@@ -33,14 +33,14 @@ export const SEAL_OVERHEAD = 1 + IV_BYTES + TAG_BYTES;
 /** The console's CHECK on "sealed": 1 byte to 15 MiB. */
 export const SEALED_MAX_BYTES = 15 * 1024 * 1024;
 /**
- * The largest PDF we seal: 12 MiB. The synthetic org's full health check, the
- * heaviest of the three, weighs well under 1 MiB, almost all of it the two
- * embedded fonts; a big org's adds pages, not fonts. 12 MiB is many times what
- * any of them weighs today and leaves room under the console's 15 MiB ceiling
- * for the seal and a later change of layout, so a document over it is a fault
- * of ours, held for us, never one the database refuses mid-transaction.
+ * The largest PDF we seal: 4 MiB. The portal opens a sealed document whole
+ * (the seal's tag must be checked before any byte leaves) and answers from a
+ * serverless function whose response is capped at about 4.5 MB, so a larger
+ * document could be made and never downloaded. The synthetic org's full
+ * health check weighs well under 1 MiB, most of it embedded fonts; a big
+ * org's adds pages, not fonts. A larger PDF is held for us.
  */
-export const PORTAL_PDF_MAX_BYTES = 12 * 1024 * 1024;
+export const PORTAL_PDF_MAX_BYTES = 4 * 1024 * 1024;
 
 /**
  * What a held-for-us row stores in "sealed", which can't be null or empty: one
