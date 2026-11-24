@@ -397,11 +397,13 @@ export const RunDigest = z.object({
   orgWords: z.object({ editionNote: SentenceOrgWords.optional() }).optional(),
   /**
    * Every rule this run checked (DECISIONS.md 718): ran to a result of any
-   * status, not measurable included, or ran and had nothing to report, so has
-   * no finding. Sorted by code unit, each once. Never an insight's, never a rule
-   * the run's scope or modules left out, and the code checker's six only on a
-   * run that had its step. Ids, never text. Absent on a digest of a run
-   * analysed before it was kept: then nothing is known of what didn't run.
+   * status, not measurable included, so each has a finding. Sorted by code
+   * unit, each once. Never an insight's, never a rule the run's scope or
+   * modules left out or that had nothing to compare, and the code checker's
+   * six only on a run that had its step. Ids, never text. Absent on a digest
+   * of a run analysed before it was kept: then nothing is known of what didn't
+   * run. A digest made before 25 November 2026 can list the calibration check
+   * on an automatic run with no finding: that silence is not a pass.
    */
   rulesRun: Ids.optional(),
   /**
