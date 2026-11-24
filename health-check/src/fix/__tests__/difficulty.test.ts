@@ -21,6 +21,8 @@ import { AS_OF, CONNECTED_USER } from "../../testing/synthetic-org.ts";
 import { DIFFICULTY_BASIS, DIFFICULTY_ORDER, DIFFICULTY_WORDS, difficultyCovered, difficultyFor, difficultyOf, neverQuick, NOT_ESTIMATED } from "../difficulty.ts";
 import { effortHours, MEDIUM_MAX_HOURS, SMALL_MAX_HOURS, timeBandOf } from "../hours.ts";
 import { FIX_TABLE, NEVER_RAISES } from "../table.ts";
+import { fixFields } from "../index.ts";
+import { Pseudonymiser } from "../../privacy/pseudonymiser.ts";
 
 // Difficulty beside severity (DECISIONS.md 714): one rule, from the finding's own
 // hours and its rule's fix complexity, never lower than the hours' band, and
@@ -128,6 +130,23 @@ describe("what a fix touches keeps it from a quick fix", () => {
     assert.equal(at("cur.stale-deals", 1).d, "quick_fix");
   });
 
+  test("each rule the review named reads as it should, by its label: never a quick fix", () => {
+    const named: Record<string, string> = {
+      // Hours that leave out the people deciding or making the change.
+      "cur.coverage": "needs_planning", "pipe.segment-divergence": "needs_planning", "cur.account-concentration": "needs_planning", "cur.rep-concentration": "needs_planning",
+      "lead.source-return": "needs_planning", "lead.campaign-return": "needs_planning", "lead.conversion-by-source": "needs_planning", "rev.win-backs": "needs_planning",
+      "pipe.probability-vs-reality": "needs_planning", "fct.manager-adjustments": "needs_planning", "act.won-vs-lost-activity": "needs_planning", "lead.converted-no-opportunity": "needs_planning",
+      "pipe.path-insights": "needs_planning", "rev.stalled-deals": "needs_planning", "pipe.calibration-contradicts-org": "needs_planning",
+      // Removals, an integration, automation, and a setting that may not be undone.
+      "cfg.unused-custom-fields": "needs_planning", "dq.record-type-use": "needs_planning", "act.unlinked-tasks": "needs_planning",
+      "aut.hardcoded-ids-in-flows": "needs_planning", "aut.flows-without-fault-paths": "needs_planning", "svc.escalation-targets": "needs_planning", "svc.omni-routing": "needs_planning",
+      "mkt.campaign-influence": "needs_planning",
+    };
+    for (const [id, level] of Object.entries(named)) assert.equal(at(id, 1).d, level, id);
+    // The reports owners keep up themselves stay quick fixes.
+    for (const id of ["cur.stale-deals", "cur.stuck-in-stage", "dq.open-opps-past-close", "fct.commit-at-risk"]) assert.equal(at(id, 1).d, "quick_fix", id);
+  });
+
   test("removals, integrations, automation and a setting that may not be undone are never quick", () => {
     for (const id of ["cfg.unused-custom-fields", "dq.record-type-use"]) assert.ok(FIX_TABLE[id]!.prompt.removes, id);
     assert.ok(FIX_TABLE["act.unlinked-tasks"]!.touches?.integration);
@@ -168,6 +187,15 @@ describe("every rule's basis, in one table beside the rules", () => {
       if (rule.hours.facts === "all") continue; // every fact counts, so any fact is its count
       assert.equal(h, null, id);
       assert.equal(difficultyFor(id, h ?? undefined, { unrelated: 3 }), null, id);
+    }
+  });
+
+  test("a per-unit finding whose count is missing gets no label from the engine, whatever else it holds", () => {
+    const pseudonyms = new Pseudonymiser();
+    for (const f of recorded.filter((x) => x.status === "issue" && FIX_TABLE[x.ruleId]?.hours.kind === "each" && FIX_TABLE[x.ruleId]!.hours.kind === "each" && (FIX_TABLE[x.ruleId]!.hours as { facts: unknown }).facts !== "all")) {
+      const { fields } = fixFields(f.ruleId, { ...f, facts: { unrelated: 3 } }, pseudonyms);
+      assert.equal(fields.effortHours, undefined, f.ruleId);
+      assert.equal(fields.difficulty, undefined, f.ruleId);
     }
   });
 
@@ -281,6 +309,7 @@ describe("the digest", () => {
       assert.ok(["critical", "high"].includes(byId.get(id)!.severity), id);
       assert.equal(byId.get(id)!.difficulty, "quick_fix", id);
     }
+    for (const id of digest.plan.quickFixes!) assert.ok(!FIX_TABLE[byId.get(id)!.ruleId]!.touches?.leavesOut, id);
     // The plan itself is the one it always was.
     assert.deepEqual(digest.plan.quickWins, plan.quickWins.map((f) => f.id));
     assert.deepEqual(digest.plan.phases.map((p) => p.findingIds), plan.phases.map((p) => p.findings.map((f) => f.id)));
