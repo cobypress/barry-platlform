@@ -115,6 +115,19 @@ async function draftSections(runId: string, dir: string, input: ReportInput, cli
 /** What a run job may ask beyond its run: `again`, a person's "Run again" of an automatic run (DECISIONS.md 698). */
 export type RunJobOptions = { again?: string };
 
+/**
+ * A person's "Run again" (DECISIONS.md 698): the console adds the run job under
+ * the id `run-<runId>-again-<ms>`, the time of the press in milliseconds (1 to
+ * 16 digits, no leading zero), and nothing more in its data. The time, or null
+ * for any other id: the first run's fixed `run-<runId>`, a scan's or a
+ * consultant-led run's `run-<runId>-<ms>`, or none.
+ */
+export function runAgainToken(runId: string, jobId: string | undefined): string | null {
+  if (!jobId || !jobId.startsWith(`run-${runId}-again-`)) return null;
+  const token = jobId.slice(`run-${runId}-again-`.length);
+  return /^[1-9][0-9]{0,15}$/.test(token) ? token : null;
+}
+
 /** The run folder's record of which "Run again" started it afresh, so a retry of that same job resumes rather than starting again. */
 export const AGAIN_FILE = "again.json";
 

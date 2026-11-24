@@ -132,6 +132,9 @@ describe("the portal's documents for a released automatic run (DECISIONS.md 698)
   const handle = createJobHandler(deps);
   const outcome = await handle(PORTAL, { final: true });
   const first = rowsOf(store).map((r) => r && { ...r, sealed: Buffer.from(r.sealed) });
+  // As the first make left them: the remake below runs while this suite is collected, and writes over both.
+  const firstPages: Record<string, string> = { ...pages };
+  const firstMade = made.last;
   const dir = store.runs.get(RUN_ID)!.runDir!;
 
   test("Claude's drafts that claimed a review fell back at draft time, so none reached a page", () => {
@@ -141,9 +144,9 @@ describe("the portal's documents for a released automatic run (DECISIONS.md 698)
     const current = new Set(out.sections.map((s) => s.currentVersionId));
     assert.ok(out.versions.filter((v) => current.has(v.id)).every((v) => v.source === "engine"));
     for (const doc of ["executive", "full", "ceo"]) {
-      assert.ok(pages[doc], doc);
-      assert.ok(!pages[doc]!.includes(CLAIM.slice(0, 20)), doc);
-      assert.deepEqual(forbiddenInFrame(pages[doc]!), [], doc);
+      assert.ok(firstPages[doc], doc);
+      assert.ok(!firstPages[doc]!.includes(CLAIM.slice(0, 20)), doc);
+      assert.deepEqual(forbiddenInFrame(firstPages[doc]!), [], doc);
     }
   });
 
@@ -160,7 +163,7 @@ describe("the portal's documents for a released automatic run (DECISIONS.md 698)
       // Kept 7 days from the make, as the console's CHECK allows.
       assert.equal(Date.parse(row.expiresAt) - Date.parse(row.madeAt), 7 * 86_400_000);
     }
-    assert.equal(made.last?.repairs, "none");
+    assert.equal(firstMade?.repairs, "none");
   });
 
   test("the renderer still refuses this run's folder to anything but the portal's make", () => {
@@ -187,7 +190,7 @@ describe("the portal's documents for a released automatic run (DECISIONS.md 698)
     assert.equal(store.documents.get(RUN_ID)!.input.state, null);
     assert.deepEqual(store.flagsOf(RUN_ID), []);
     // No page names who prepared it, though the row named a consultant.
-    for (const doc of ["executive", "full", "ceo"]) assert.ok(!/consultant@example\.com|Prepared by/i.test(pages[doc]!), doc);
+    for (const doc of ["executive", "full", "ceo"]) assert.ok(!/consultant@example\.com|Prepared by/i.test(firstPages[doc]!), doc);
   });
 
   describe("made again, with a planted claim and a planted figure in the checked sections", async () => {

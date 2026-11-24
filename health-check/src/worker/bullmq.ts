@@ -75,7 +75,8 @@ export function processorFor(
   return async (job) => {
     const final = job.attemptsMade + 1 >= (job.opts.attempts ?? 1);
     try {
-      const result = await handler(job.data, { final });
+      // The job's own id goes with it: "Run again" is known by its id (DECISIONS.md 698). The heavy queue keeps the console's id.
+      const result = await handler(job.data, { final, ...(job.id ? { jobId: job.id } : {}) });
       // With how full the org-word store is, so a worker whose marks have degraded to unknown is seen (DECISIONS.md 663).
       const store = orgWordsStore();
       log(`${job.id ?? "?"} ${result.outcome}: ${result.detail} (org-word store ${store.size} of ${store.limit}${store.full ? ", full: marks are unknown until restart" : ""})`);

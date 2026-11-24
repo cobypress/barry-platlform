@@ -74,7 +74,13 @@ export type WorkerDeps = {
 };
 
 /** Whether the queue will deliver this job again if it throws. */
-export type Attempt = { final: boolean };
+/**
+ * Whether the queue will deliver this job again if it throws, and the job's
+ * own queue id where the queue gives one: a person's "Run again" is known by
+ * its id alone, `run-<runId>-again-<ms>` (DECISIONS.md 698), since the job's
+ * data holds ids only and its schema is strict.
+ */
+export type Attempt = { final: boolean; jobId?: string };
 
 export type JobOutcome =
   | { outcome: "done"; detail: string }
