@@ -377,8 +377,9 @@ e) On an org where `DefaultCurrencyIsoCode` fails for another reason than `INVAL
 
 ## Stage probabilities (DECISIONS.md 706)
 
-The engine's stage read asks for `OpportunityStage.DefaultProbability`, a stage setting, and reads the stages again without it if Salesforce refuses; only `pipe.probability-vs-reality` and its metric then go unmeasured. To settle on a real org, never a customer's without the owner's word:
+The engine's stage read asks for `OpportunityStage.DefaultProbability`, a stage setting, and reads the stages again without it only if Salesforce refuses the field (its "No such column", `INVALID_FIELD` or an access refusal); only `pipe.probability-vs-reality` and its metric then go unmeasured, and any other failure is the stage read's own, as before. To settle on a real org, never a customer's without the owner's word:
 
 a) Is `DefaultProbability` readable on `OpportunityStage` by the connected user in every edition we read, Professional Edition with API access among them? Salesforce documents it as a standard field of the object; unconfirmed here.
 b) What does it hold for closed stages (100 for won and 0 for lost by default, or null), and for a stage a sales process doesn't use? Only open stages are compared, so closed stages' values change nothing, but the metric lists what it reads.
 c) A stage has one default probability, whatever the sales process, and a deal's own `Probability` can be changed by hand. Do orgs that change it by hand do so often enough that the stage's setting no longer says what their forecasts use? The comparison reads only the stage's setting, and says so.
+d) What does Salesforce answer, word for word, when the connected user can't see `DefaultProbability` through field-level security: `INVALID_FIELD` with "No such column", or an access code? The engine works round both, and words the not-measurable reason by which it was; the reason's wording depends on `readableReason`, so a change there (decision 702's lane) should keep the field's refusal recognisable.
