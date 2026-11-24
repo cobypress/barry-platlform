@@ -116,9 +116,12 @@ describe("[1] the inventory never fails a run", () => {
     assert.ok((kept.get("inventory-fill-rates") ?? []).length >= 4);
   });
 
-  test("any other error from an inventory step costs only its section: the step is failed with why, and the run goes on", async () => {
+  test("any other error from an inventory step costs only its section on the last delivery: the step is failed with why, and the run goes on", async () => {
     const baseline = await runHealthCheck({ provider: syntheticProvider, calibration: loadCalibration(), modules: [BARE], outDir: tempDir(), now: new Date(AS_OF), transport: new Simulator(), connectedUser: CONNECTED_USER });
-    const broken = await run(new Simulator({ failQuery: (q) => (/FROM InstalledSubscriberPackage\b/.test(q) && /SubscriberPackageId/.test(q) ? { errorCode: "SERVER_UNAVAILABLE", message: "Something broke" } : null) }));
+    const failing = () => new Simulator({ failQuery: (q) => (/FROM InstalledSubscriberPackage\b/.test(q) && /SubscriberPackageId/.test(q) ? { errorCode: "SERVER_UNAVAILABLE", message: "Something broke" } : null) });
+    // Salesforce not answering before the last delivery stops the run, for the queue to read the step again (DECISIONS.md 702).
+    await assert.rejects(run(failing()), (err: unknown) => err instanceof Error && /SERVER_UNAVAILABLE/.test(err.message));
+    const broken = await run(failing(), { lastDelivery: true });
     assert.equal(broken.run.status, baseline.run.status);
     const step = broken.run.steps.find((s) => s.id === packagesExtractor.id)!;
     assert.equal(step.status, "failed");
