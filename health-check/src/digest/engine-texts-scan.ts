@@ -34,10 +34,21 @@ function* sourceFiles(dir: string): Generator<string> {
   }
 }
 
-/** Each key, sorted. Only texts with a space: a single word could be a value the org chose. */
-export function scanEngineTexts(srcDir: string): string[] {
-  const keys = new Set<string>();
+/**
+ * The extractors' folder holds queries, permission and edition names, field
+ * lists and shell lines beside the sentences a read's reason is made of, so only
+ * its sentences are keyed (DECISIONS.md 743): a capital first, three words or
+ * more, and a full stop last. Every other folder keys any text with a space.
+ */
+export const SENTENCE_ONLY_DIRS: readonly string[] = ["extract"];
+export const isSentence = (text: string): boolean => /^[A-Z]/.test(text) && text.trim().split(/\s+/).length >= 3 && text.endsWith(".");
+
+/** Each text keyed, by folder, before it is hashed: for a reviewer to read what a folder adds (a test lists the extractors'). */
+export function scanEngineTextsByDir(srcDir: string): Map<string, Set<string>> {
+  const out = new Map<string, Set<string>>();
   for (const dir of ENGINE_TEXT_DIRS) {
+    const texts = new Set<string>();
+    out.set(dir, texts);
     for (const file of sourceFiles(join(srcDir, dir))) {
       const source = ts.createSourceFile(file, readFileSync(file, "utf8"), ts.ScriptTarget.Latest, true);
       // The file's own top-level number constants, such as RECENT_DAYS = 28: a template putting in only these is
@@ -61,12 +72,19 @@ export function scanEngineTexts(srcDir: string): string[] {
         // A template with nothing put in, but never one with substitutions: what is put in could be the org's (DECISIONS.md 693).
         else if (ts.isNoSubstitutionTemplateLiteral(node) && !ts.isTaggedTemplateExpression(node.parent)) text = node.text;
         else if (ts.isTemplateExpression(node) && !ts.isTaggedTemplateExpression(node.parent)) text = constant(node);
-        if (text !== null && /\s/.test(text.trim())) keys.add(engineTextKey(text));
+        if (text !== null && /\s/.test(text.trim()) && (!SENTENCE_ONLY_DIRS.includes(dir) || isSentence(text))) texts.add(text);
         ts.forEachChild(node, visit);
       };
       visit(source);
     }
   }
+  return out;
+}
+
+/** Each key, sorted. Only texts with a space: a single word could be a value the org chose. */
+export function scanEngineTexts(srcDir: string): string[] {
+  const keys = new Set<string>();
+  for (const texts of scanEngineTextsByDir(srcDir).values()) for (const text of texts) keys.add(engineTextKey(text));
   return [...keys].sort();
 }
 

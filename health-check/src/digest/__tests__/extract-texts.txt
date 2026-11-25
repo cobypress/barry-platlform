@@ -1,0 +1,133 @@
+A block of code that does nothing.
+A block that does nothing.
+A browser alert, confirm or prompt.
+A callout over plain http.
+A checkbox always holds true or false, so it's never empty.
+A class that reads or changes data without declaring its sharing.
+A comparison with NaN, which is never equal to anything.
+A condition that is always true or always false.
+A costly operation inside a loop.
+A debugger statement left in.
+A describe that loads every field up front.
+A finally block that overrides what the try returned or threw.
+A formula field is worked out by Salesforce, not filled in.
+A javascript: address.
+A local variable that is never used.
+A loose == or != comparison.
+A method named like its class, easily mistaken for a constructor.
+A method or class with many paths through it.
+A method or class with too many statements.
+A method that can weaken security if misused.
+A method that is hard to follow.
+A method with too many parameters.
+A negation that applies to the wrong part of a test.
+A page parameter used without escaping.
+A permission set group can mute a permission one of its sets grants, and mutes aren't read. People who might hold a permission only through a group are counted apart, never as holders.
+A query built from text the user can supply.
+A query with no filter and no limit.
+A query, DML or other limited operation inside a loop.
+A record id written into the code, which differs between orgs.
+A redirect to an address the user can supply.
+A set-up only scan doesn't count records, so fill rates weren't read.
+A switch with the same case twice.
+A test method outside a test class.
+A test method that checks nothing with an assertion.
+A test method without @isTest.
+A test that reads the org's live data (SeeAllData=true).
+A try or finally block that does nothing.
+A value compared with itself.
+A variable assigned to itself.
+A variable that is never used.
+A while loop that does nothing.
+Account Engagement (the Pardot package, namespace pi) isn't installed in this org, so there's nothing of it to check.
+Account Engagement wasn't part of this run.
+An annotation Apex doesn't have.
+An assignment where a comparison was probably meant.
+An async function given to new Promise, which loses its errors.
+An else-if that repeats an earlier condition.
+An error caught and ignored.
+An id always has a value.
+An if statement that does nothing.
+An object with the same key twice.
+Case.Origin isn't in this org, so there's no channel to count cases by.
+Code marked global, which can't be changed freely once published.
+Code that can never run.
+Credentials handled in code instead of a named credential.
+Data changed while a page loads, open to cross-site request forgery.
+Data read or changed without checking the user's object permissions.
+ESLint couldn't be loaded on this worker.
+Each member returned its settings.
+Each permission's holders weren't counted in this run.
+Encryption with a fixed key or vector written into the code.
+If statements nested too deeply to follow easily.
+Learned as the run reads.
+Logic written in the trigger itself, rather than in a handler class.
+No JavaScript is read from the org today: the health check doesn't retrieve Lightning web components or Aura components, and reads JavaScript buttons by name and type only.
+No answer came back for this count.
+No permission set assignments were visible for the connected user.
+No revenue forecast type is active, so Forecasting isn't in use for revenue.
+Nobody has told us which of your users are integration accounts, so only those on an integration licence or set to API only are counted as integrations.
+None of the org's Apex code could be handed to PMD: each class and trigger was unreadable or too large.
+Not every Apex class could be read, so some weren't checked.
+Not every Apex trigger could be read, so some weren't checked.
+Not in this org's permissions, so not counted.
+Only a user who can manage all private reports can count other people's, and the connected user can't.
+Only limits Salesforce gives both a maximum and a remaining figure are listed.
+Only users of the standard type are counted, as the checks count them: the users read holds no portal or community users.
+Opportunity has CurrencyIsoCode, which only multi-currency orgs have.
+Opportunity has no CurrencyIsoCode, which every multi-currency org has.
+OpportunityLineItem couldn't be described.
+Optional chaining where an undefined result throws.
+Output with escaping turned off.
+PMD didn't accept our ruleset, so its findings weren't read.
+PMD finished without writing its report.
+PMD is on this worker, but Java isn't: HC_JAVA_HOME has no bin/java.
+PMD isn't installed on this worker.
+PMD's report couldn't be read.
+PMD's temporary folder on this worker isn't one only the worker can reach, so the code wasn't handed over.
+Professional Edition has no Metadata API, except for apps that have passed Salesforce's security review, which Barometer hasn't.
+Read: s-controls must be switched on even where the edition has them.
+Read: the org's own Apex classes and triggers.
+Read: the org's sites.
+SBQQ__QuoteLine__c couldn't be described.
+SBQQ__Quote__c couldn't be described.
+Salesforce CPQ (the SBQQ package) isn't installed in this org, so there's nothing of it to check.
+Salesforce Knowledge is switched off.
+Salesforce didn't say whether each version is deprecated or managed.
+Salesforce returned no forecast types, so we can't tell whether Forecasting is in use.
+Salesforce returned no period holding today.
+Salesforce's /limits wasn't read.
+Salesforce's count for this field didn't come back as a whole number, so its fill isn't measured.
+Salesforce's count of this object's records didn't come back as a whole number, so its fields' fill isn't measured.
+Salesforce's record count and the records the connected user can count differ by more than a tenth, so some records may be hidden from them.
+Text run as code through a timer.
+Text run as code through new Function.
+Text run as code with eval.
+The AI readiness reads weren't part of this run.
+The connected user can only see its own authorisations.
+The connected user can't see every record, so a count would show only part.
+The connected user's id isn't the shape of a Salesforce id.
+The count couldn't be read.
+The count took too long.
+The describe of a core object lists record types.
+The login log couldn't be read, so not logging in is told by each user's last-login date alone.
+The login log wasn't read in this run, so not logging in is told by each user's last-login date alone.
+The org reported no limits.
+The org reported none of the daily limits we read.
+The org's PermissionSet has none of the permissions we check.
+The org's edition couldn't be read, so this is read.
+The run wasn't told which user connected, so we can't tell whether it sees everyone's authorisations.
+The run wasn't told which user connected.
+The run's API budget hadn't clear room for reading the Apex code again, so PMD didn't run. Nothing else in the run is affected.
+The run's API budget ran short while the Apex code was read again, so PMD didn't run. Nothing else in the run is affected.
+There are more than 20000 reports, which is too many to scan.
+There's no Apex code in this org to check.
+This part of the inventory couldn't be put together from what was read, so it isn't shown.
+This step didn't run.
+Trigger records read by fixed position, so only the first of a batch is handled.
+Users weren't read in this run, so who is active can't be told.
+Waiting inside a loop, one call at a time.
+We couldn't find the connected user by their username.
+Whether a user is frozen isn't read, so a frozen user who is still active is counted, as every check counts them.
+Who is set to API only couldn't be read, so integration accounts aren't counted.
+Who is set to API only wasn't read in this run, so integration accounts aren't counted.

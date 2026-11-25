@@ -111,6 +111,26 @@ describe("every producer of a digest text is one an automatic run knows (DECISIO
     // A field the inventory couldn't count: the inventory's own row, which the digest doesn't hold.
     "src/extract/inventory.ts: reason",
   ];
+  /**
+   * AI readiness's pillar reasons (DECISIONS.md 742, another lane's): served marked by readinessWords in build.ts, ours
+   * unless the pillar quotes a finding's title (that title's spans) or passes a metric's reason on (that reason's marks),
+   * and its figures counted apart. Signed off by expression; readiness's own tests hold the marks.
+   */
+  const READINESS: string[] = [
+    'src/narrative/readiness.ts: `${head}${as}.`',
+    'src/narrative/readiness.ts: `${subject} has nothing above low severity.`',
+    'src/narrative/readiness.ts: `${text}, within our working line of ${LEGACY_READY}%.`',
+    'src/narrative/readiness.ts: `${text}. Our working line is ${LEGACY_READY}%.`',
+    'src/narrative/readiness.ts: `${text}.`',
+    'src/narrative/readiness.ts: `${what}. An agent chooses an action by its description, and too few have one.`',
+    'src/narrative/readiness.ts: `${what}.`',
+    'src/narrative/readiness.ts: `Einstein generative AI and Agentforce are both switched on.${tail}`',
+    'src/narrative/readiness.ts: `Einstein generative AI is on, and Agentforce ${agentforce === 0 ? "isn\'t" : "couldn\'t be read"}.${tail}`',
+    "src/narrative/readiness.ts: `Einstein generative AI isn't switched on, and Agentforce needs it.${tail}`",
+    'src/narrative/readiness.ts: `None of the checks on ${noun} could be measured.`',
+    'src/narrative/readiness.ts: `Salesforce Knowledge is on, with ${count}.`',
+    'src/narrative/readiness.ts: `Salesforce Knowledge is on, with ${count}: fewer than ${ARTICLES_READY}, our working line for enough to ground most answers.`',
+  ];
   /** Values handed on, signed off by file and expression as one of the known kinds, with where each is written. */
   const SIGNED_OFF: string[] = [
     // A rule's own title, a literal where each rule is declared: a pass's or not measurable title is known as the rule's (evaluate.ts).
@@ -149,35 +169,31 @@ describe("every producer of a digest text is one an automatic run knows (DECISIO
     "src/domains/utilisation/index.ts: [...new Set(a.guards.filter((g) => g.status === \"failed\").map((g) => USER_GUARD_BLOCKERS[g.guardId as keyof typeof USER_GUARD_BLOCKERS] ?? g.guardId))]",
     // The loss reason field's sentence, made by lossFieldUnusable and known by the recogniser (702).
     "src/domains/data-quality/index.ts: extract.lossReasonUnusable",
-    // An extractor's reason: refusalReason's sentence (the recogniser's, or the edition's whole pointer), or a reason read and passed on.
+    // An extractor's reason, each traced to what can be put there (re-audited in review, DECISIONS.md 743):
+    // automation.ts `why`: a ToolingGapError's message (tooManyFlows or flowWithoutDefinition, the recogniser's) or refusalReason's.
     "src/extract/automation.ts: why",
+    // configuration.ts `failure`: batchRefused's or refusalReason's sentence, or "The field usage query failed" (a sentence, scanned).
     "src/extract/configuration.ts: failure",
-    "src/extract/cpq.ts: reason",
-    "src/extract/fields.ts: reason",
+    // integrations.ts and inventory.ts `unread`: the client's limitsUnread, LIMITS_NO_PERMISSION or LIMITS_REFUSED (the recogniser's whole sentences).
     "src/extract/integrations.ts: unread",
-    "src/extract/inventory.ts: refusalReason(a.error, readName({ kind: \"soql\", api: \"rest\", query: chunk[j]! }))",
-    "src/extract/inventory.ts: refusalReason(err, \"PermissionSet\")",
-    "src/extract/inventory.ts: refusalReason(err, readName(source))",
     "src/extract/inventory.ts: unread",
-    // The inventory's own rows' reasons, which the digest doesn't hold.
-    "src/extract/inventory.ts: reason",
-    "src/extract/lint/findings.ts: reason",
-    "src/extract/metadata-parse.ts: bundle.unread![kind]!",
+    // opportunities.ts and pardot.ts `reasons[i]`: batchRefused's sentences.
     "src/extract/opportunities.ts: reasons[i]!",
-    "src/extract/opportunities.ts: refusalReason(result.error, readName(source))",
-    "src/extract/pardot.ts: reason",
-    "src/extract/pardot.ts: refusalReason(r.error, \"Lead\")",
+    "src/extract/pardot.ts: reasons[i]!",
+    // record-types.ts: a read's reason (readSoql's refusal sentence) with the connected user's id and username hidden, which no
+    // refusal sentence holds, so it's the sentence unchanged; and batchRefused's sentences handed to each count.
     "src/extract/record-types.ts: hide(read.reason)",
     "src/extract/record-types.ts: reason",
-    "src/extract/record-types.ts: refusalReason(result.error, readName({ kind: \"soql\", api: \"rest\", query: chunk[j]! }))",
-    "src/extract/report-definitions.ts: refusalReason(err, \"Report\")",
-    "src/extract/report-definitions.ts: refusalReason(err, \"The org's set-up from the Metadata API\")",
-    "src/extract/types.ts: refusalReason(err, readName(source))",
+    // metadata-parse.ts: a kind's reason in `unread`, written only by markUnread in metadata-tooling.ts, whose every call is a
+    // producer read here (refusalReason's sentence, tooManyRules or ruleWithoutDefinition, the recogniser's).
+    "src/extract/metadata-parse.ts: bundle.unread![kind]!",
+    // A code checker's not-run reason: kept in the evidence's note alone (lint.ts `cannot`), never a digest text.
+    "src/extract/lint/findings.ts: reason",
   ];
   const producers = textProducers();
 
   test("none is a plain template, a join or a sum of strings: each is said, written whole, or a reason passed on", () => {
-    const plain = [...new Set(producers.filter((p) => p.kind === "NOT RECOGNISED").map(producerKey))].filter((k) => !NOT_SERVED.includes(k)).sort();
+    const plain = [...new Set(producers.filter((p) => p.kind === "NOT RECOGNISED").map(producerKey))].filter((k) => !NOT_SERVED.includes(k) && !READINESS.includes(k)).sort();
     assert.deepEqual(plain, []);
     assert.ok(producers.length > 1500, `${producers.length} producers`);
   });
@@ -187,7 +203,18 @@ describe("every producer of a digest text is one an automatic run knows (DECISIO
     assert.deepEqual(refs.filter((k) => !SIGNED_OFF.includes(k)), []);
     assert.deepEqual(SIGNED_OFF.filter((k) => !refs.includes(k)), []);
     const unrecognised = new Set(producers.filter((p) => p.kind === "NOT RECOGNISED").map(producerKey));
-    assert.deepEqual(NOT_SERVED.filter((k) => !unrecognised.has(k)), []);
+    assert.deepEqual([...NOT_SERVED, ...READINESS].filter((k) => !unrecognised.has(k)), []);
+  });
+
+  test("the ways a producer once slipped past are caught: a field set later, a computed key, a quoted key, a helper in an unlisted folder", () => {
+    const at = "src/digest/__tests__/fixtures/";
+    const found = textProducers({ fixtures: [`${at}unmarked-producers.ts`, `${at}unmarked-helper.ts`], unlisted: [`${at}unmarked-helper.ts`] }).filter((p) => p.at.startsWith(at) && p.kind === "NOT RECOGNISED");
+    assert.deepEqual(found.map((p) => `${p.at.slice(at.length).replace(/:\d+$/, "")} ${p.slot} ${p.expression}`).sort(), [
+      "unmarked-helper.ts field:reason `${n} things is too few.`",
+      "unmarked-producers.ts field:reason `${name} couldn't be counted.`",
+      "unmarked-producers.ts field:reason `${name} couldn't be listed.`",
+      "unmarked-producers.ts set:reason `${name} couldn't be read.`",
+    ]);
   });
 
   test("the 739 pushes are still held: each exclusion or assumption pushed in src/domains is a producer here", () => {

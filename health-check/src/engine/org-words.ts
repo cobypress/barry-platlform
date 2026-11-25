@@ -1,3 +1,4 @@
+import { AsyncLocalStorage } from "node:async_hooks";
 import { createHash } from "node:crypto";
 import { passedOnSpans } from "./passed-on.ts";
 
@@ -47,8 +48,12 @@ export const eng = (text: string): Said => text as Said;
 type Literal<T> = T extends string ? ({} extends Record<T, 1> ? never : T) : never;
 /** A string literal type and never `any`: what a helper such as `plural` may take as words of its own (DECISIONS.md 657). */
 export type LiteralText<T> = 0 extends 1 & T ? never : Literal<T>;
-/** What `said` takes: a number, org words, a sentence already made, or a literal. Never `any`. */
-type Piece<T> = 0 extends 1 & T ? never : T extends number | OrgWords | Said ? T : Literal<T>;
+const PASSED = Symbol("passed on");
+/** A reason read elsewhere, handed on into a sentence by `passedOn`, with the passed-on route's spans or unknown. */
+export type PassedOn = { readonly [PASSED]: { text: string; spans: OrgSpan[] | null } };
+
+/** What `said` takes: a number, org words, a reason passed on, a sentence already made, or a literal. Never `any`. */
+type Piece<T> = 0 extends 1 & T ? never : T extends number | OrgWords | PassedOn | Said ? T : Literal<T>;
 
 /**
  * One analysis's sentences and their spans. A text made twice with different
@@ -56,6 +61,17 @@ type Piece<T> = 0 extends 1 & T ? never : T extends number | OrgWords | Said ? T
  */
 class Ledger {
   readonly #spans = new Map<string, OrgSpan[] | null>();
+  readonly #passed = new Map<string, OrgSpan[]>();
+  /** Where a sentence holds a reason passed on (DECISIONS.md 743), so a reason equal to a value the org chose is never ours. */
+  notePassed(text: string, ranges: OrgSpan[]): void {
+    if (ranges.length === 0) return;
+    const held = this.#passed.get(text) ?? [];
+    for (const r of ranges) if (!held.some((h) => h.start === r.start && h.end === r.end)) held.push({ ...r });
+    this.#passed.set(text, held);
+  }
+  passed(text: string): OrgSpan[] {
+    return this.#passed.get(text) ?? [];
+  }
   /** Spans, or null for a sentence that can't be vouched for (one with an unknown part). */
   note(text: string, spans: OrgSpan[] | null): void {
     if (!this.#spans.has(text)) {
@@ -89,21 +105,39 @@ class Ledger {
  * recycle itself well before it (HC_WORKER_RECYCLE_AT, DECISIONS.md 666).
  */
 const TAINTED_LIMIT = 100_000;
-const tainted = new Set<string>();
-let taintedFull = false;
+type Store = { texts: Set<string>; full: boolean };
+const processStore: Store = { texts: new Set(), full: false };
+/**
+ * Each health check's own store (DECISIONS.md 743). A worker runs several orgs' checks in one
+ * process, one after another and side by side (its concurrency), and a store shared by all of them
+ * let one org's words reach another's run: an org whose stage is named "Modify All Data" left the
+ * next org's literal of the same words unknown, and held its run. runHealthCheck runs inside
+ * withRunOrgWords, so every sentence said makes during a check, in its analysis or its reads, is
+ * kept in that check's store alone, through every await, and no check reads another's. Outside any
+ * check (a test, a script) the process's store is used, as before.
+ */
+const runStores = new AsyncLocalStorage<Store>();
+const store = (): Store => runStores.getStore() ?? processStore;
+
+/** Runs a health check with a store of org-worded sentences of its own. */
+export function withRunOrgWords<T>(fn: () => T): T {
+  return runStores.run({ texts: new Set(), full: false }, fn);
+}
+
 function taint(text: string, spans: OrgSpan[] | null): void {
   if (spans && spans.length === 0) return;
-  if (tainted.has(text)) return;
-  if (tainted.size < TAINTED_LIMIT) tainted.add(text);
-  else if (!taintedFull) {
-    taintedFull = true;
+  const held = store();
+  if (held.texts.has(text)) return;
+  if (held.texts.size < TAINTED_LIMIT) held.texts.add(text);
+  else if (!held.full) {
+    held.full = true;
     // Once, and never with org text: from here every mark degrades to unknown until the worker restarts (DECISIONS.md 663).
     console.warn(`The org-word store is full (${TAINTED_LIMIT} sentences): sentence marks fall back to unknown until the worker restarts.`);
   }
 }
 
 /** How full the process's store of org-worded sentences is, for the worker's log line (DECISIONS.md 663). Counts only, never text. */
-export const orgWordsStore = (): { size: number; limit: number; full: boolean } => ({ size: tainted.size, limit: TAINTED_LIMIT, full: taintedFull });
+export const orgWordsStore = (): { size: number; limit: number; full: boolean } => ({ size: store().texts.size, limit: TAINTED_LIMIT, full: store().full });
 
 const sameSpans = (a: OrgSpan[], b: OrgSpan[]): boolean => a.length === b.length && a.every((s, i) => s.start === b[i]!.start && s.end === b[i]!.end);
 
@@ -145,13 +179,21 @@ function push(spans: OrgSpan[], start: number, end: number): void {
  * the ledger doesn't hold. Unknown goes up through every level that quotes it.
  * A sentence with org words made anywhere but the open ledger is unknown here.
  */
-function piecesOf(strings: readonly string[], pieces: readonly unknown[], sentences = false): { text: string; spans: OrgSpan[] | null } {
+function piecesOf(strings: readonly string[], pieces: readonly unknown[], sentences = false): { text: string; spans: OrgSpan[] | null; passed: OrgSpan[] } {
   let text = strings[0]!;
   const spans: OrgSpan[] = [];
+  const passed: OrgSpan[] = [];
   let known = true;
   pieces.forEach((piece, i) => {
     const at = text.length;
-    if (piece !== null && typeof piece === "object" && ORG in piece) {
+    if (piece !== null && typeof piece === "object" && PASSED in piece) {
+      // A reason passed on: its own spans, or unknown; and where it sits, for the org-value guard.
+      const { text: reason, spans: own } = (piece as PassedOn)[PASSED];
+      text += reason;
+      if (own) for (const s of own) push(spans, at + s.start, at + s.end);
+      else known = false;
+      passed.push({ start: at, end: text.length });
+    } else if (piece !== null && typeof piece === "object" && ORG in piece) {
       const words = (piece as OrgWords)[ORG];
       text += words;
       push(spans, at, text.length);
@@ -162,7 +204,8 @@ function piecesOf(strings: readonly string[], pieces: readonly unknown[], senten
         const held = ledger.get(piece);
         if (held) for (const s of held) push(spans, at + s.start, at + s.end);
         else known = false;
-      } else if (sentences || tainted.has(piece) || taintedFull) {
+        for (const r of ledger.passed(piece)) passed.push({ start: at + r.start, end: at + r.end });
+      } else if (sentences || store().texts.has(piece) || store().full) {
         known = false;
       }
       // Otherwise a literal, all the types let through: the engine's.
@@ -173,18 +216,19 @@ function piecesOf(strings: readonly string[], pieces: readonly unknown[], senten
     }
     text += strings[i + 1]!;
   });
-  return { text, spans: known ? spans : null };
+  return { text, spans: known ? spans : null, passed };
 }
 
-function record(text: string, spans: OrgSpan[] | null): void {
+function record(text: string, spans: OrgSpan[] | null, passed: OrgSpan[] = []): void {
   ledger?.note(text, spans);
+  ledger?.notePassed(text, passed);
   taint(text, spans);
 }
 
 /** A sentence with the characters it took from the org marked. Returns the plain string. */
 export function said<const P extends readonly unknown[]>(strings: TemplateStringsArray, ...pieces: P & { readonly [K in keyof P]: Piece<P[K]> }): Said {
-  const { text, spans } = piecesOf(strings, pieces);
-  record(text, spans);
+  const { text, spans, passed } = piecesOf(strings, pieces);
+  record(text, spans, passed);
   return text as Said;
 }
 
@@ -195,9 +239,16 @@ export function said<const P extends readonly unknown[]>(strings: TemplateString
  * it names marked as the org's, or unknown, which makes the whole sentence
  * unknown. A sentence said already made keeps its own marks.
  */
-export function passedOn(reason: string): Said {
-  if (!ledger?.has(reason)) record(reason, passedOnSpans(reason));
-  return reason as Said;
+export function passedOn(reason: string): PassedOn {
+  // Recorded nowhere alone: the reason is vouched for only inside the sentence, where its place is kept, so a
+  // reason equal to a value the org chose is found and left unknown when the run's values are known.
+  const spans = ledger?.has(reason) ? ledger.get(reason) : passedOnSpans(reason);
+  return { [PASSED]: { text: reason, spans: spans ? spans.map((s) => ({ ...s })) : null } };
+}
+
+/** Where a sentence said made holds a reason passed on, in this analysis (DECISIONS.md 743). */
+export function passedRangesOf(text: string): OrgSpan[] {
+  return ledger?.passed(text) ?? [];
 }
 
 /** Sentences joined, as `Array.join` would, keeping their spans. Every part must be one `said` made in this analysis, or the whole is unknown. */
@@ -205,8 +256,8 @@ export function joinSaid(parts: readonly Said[], separator: "" | " " | ", " | ";
   // The separator is a fixed string; every part is interpolated, so the fixed strings around them are all empty.
   const strings = [""];
   for (let i = 0; i < parts.length; i++) strings.push(i < parts.length - 1 ? separator : "");
-  const { text, spans } = piecesOf(strings, parts, true);
-  record(text, spans);
+  const { text, spans, passed } = piecesOf(strings, parts, true);
+  record(text, spans, passed);
   return text as Said;
 }
 

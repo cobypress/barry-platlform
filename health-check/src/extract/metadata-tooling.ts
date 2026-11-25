@@ -1,4 +1,4 @@
-import { flowWithoutDefinition, tooManyFlows } from "../salesforce/refusal-words.ts";
+import { flowWithoutDefinition, ruleWithoutDefinition, tooManyFlows, tooManyRules } from "../salesforce/refusal-words.ts";
 import { isUnavailable } from "../salesforce/client.ts";
 import { redactSecrets } from "../privacy/secrets.ts";
 import { METADATA_READING, validationRuleDetail } from "../handbook/detail.ts";
@@ -152,7 +152,7 @@ export async function readBundleThroughTooling(ctx: ExtractContext): Promise<Met
   const rules = await optional(bundle, "Workflow Rules", async () => (await tooling(ctx, "SELECT Id, Name, TableEnumOrId, NamespacePrefix FROM WorkflowRule")).filter(own), "workflowRules");
   if (rules && rules.length + versions.length > MAX_ITEM_READS) {
     bundle.unsearched!.push("Workflow Rules");
-    markUnread(bundle, "workflowRules", `There are ${rules.length} Workflow Rules and ${versions.length} flows, more than the ${MAX_ITEM_READS} we read one at a time.`);
+    markUnread(bundle, "workflowRules", tooManyRules(rules.length, versions.length, MAX_ITEM_READS));
   } else if (rules) {
     const byObject = new Map<string, WorkflowSummary>();
     for (const rule of [...rules].sort((a, b) => String(a.Name).localeCompare(String(b.Name)))) {
@@ -160,7 +160,7 @@ export async function readBundleThroughTooling(ctx: ExtractContext): Promise<Met
       const { metadata } = await reader.read("WorkflowRule", rule.Id);
       if (!metadata) {
         bundle.unsearched!.push("Workflow Rules");
-        markUnread(bundle, "workflowRules", `Workflow Rule ${String(rule.Name)} came back without its definition.`);
+        markUnread(bundle, "workflowRules", ruleWithoutDefinition(String(rule.Name)));
         continue;
       }
       const summary = byObject.get(object) ?? { object, path: `workflows/${object}.workflow`, rules: [] };

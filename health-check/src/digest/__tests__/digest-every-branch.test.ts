@@ -4,7 +4,7 @@ import { checkedDigest, digestTextsAt, marksOf, type CheckedDigest } from "../ch
 import { scoreDomains } from "../../domains/scoring.ts";
 import { SALES_CLOUD_MODULES } from "../../domains/index.ts";
 import { runHealthCheck } from "../../engine/run.ts";
-import type { ReportInput } from "../../narrative/sections.ts";
+import { buildReport, type ReportInput } from "../../narrative/sections.ts";
 import { loadRun } from "../../render/render-run.ts";
 import { fieldsNotInOrg, refusalSentence, type RefusalKind } from "../../salesforce/refusal-words.ts";
 import type { RunDigest } from "../../schemas/digest.ts";
@@ -12,6 +12,8 @@ import { AutomaticReplay, automaticSyntheticCalibration } from "../../testing/au
 import { analyseExtracts, clone, loadExtracts, runFromRecording, tempDir } from "../../testing/harness.ts";
 import { syntheticProvider } from "../../testing/replay.ts";
 import { Simulator, type SimulatorOptions } from "../../testing/simulator.ts";
+import type { Transport, TransportRequest, TransportResponse } from "../../salesforce/transport.ts";
+import { MAX_ITEM_READS } from "../../extract/metadata-tooling.ts";
 import { AS_OF, CONNECTED_USER } from "../../testing/synthetic-org.ts";
 
 // The branches a real org reaches and the synthetic org doesn't (DECISIONS.md
@@ -63,17 +65,24 @@ function unreadable(value: unknown, reason: string): unknown {
 describe("every read unreadable in turn, on an automatic run (DECISIONS.md 743)", () => {
   const ids = [...extracts.keys()];
   test("the run reads enough steps for this to mean something", () => assert.ok(ids.length > 40, `${ids.length}`));
+  // Each read alone, with one reason, every reason in turn: what an unreadable read reaches is the producer's head,
+  // the same whatever follows it. And each reason with every read unreadable at once: the passed-on route knows a head
+  // and what follows it apart (the rest is read on its own after a head of ours), so a reason every head passes on here
+  // is known after each of them. Together they reach every head with every reason, at a sixth of the full cross.
   ids.forEach((id, i) => {
-    // Each read refused (a different kind in turn, so every kind is met many times over), with an extractor's own
-    // sentence, and with a field the read needs: the three ways a reason is known (DECISIONS.md 702, 743).
-    for (const reason of [REASONS[i % KINDS.length]!, ...REASONS.slice(KINDS.length)]) {
-      test(`${id}, ${reason.slice(0, 40)}`, () => {
-        const changed = clone(extracts);
-        changed.set(id, unreadable(extracts.get(id), reason));
-        released(checked(changed), id);
-      });
-    }
+    const reason = REASONS[i % REASONS.length]!;
+    test(`${id}, ${reason.slice(0, 40)}`, () => {
+      const changed = clone(extracts);
+      changed.set(id, unreadable(extracts.get(id), reason));
+      released(checked(changed), id);
+    });
   });
+  for (const reason of REASONS) {
+    test(`every read at once, ${reason.slice(0, 40)}`, () => {
+      const changed = new Map([...extracts].map(([id, v]) => [id, unreadable(v, reason)]));
+      released(checked(changed), "every read");
+    });
+  }
 });
 
 describe("every read empty in turn, on an automatic run (DECISIONS.md 743)", () => {
@@ -94,6 +103,19 @@ describe("every sample too thin, on an automatic run (DECISIONS.md 743)", () => 
     const c = checked(extracts, thin);
     released(c, "thin");
     assert.ok(c.digest!.metrics.filter((m) => m.status === "not_measurable").length > 20);
+  });
+
+  test("readiness's withheld texts stay out of the hold counts: the run is released or held as it is without the block (742)", () => {
+    const thin = { ...clone(calibration), minSample: 1_000_000 };
+    for (const [cal, changed] of [[thin, extracts], [calibration, new Map([...extracts].map(([id, v]) => [id, unreadable(v, REASONS[0]!)]))]] as const) {
+      const analysis = analyseExtracts(changed, { calibration: cal });
+      const input: ReportInput = { ...loaded.input, calibration: cal, findings: analysis.findings, metrics: analysis.metrics, scores: scoreDomains(loaded.input.run.modules, analysis.findings, loaded.input.run.ruleSetVersion) };
+      const withBlock = checkedDigest({ input, pseudonyms: loaded.pseudonyms, inventory: null, madeAt: MADE_AT });
+      const without = checkedDigest({ input, pseudonyms: loaded.pseudonyms, inventory: null, madeAt: MADE_AT, build: (i) => ({ ...buildReport(i), readiness: undefined }) as unknown as ReturnType<typeof buildReport> });
+      assert.ok(withBlock.digest?.readiness);
+      const counts = (c: CheckedDigest) => ({ held: c.held, unmarked: c.unmarked, unmatched: c.unmatched, masks: c.masks });
+      assert.deepEqual(counts(withBlock), counts(without));
+    }
   });
 });
 
@@ -138,6 +160,52 @@ describe("the org's own words, hostile, on an automatic run (DECISIONS.md 743)",
       }
       // The stage named as a sentence of ours is never read as ours where it stands.
       if (t.text === HOSTILE["Closed Lost - No Budget"]) assert.notDeepEqual(marksOf(d, t)!.orgWords, [], t.path);
+    }
+  });
+});
+
+/** The simulator, with this many more Workflow Rules listed than it holds: as an org past the item reads' limit. */
+class ManyRules implements Transport {
+  readonly #inner: Simulator;
+  readonly #extra: number;
+  constructor(options: SimulatorOptions, extra: number) {
+    this.#inner = new Simulator(options);
+    this.#extra = extra;
+  }
+  async send(request: TransportRequest): Promise<TransportResponse> {
+    const r = await this.#inner.send(request);
+    if (!/FROM\+WorkflowRule(?!\+WHERE)/.test(request.url) && !/FROM WorkflowRule(?! WHERE)/.test(decodeURIComponent(request.url).replace(/\+/g, " "))) return r;
+    const body = JSON.parse(r.text) as { totalSize: number; records: unknown[] };
+    for (let i = 0; i < this.#extra; i++) body.records.push({ attributes: { type: "WorkflowRule" }, Id: `01Q${String(i).padStart(15, "0")}`, Name: `Rule_${i}`, TableEnumOrId: "Account", NamespacePrefix: null });
+    body.totalSize = body.records.length;
+    return { status: r.status, header: (name) => r.header(name), text: JSON.stringify(body) };
+  }
+}
+
+describe("Workflow Rules unread on the Tooling route, end to end (DECISIONS.md 743)", () => {
+  // The Tooling route is the one a read-only or Professional Edition connection takes; both of its ways to leave
+  // Workflow Rules unread are driven through the real reads, never an `unread` put in by hand.
+  const automatic = async (transport: Transport) => {
+    const run = await runHealthCheck({ provider: syntheticProvider, calibration, modules: SALES_CLOUD_MODULES, outDir: tempDir(), now: new Date(AS_OF), transport, connectedUser: CONNECTED_USER, log: () => {}, reviewMode: "automatic" });
+    const { input, pseudonyms } = loadRun(run.dir);
+    return checkedDigest({ input, pseudonyms, inventory: null, madeAt: MADE_AT });
+  };
+  const served = (c: CheckedDigest, words: RegExp) => digestTextsAt(c.digest!).filter((t) => words.test(t.text));
+
+  test("more Workflow Rules and flows than we read one at a time: said, and released", async () => {
+    const c = await automatic(new ManyRules({ readOnly: true }, MAX_ITEM_READS + 1));
+    released(c, "too many rules");
+    assert.ok(served(c, /Workflow Rules and \d+ flows, more than the \d+ we read one at a time/).length > 0);
+  });
+
+  test("a Workflow Rule without its definition: its name marked as the org's, and released", async () => {
+    const c = await automatic(new Simulator({ organizationType: "Professional Edition", withholdMetadata: (soql) => /FROM WorkflowRule WHERE/.test(soql) }));
+    released(c, "rule without definition");
+    const texts = served(c, /Workflow Rule (.+) came back without its definition/);
+    assert.ok(texts.length > 0);
+    for (const t of texts) {
+      const name = /Workflow Rule (.+) came back/.exec(t.text)![1]!;
+      assert.ok(marksOf(c.digest!, t)!.orgWords.some((s) => t.text.slice(s.start, s.end) === name), t.text);
     }
   });
 });

@@ -15,7 +15,7 @@ import ts from "typescript";
 export const HEALTH_CHECK = join(import.meta.dirname, "../../..");
 
 /** The folders whose strings become a finding's or a metric's text. */
-export const PRODUCER_DIRS = ["src/domains", "src/engine/currency.ts", "src/extract"];
+export const PRODUCER_DIRS = ["src/domains", "src/engine/currency.ts", "src/extract", "src/narrative/readiness.ts"];
 
 /** The extractors', whose only text a rule passes on is a read's reason. */
 const REASON_ONLY = "src/extract";
@@ -23,7 +23,14 @@ const REASON_ONLY = "src/extract";
 /** Fields of a rule's result, a value, a metric or a loader's answer that hold text the digest serves. */
 const FIELDS = new Set(["title", "summary", "recommendation", "blockedRecommendation", "reason", "definition", "label", "exclusions", "assumptions", "caveat"]);
 /** Helpers whose string arguments become a reason. */
-const CALLS = /^(notSized|nm|notMeasurable|off|thinReason|apexGap|cantRead)$/;
+const CALLS = /^(notSized|nm|notMeasurable|off|thinReason|apexGap|cantRead|markUnread|notRead)$/;
+/** A helper's parameters that hold text: its reason, a note, or the words put into its sentence. */
+const TEXT_PARAMS = /^(reason|note|what|noun|text|words)$/;
+/**
+ * Folders outside the listed ones that only carry a text already made, with its marks, from one place to
+ * another (the engine's marking and rewording, the store, the schemas, the tests' fixtures): never a producer.
+ */
+const CARRIERS = ["src/engine/evaluate.ts", "src/engine/automatic-words.ts", "src/worker/", "src/schemas/", "src/testing/"];
 /** Arrays that become a metric's exclusions or assumptions, or a reason's parts. */
 const LISTS = /(exclusions|assumptions|reasons)$/i;
 /**
@@ -44,12 +51,14 @@ export type Producer = {
 };
 
 /**
- * Every producer, each value expression classified. `files` is every source
- * file of the program; the program is built once per call.
+ * Every producer, each value expression classified, in the listed folders and,
+ * anywhere else in src, every rule's result or metric a helper builds. The
+ * program is built once per call; fixtures are added to it for the guard's own test.
  */
-export function textProducers(): Producer[] {
+export function textProducers(options: { fixtures?: string[]; unlisted?: string[] } = {}): Producer[] {
   const config = ts.getParsedCommandLineOfConfigFile(join(HEALTH_CHECK, "tsconfig.json"), {}, { ...ts.sys, onUnRecoverableConfigFileDiagnostic: () => {} })!;
-  const program = ts.createProgram(config.fileNames, config.options);
+  // Fixtures, by path relative to the health check folder, read as listed producers (or unlisted ones, if named there too).
+  const program = ts.createProgram([...config.fileNames, ...(options.fixtures ?? []).map((f) => join(HEALTH_CHECK, f))], config.options);
   const checker = program.getTypeChecker();
   const out: Producer[] = [];
   const typedAt = (e: ts.Expression): string => checker.typeToString(checker.getTypeAtLocation(e));
@@ -89,6 +98,12 @@ export function textProducers(): Producer[] {
     return found;
   };
   const RECOGNISER = "src/salesforce/refusal-words.ts";
+  /**
+   * Helpers whose every return the recogniser knows: refusalReason gives refusalSentence's sentence, or a
+   * NotInOrgError's, which READ_NEEDS in src/extract/org-profile.ts sets only to its whole pointers (a test
+   * holds each to the recogniser); batchRefused gives refusalReason's for each query.
+   */
+  const RECOGNISED_HELPERS: Readonly<Record<string, readonly string[]>> = { "src/extract/types.ts": ["refusalReason", "batchRefused"] };
   const kinds = (e: ts.Expression, depth = 0): Array<Producer["kind"]> => {
     while (ts.isParenthesizedExpression(e) || ts.isNonNullExpression(e) || ts.isAsExpression(e) || ts.isSatisfiesExpression(e)) e = e.expression;
     if (e.kind === ts.SyntaxKind.NullKeyword || (ts.isIdentifier(e) && e.text === "undefined")) return [];
@@ -121,7 +136,8 @@ export function textProducers(): Producer[] {
       const fn = d && (ts.isFunctionDeclaration(d) ? d : ts.isVariableDeclaration(d) && d.initializer && (ts.isArrowFunction(d.initializer) || ts.isFunctionExpression(d.initializer)) ? d.initializer : undefined);
       if (fn) {
         const where = relative(HEALTH_CHECK, fn.getSourceFile().fileName);
-        if (where === RECOGNISER) return ["passed-on"];
+        const named = ts.isFunctionDeclaration(fn) ? fn.name?.text : ts.isVariableDeclaration(fn.parent) && ts.isIdentifier(fn.parent.name) ? fn.parent.name.text : undefined;
+        if (where === RECOGNISER || (named && RECOGNISED_HELPERS[where]?.includes(named))) return ["passed-on"];
         if (depth < 4 && !where.includes("node_modules")) return returnsOf(fn).flatMap((r) => kinds(r, depth + 1));
       }
     }
@@ -142,9 +158,20 @@ export function textProducers(): Producer[] {
     }
     return ["ref"];
   };
+  /** A property's name however it is written: `reason`, `"reason"` or `["reason"]`. */
+  const nameOf = (name: ts.PropertyName): string | null => {
+    if (ts.isIdentifier(name) || ts.isStringLiteral(name) || ts.isNoSubstitutionTemplateLiteral(name)) return name.text;
+    if (ts.isComputedPropertyName(name) && (ts.isStringLiteral(name.expression) || ts.isNoSubstitutionTemplateLiteral(name.expression))) return name.expression.text;
+    return null;
+  };
+  const propertiesOf = (t: ts.Type): Set<string> => new Set((t.isUnion() ? t.types : [t]).flatMap((x) => x.getProperties().map((p) => p.name)));
+  /** A rule's result or a metric: what a helper anywhere may build for a rule to return. */
+  const isResult = (names: Set<string>): boolean => names.has("outcome") || (names.has("definition") && names.has("evidence") && names.has("status"));
   for (const source of program.getSourceFiles()) {
     const file = relative(HEALTH_CHECK, source.fileName);
-    if (source.isDeclarationFile || file.includes("__tests__") || !PRODUCER_DIRS.some((d) => file === d || file.startsWith(`${d}/`))) continue;
+    if (source.isDeclarationFile || file.startsWith("..") || file.includes("node_modules") || (file.includes("__tests__") && !options.fixtures?.includes(file))) continue;
+    const listed = (options.fixtures?.includes(file) && !options.unlisted?.includes(file)) || PRODUCER_DIRS.some((d) => file === d || file.startsWith(`${d}/`));
+    if (!listed && (!file.startsWith("src/") || CARRIERS.some((c) => file.startsWith(c)))) continue;
     const typed = (e: ts.Expression): string => checker.typeToString(checker.getTypeAtLocation(e));
     const stringLike = (e: ts.Expression): boolean => {
       const t = checker.getTypeAtLocation(e);
@@ -156,23 +183,35 @@ export function textProducers(): Producer[] {
       const kind = all.includes("NOT RECOGNISED") ? "NOT RECOGNISED" : all.includes("ref") ? "ref" : all.includes("passed-on") ? "passed-on" : all.includes("said") ? "said" : "whole";
       out.push({ at: `${file}:${line}`, slot, kind, expression: e.getText().replace(/\s+/g, " ") });
     };
-    const served = (o: ts.ObjectLiteralExpression): boolean => {
-      const t = checker.getContextualType(o) ?? checker.getTypeAtLocation(o);
-      const names = new Set((t.isUnion() ? t.types : [t]).flatMap((x) => x.getProperties().map((p) => p.name)));
-      return !NOT_SERVED.some((n) => names.has(n)) || names.has("outcome") || names.has("definition");
+    const servedType = (t: ts.Type): boolean => {
+      const names = propertiesOf(t);
+      return listed ? !NOT_SERVED.some((n) => names.has(n)) || names.has("outcome") || names.has("definition") : isResult(names);
     };
+    const served = (o: ts.ObjectLiteralExpression): boolean => servedType(checker.getContextualType(o) ?? checker.getTypeAtLocation(o));
     const reasonOnly = file.startsWith(`${REASON_ONLY}/`);
+    const watched = (name: string | null): name is string => name !== null && (reasonOnly ? name === "reason" : FIELDS.has(name));
     const visit = (node: ts.Node): void => {
-      if (reasonOnly) {
-        if ((ts.isPropertyAssignment(node) || ts.isShorthandPropertyAssignment(node)) && ts.isIdentifier(node.name) && node.name.text === "reason" && stringLike(ts.isPropertyAssignment(node) ? node.initializer : node.name)) add("field:reason", ts.isPropertyAssignment(node) ? node.initializer : node.name);
-      } else if ((ts.isPropertyAssignment(node) || ts.isShorthandPropertyAssignment(node)) && ts.isIdentifier(node.name) && FIELDS.has(node.name.text) && ts.isObjectLiteralExpression(node.parent) && served(node.parent)) {
+      if ((ts.isPropertyAssignment(node) || ts.isShorthandPropertyAssignment(node)) && watched(nameOf(node.name)) && ts.isObjectLiteralExpression(node.parent) && (reasonOnly || served(node.parent))) {
+        const name = nameOf(node.name)!;
+        const value = ts.isPropertyAssignment(node) ? node.initializer : node.name;
         // A label is text only beside a definition: elsewhere it names a subject or a field.
-        if (node.name.text !== "label" || node.parent.properties.some((p) => p.name?.getText() === "definition")) add(`field:${node.name.text}`, ts.isPropertyAssignment(node) ? node.initializer : node.name);
-      } else if (ts.isCallExpression(node)) {
+        if ((!reasonOnly || stringLike(value)) && (name !== "label" || node.parent.properties.some((p) => p.name && nameOf(p.name) === "definition"))) add(`field:${name}`, value);
+      } else if (ts.isBinaryExpression(node) && [ts.SyntaxKind.EqualsToken, ts.SyntaxKind.QuestionQuestionEqualsToken, ts.SyntaxKind.BarBarEqualsToken].includes(node.operatorToken.kind) && (ts.isPropertyAccessExpression(node.left) || ts.isElementAccessExpression(node.left))) {
+        // A field set later, as `r.reason = ...` or `r["reason"] = ...`.
+        const left = node.left;
+        const name = ts.isPropertyAccessExpression(left) ? left.name.text : ts.isStringLiteralLike(left.argumentExpression) ? left.argumentExpression.text : null;
+        if (watched(name) && stringLike(node.right) && (reasonOnly || servedType(checker.getTypeAtLocation(left.expression)))) add(`set:${name}`, node.right);
+      } else if (listed && ts.isCallExpression(node)) {
         const callee = node.expression;
-        if (ts.isPropertyAccessExpression(callee) && callee.name.text === "push" && LISTS.test(callee.expression.getText())) for (const a of node.arguments) add(`push:${callee.expression.getText()}`, a);
-        else if (CALLS.test(callee.getText()) || (ts.isPropertyAccessExpression(callee) && callee.name.text === "assume")) for (const a of node.arguments) if (stringLike(a)) add(`call:${callee.getText()}`, a);
-      } else if (ts.isVariableDeclaration(node) && ts.isIdentifier(node.name) && LISTS.test(node.name.text) && node.initializer && ts.isArrayLiteralExpression(node.initializer)) {
+        if (!reasonOnly && ts.isPropertyAccessExpression(callee) && callee.name.text === "push" && LISTS.test(callee.expression.getText())) for (const a of node.arguments) add(`push:${callee.expression.getText()}`, a);
+        else if (CALLS.test(callee.getText()) || (!reasonOnly && ts.isPropertyAccessExpression(callee) && callee.name.text === "assume")) {
+          // Only the arguments a helper takes as text, by its parameter's name: a query or an object beside it isn't.
+          const params = checker.getResolvedSignature(node)?.getParameters() ?? [];
+          node.arguments.forEach((a, i) => {
+            if (stringLike(a) && TEXT_PARAMS.test(params[Math.min(i, params.length - 1)]?.name ?? "")) add(`call:${callee.getText()}`, a);
+          });
+        }
+      } else if (listed && !reasonOnly && ts.isVariableDeclaration(node) && ts.isIdentifier(node.name) && LISTS.test(node.name.text) && node.initializer && ts.isArrayLiteralExpression(node.initializer)) {
         add(`list:${node.name.text}`, node.initializer);
       }
       ts.forEachChild(node, visit);

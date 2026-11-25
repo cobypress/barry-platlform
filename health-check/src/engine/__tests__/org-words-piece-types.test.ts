@@ -133,7 +133,7 @@ function allowed(t: TS.Type): boolean {
   if (t.flags & ts.TypeFlags.NumberLike) return true;
   if (t.isStringLiteral()) return true;
   const name = t.aliasSymbol?.name ?? t.getSymbol()?.name;
-  return name === "Said" || name === "OrgWords" || (t.isIntersection() && t.types.some((p) => p.getProperties().some((s) => s.name.startsWith("__@SAID"))));
+  return name === "Said" || name === "OrgWords" || name === "PassedOn" || (t.isIntersection() && t.types.some((p) => p.getProperties().some((s) => s.name.startsWith("__@SAID"))));
 }
 
 const all = pieces();

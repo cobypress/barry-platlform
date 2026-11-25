@@ -132,6 +132,21 @@ export function flowWithoutDefinition(name: string): string {
   return `Flow ${name} came back without its definition.`;
 }
 
+/** Too many Workflow Rules and flows together to read one at a time through Tooling (DECISIONS.md 743). */
+export function tooManyRules(rules: number, flows: number, max: number): string {
+  return `There are ${rules} Workflow Rules and ${flows} flows, more than the ${max} we read one at a time.`;
+}
+
+/** A Workflow Rule Tooling gave back without its definition (DECISIONS.md 743). The rule's name is the org's. */
+export function ruleWithoutDefinition(name: string): string {
+  return `Workflow Rule ${name} came back without its definition.`;
+}
+
+/** Account Engagement's Lead fields this org doesn't have, so its leads can't be read (DECISIONS.md 743). Each field is the org's. */
+export function pardotFieldsMissing(fields: readonly string[]): string {
+  return `Lead.${fields.join(" and Lead.")} ${fields.length === 1 ? "isn't" : "aren't"} in this org, so Account Engagement's leads can't be read.`;
+}
+
 /** ESLint stopped at its time limit (DECISIONS.md 743). */
 export function eslintTimeLimit(seconds: number, files: number): string {
   return `ESLint reached its time limit of ${seconds} seconds, so ${files} of the files weren't checked.`;
@@ -155,6 +170,9 @@ const ABSENT = /^([A-Za-z][A-Za-z0-9_]{0,79}) isn't available in this org, or to
 const AMBIGUOUS_TYPES = /^\d+ revenue forecast types are active, and none is the standard one, so we can't tell which to read\.$/;
 const TOO_MANY_FLOWS = /^There are \d+ flows, more than the \d+ we read one at a time\.$/;
 const FLOW_WITHOUT = /^Flow (.+) came back without its definition\.$/;
+const TOO_MANY_RULES = /^There are \d+ Workflow Rules and \d+ flows, more than the \d+ we read one at a time\.$/;
+const PARDOT_FIELDS = new RegExp(`^(${FIELD}(?: and ${FIELD})*) (?:isn't|aren't) in this org, so Account Engagement's leads can't be read\\.$`);
+const RULE_WITHOUT = /^Workflow Rule (.+) came back without its definition\.$/;
 const ESLINT_LIMIT = /^ESLint reached its time limit of \d+ seconds, so \d+ of the files weren't checked\.$/;
 const PARDOT_UNKNOWN = "We couldn't tell whether Account Engagement is installed: Lead couldn't be described";
 
@@ -175,10 +193,12 @@ export function refusalSpans(text: string): Array<{ start: number; end: number }
   if (WHOLE.has(text) || UNFIT.test(text)) return [];
   // The extractors' own sentences with something put in (DECISIONS.md 743), every name in them marked as the org's;
   // before the refusal's own patterns, whose first part would otherwise take a whole absent object's sentence.
-  if (AMBIGUOUS_TYPES.test(text) || TOO_MANY_FLOWS.test(text) || ESLINT_LIMIT.test(text)) return [];
+  if (AMBIGUOUS_TYPES.test(text) || TOO_MANY_FLOWS.test(text) || TOO_MANY_RULES.test(text) || ESLINT_LIMIT.test(text)) return [];
+  const rule = RULE_WITHOUT.exec(text);
+  if (rule) return [{ start: "Workflow Rule ".length, end: "Workflow Rule ".length + rule[1]!.length }];
   const flow = FLOW_WITHOUT.exec(text);
   if (flow) return [{ start: "Flow ".length, end: "Flow ".length + flow[1]!.length }];
-  const fields = NOT_IN_ORG.exec(text) ?? UNSEEN.exec(text);
+  const fields = NOT_IN_ORG.exec(text) ?? UNSEEN.exec(text) ?? PARDOT_FIELDS.exec(text);
   if (fields) return fieldSpans(fields[1]!, 0);
   const absent = ABSENT.exec(text);
   if (absent) {

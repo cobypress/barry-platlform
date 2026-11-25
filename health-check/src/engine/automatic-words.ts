@@ -3,7 +3,7 @@ import { ENGINE_TEXT_KEYS } from "../digest/engine-texts.ts";
 import { replaceMarked, type Marked } from "../fix/marked.ts";
 import type { Finding, Metric, MetricOrgWords } from "../schemas/index.ts";
 import type { MarkedSentence } from "./org-words.ts";
-import { orgWordsOf, saidMade, spansIfCurrent, textSha256 } from "./org-words.ts";
+import { orgWordsOf, passedRangesOf, saidMade, spansIfCurrent, textSha256 } from "./org-words.ts";
 import { passedOnSpans } from "./passed-on.ts";
 
 // What a run whose calibration was read from the org's settings says, and how
@@ -121,6 +121,18 @@ export function orgValuesOf(input: { metrics: Metric[]; findings: Finding[]; sta
 }
 
 /**
+ * Whether every reason passed on inside a sentence said made still reads as the passed-on route's
+ * once the org's values are known (DECISIONS.md 693, 743): one equal to a value the org chose, here or
+ * after a head, could be the org's whole, so the sentence is unknown. A reason said made keeps its own.
+ */
+export function passedPartsHold(text: string, orgValues: ReadonlySet<string>): boolean {
+  return passedRangesOf(text).every((r) => {
+    const part = text.slice(r.start, r.end);
+    return saidMade(part) ? !orgValues.has(part) || (orgWordsOf(part)?.length ?? 0) > 0 : passedOnSpans(part, orgValues) !== null;
+  });
+}
+
+/**
  * A finding's marks without any a passed-on refusal gave a text equal to a value
  * the org chose (DECISIONS.md 693, 702): the org could have written it whole,
  * so it is unknown. Marks said made are left as they are.
@@ -129,13 +141,17 @@ export function guardPassedOn(f: Finding, orgValues: ReadonlySet<string>): Findi
   if (!f.orgWords) return f;
   const marks = { ...f.orgWords };
   const texts: Array<[keyof typeof marks, string | null | undefined]> = [
+    ["title", f.title],
+    ["recommendation", f.recommendation],
     ["summary", f.summary],
     ["notMeasurableReason", f.notMeasurableReason],
     ["valueReason", f.value.kind === "not_sized" ? f.value.reason : null],
   ];
   let changed = false;
   for (const [key, text] of texts) {
-    if (typeof text === "string" && marks[key] && orgValues.has(text) && !saidMade(text)) {
+    // A whole text equal to a value the org chose (693) is checked where a refusal may stand whole; a reason passed on inside a sentence, everywhere (743).
+    const whole = key !== "title" && key !== "recommendation" && orgValues.has(text ?? "") && !saidMade(text ?? "");
+    if (typeof text === "string" && marks[key] && (whole || (saidMade(text) && !passedPartsHold(text, orgValues)))) {
       delete marks[key];
       changed = true;
     }
@@ -160,7 +176,7 @@ export function engineOwn(text: string, orgValues: ReadonlySet<string>): boolean
  */
 export function metricMarks(text: string, orgValues: ReadonlySet<string> = new Set()): MarkedSentence | null {
   // A refused read's reason passed on is known by its words (DECISIONS.md 702).
-  const spans = saidMade(text) ? orgWordsOf(text) : engineOwn(text, orgValues) ? [] : passedOnSpans(text, orgValues);
+  const spans = saidMade(text) ? (passedPartsHold(text, orgValues) ? orgWordsOf(text) : null) : engineOwn(text, orgValues) ? [] : passedOnSpans(text, orgValues);
   return spans ? { spans: spans.map((s) => ({ ...s })), textSha256: textSha256(text) } : null;
 }
 

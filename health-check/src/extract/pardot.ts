@@ -1,4 +1,4 @@
-import { pardotUnknown } from "../salesforce/refusal-words.ts";
+import { pardotFieldsMissing, pardotUnknown } from "../salesforce/refusal-words.ts";
 import { XMLParser } from "fast-xml-parser";
 import { isUnavailable } from "../salesforce/client.ts";
 import { schemaExtractor } from "./configuration.ts";
@@ -112,7 +112,7 @@ export const pardotLeadsExtractor: Extractor<PardotLeads> = {
     // Each field is checked against the org's own Lead describe, so a different name is a named gap, not a failed run (QUESTIONS.md).
     const missing = Object.values(PI_FIELDS).filter((f) => !presence.leadFields.includes(f));
     if (missing.length) {
-      const reason = `Lead.${missing.join(" and Lead.")} ${missing.length === 1 ? "isn't" : "aren't"} in this org, so Account Engagement's leads can't be read.`;
+      const reason = pardotFieldsMissing(missing);
       return { counts: { synced: notRead(reason, queries.synced), ungraded: notRead(reason, queries.ungraded), unscored: notRead(reason, queries.unscored) }, open: notRead(reason, openSoql) };
     }
     const keys = Object.keys(queries) as Array<keyof typeof queries>;
