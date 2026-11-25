@@ -1,8 +1,6 @@
 import { describe, test } from "node:test";
 import assert from "node:assert/strict";
-import { readdirSync, readFileSync } from "node:fs";
-import { join } from "node:path";
-import ts from "typescript";
+import { producerKey, textProducers } from "./text-producers.ts";
 import { checkedDigest, digestTextsAt, marksOf } from "../checked.ts";
 import { PLAN_HOURS_APART } from "../build.ts";
 import { ENGINE_TEXT_DIRS } from "../engine-texts-scan.ts";
@@ -95,27 +93,106 @@ describe("the object inventory's unnamed layouts and triggers on an automatic ru
   });
 });
 
-describe("a metric's exclusion or assumption added as the rule runs (DECISIONS.md 739)", () => {
-  test("is said, or a reason passed on after words of ours, never a plain template with something else put in", () => {
-    const root = join(import.meta.dirname, "../../domains");
-    const files = (dir: string): string[] => readdirSync(dir, { withFileTypes: true }).flatMap((e) => (e.isDirectory() ? (e.name === "__tests__" ? [] : files(join(dir, e.name))) : e.name.endsWith(".ts") ? [join(dir, e.name)] : []));
-    // `${x.reason}` alone, last: the passed-on route knows it by its head (702).
-    const passedOn = (e: ts.TemplateExpression): boolean => e.templateSpans.length === 1 && e.templateSpans[0]!.literal.text === "" && ts.isPropertyAccessExpression(e.templateSpans[0]!.expression) && e.templateSpans[0]!.expression.name.text === "reason";
-    const plain = (e: ts.Expression): boolean => (ts.isTemplateExpression(e) ? !passedOn(e) : ts.isConditionalExpression(e) ? plain(e.whenTrue) || plain(e.whenFalse) : false);
-    const found: string[] = [];
-    let pushes = 0;
-    for (const file of files(root)) {
-      const source = ts.createSourceFile(file, readFileSync(file, "utf8"), ts.ScriptTarget.Latest, true);
-      const visit = (node: ts.Node): void => {
-        if (ts.isCallExpression(node) && ts.isPropertyAccessExpression(node.expression) && node.expression.name.text === "push" && ts.isIdentifier(node.expression.expression) && /^(exclusions|assumptions)$/.test(node.expression.expression.text)) {
-          pushes++;
-          for (const a of node.arguments) if (plain(a)) found.push(`${file.slice(root.length)}: ${a.getText().slice(0, 100)}`);
-        }
-        ts.forEachChild(node, visit);
-      };
-      visit(source);
-    }
-    assert.ok(pushes > 20, `${pushes} pushes`);
-    assert.deepEqual(found, []);
+describe("every producer of a digest text is one an automatic run knows (DECISIONS.md 739, 743)", () => {
+  /**
+   * Strings the classifier finds in a producer's place that the digest never
+   * serves, by file and expression: each read where it goes, in review.
+   */
+  const NOT_SERVED: string[] = [
+    // Evidence exclusions: kept in the run's evidence, never in the digest.
+    'src/domains/account-engagement/index.ts: [...(open.truncated ? [`Open synced leads past the first ${open.data.length.toLocaleString("en-GB")}, in order of Salesforce id`] : []), "Converted leads"]',
+    'src/domains/configuration/index.ts: [`Not scanned, because their type can\'t be counted: ${scan.data.notScanned.length} fields`, "Packaged and formula fields"]',
+    'src/domains/integrations/index.ts: [ "Accounts calibrated as shared, system, integration or test", apiOnly ? `Accounts ${API_ONLY_ACCOUNT}` : "Who is API only couldn\'t be read, so an account set to API only may be counted as a person\'s", `People with fewer than ${MIN_API_LOGINS} API logins, which is normal for an occasional data load`, ]',
+    // A quarter's point in a series: its reason is the series point's, which the digest doesn't hold.
+    "src/domains/historic-pipeline/deep-dive.ts: `${n} ${noun} is below the calibrated minimum of ${minSample}`",
+    "src/domains/historic-pipeline/deep-dive.ts: `${rows.filter((d) => d.Amount === null).length} of ${rows.length} won deals have no amount`",
+    // The Metadata API's refusal code and class, kept for us in run.json (702); the raw notes leave it out.
+    'src/extract/automation.ts: `${retrieveError.code.replace(/[^A-Za-z0-9_]/g, "").slice(0, 60)} (${classifyError(retrieveError).replace(/_/g, " ")})`',
+    // A field the inventory couldn't count: the inventory's own row, which the digest doesn't hold.
+    "src/extract/inventory.ts: reason",
+  ];
+  /** Values handed on, signed off by file and expression as one of the known kinds, with where each is written. */
+  const SIGNED_OFF: string[] = [
+    // A rule's own title, a literal where each rule is declared: a pass's or not measurable title is known as the rule's (evaluate.ts).
+    "src/domains/current-pipeline/index.ts: options.title",
+    "src/domains/data-quality/index.ts: options.title",
+    "src/domains/security/index.ts: options.title",
+    "src/domains/technical-health/lint.ts: group.title",
+    "src/domains/utilisation/index.ts: title",
+    // A metric's label and definition from the file's own table of literals, which the engine-text scan reads.
+    "src/domains/configuration/documented.ts: definition",
+    "src/domains/configuration/documented.ts: label",
+    "src/domains/historic-pipeline/deep-dive.ts: label",
+    "src/domains/historic-pipeline/deep-dive.ts: text",
+    "src/domains/historic-pipeline/metrics.ts: label",
+    "src/domains/service/operations.ts: definition",
+    "src/domains/service/operations.ts: label",
+    // A helper's list of exclusions or assumptions, every caller's items written in its own object, read there as producers.
+    "src/domains/adoption/index.ts: extra.assumptions ?? []",
+    "src/domains/adoption/index.ts: extra.exclusions ?? EXCLUSIONS",
+    "src/domains/configuration/documented.ts: extra.assumptions ?? []",
+    "src/domains/configuration/documented.ts: extra.exclusions ?? []",
+    "src/domains/utilisation/investment.ts: extra.assumptions ?? []",
+    "src/domains/utilisation/investment.ts: extra.exclusions ?? [LICENCE_EXCLUSION]",
+    "src/domains/current-pipeline/outlook.ts: [...data.exclusions, ...weighted.unweighted]",
+    "src/domains/historic-pipeline/metrics.ts: [zoneNote(ctx), ...(fields.assumptions ?? [])]",
+    // Said lists the classifier can't see through: each item made by said where it is pushed or written.
+    "src/domains/technical-health/lint.ts: [ ...(pmd.skipped.tooLarge ? [said`Classes and triggers too large for our code checker: ${pmd.skipped.tooLarge}`] : []), ...(pmd.skipped.unparsable ? [said`Classes and triggers our code checker couldn't read: ${pmd.skipped.unparsable}`] : []), ...(pmd.skipped.unreadable ? [said`Classes and triggers whose code is hidden: ${pmd.skipped.unreadable}`] : []), \"Installed packages' code\", ...pmd.limits, ]",
+    // A gate made by unmappedReason (said), passed to the metric builder.
+    "src/domains/historic-pipeline/deep-dive.ts: gate",
+    // A driver's reason, the segment's own, which the digest doesn't hold.
+    "src/domains/historic-pipeline/drivers.ts: yes?.notMeasurableReason ?? null",
+    // A score's reason: the literals scoreDomain passes, read by the engine-text scan.
+    "src/domains/scoring.ts: reason",
+    "src/domains/scoring.ts: words",
+    // Guard phrases from USER_GUARD_BLOCKERS, our own table (signed off in org-words-eng.test.ts), for an action list's rows.
+    "src/domains/utilisation/index.ts: [...new Set(a.guards.filter((g) => g.status === \"failed\").map((g) => USER_GUARD_BLOCKERS[g.guardId as keyof typeof USER_GUARD_BLOCKERS] ?? g.guardId))]",
+    // The loss reason field's sentence, made by lossFieldUnusable and known by the recogniser (702).
+    "src/domains/data-quality/index.ts: extract.lossReasonUnusable",
+    // An extractor's reason: refusalReason's sentence (the recogniser's, or the edition's whole pointer), or a reason read and passed on.
+    "src/extract/automation.ts: why",
+    "src/extract/configuration.ts: failure",
+    "src/extract/cpq.ts: reason",
+    "src/extract/fields.ts: reason",
+    "src/extract/integrations.ts: unread",
+    "src/extract/inventory.ts: refusalReason(a.error, readName({ kind: \"soql\", api: \"rest\", query: chunk[j]! }))",
+    "src/extract/inventory.ts: refusalReason(err, \"PermissionSet\")",
+    "src/extract/inventory.ts: refusalReason(err, readName(source))",
+    "src/extract/inventory.ts: unread",
+    // The inventory's own rows' reasons, which the digest doesn't hold.
+    "src/extract/inventory.ts: reason",
+    "src/extract/lint/findings.ts: reason",
+    "src/extract/metadata-parse.ts: bundle.unread![kind]!",
+    "src/extract/opportunities.ts: reasons[i]!",
+    "src/extract/opportunities.ts: refusalReason(result.error, readName(source))",
+    "src/extract/pardot.ts: reason",
+    "src/extract/pardot.ts: refusalReason(r.error, \"Lead\")",
+    "src/extract/record-types.ts: hide(read.reason)",
+    "src/extract/record-types.ts: reason",
+    "src/extract/record-types.ts: refusalReason(result.error, readName({ kind: \"soql\", api: \"rest\", query: chunk[j]! }))",
+    "src/extract/report-definitions.ts: refusalReason(err, \"Report\")",
+    "src/extract/report-definitions.ts: refusalReason(err, \"The org's set-up from the Metadata API\")",
+    "src/extract/types.ts: refusalReason(err, readName(source))",
+  ];
+  const producers = textProducers();
+
+  test("none is a plain template, a join or a sum of strings: each is said, written whole, or a reason passed on", () => {
+    const plain = [...new Set(producers.filter((p) => p.kind === "NOT RECOGNISED").map(producerKey))].filter((k) => !NOT_SERVED.includes(k)).sort();
+    assert.deepEqual(plain, []);
+    assert.ok(producers.length > 1500, `${producers.length} producers`);
+  });
+
+  test("every value handed on is signed off, and every sign-off still names one", () => {
+    const refs = [...new Set(producers.filter((p) => p.kind === "ref").map(producerKey))].sort();
+    assert.deepEqual(refs.filter((k) => !SIGNED_OFF.includes(k)), []);
+    assert.deepEqual(SIGNED_OFF.filter((k) => !refs.includes(k)), []);
+    const unrecognised = new Set(producers.filter((p) => p.kind === "NOT RECOGNISED").map(producerKey));
+    assert.deepEqual(NOT_SERVED.filter((k) => !unrecognised.has(k)), []);
+  });
+
+  test("the 739 pushes are still held: each exclusion or assumption pushed in src/domains is a producer here", () => {
+    const pushes = producers.filter((p) => p.slot.startsWith("push:") && p.at.startsWith("src/domains/"));
+    assert.ok(pushes.length > 20, `${pushes.length} pushes`);
+    assert.ok(pushes.every((p) => p.kind !== "NOT RECOGNISED"));
   });
 });
