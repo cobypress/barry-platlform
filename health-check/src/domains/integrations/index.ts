@@ -32,9 +32,12 @@ const MIN_API_LOGINS = 5;
 const NON_PERSON_KINDS = new Set(["shared", "system", "integration", "test"]);
 /** The licence Salesforce gives for API-only integration users (Well-Architected, Trust). */
 export const INTEGRATION_LICENCE = "Salesforce Integration";
-// Our judgement: a day's allowance this used up leaves no room for a busy day.
-const ALLOWANCE_WARNING = 80;
-const ALLOWANCE_HIGH = 95;
+// A daily allowance is read once, when the check first connects, and Salesforce
+// counts it over a rolling 24 hours, so one reading can't tell a busy hour from
+// a trend. Only one at or near exhaustion is an issue: from 95% used, what is
+// left can go in an hour or two of an ordinary day (medium); with none left,
+// calls or jobs are being refused as we read it (high) (DECISIONS.md 726).
+const ALLOWANCE_NEAR_EXHAUSTION = 95;
 const ALLOWANCES = { DailyApiRequests: "API requests", DailyAsyncApexExecutions: "asynchronous Apex runs" } as const;
 // The jobs someone starts. A batch's own chunks (BatchApexWorker) are counted through the batch.
 const JOB_TYPES = new Set(["BatchApex", "Queueable", "Future", "ScheduledApex"]);
@@ -352,35 +355,42 @@ const interactiveIntegrations: Rule = {
 
 const apiUsage: Rule = {
   id: "int.api-usage",
-  version: 2,
+  // 3: an issue only at or near exhaustion (95%), not from 80%; a reading past the
+  // allowance reads "over the ... allowance"; read before this check's own calls (DECISIONS.md 726).
+  version: 3,
   domain: DOMAIN,
   title: "Daily API and async Apex use against the allowance",
   evaluate(ctx): RuleResult | RuleResult[] {
     const limits = ctx.data(apiLimitsExtractor);
     if (limits.status !== "ok") return { outcome: "not_measurable", reason: `The org's limits couldn't be read: ${limits.reason}`, evidence: [ctx.ev(limits.source, { count: null })] };
+    // A maximum of 0 or none: the org has no such allowance, so it's neither an issue nor a pass.
     const read = Object.entries(ALLOWANCES).flatMap(([key, label]) => {
       const limit = limits.data[key];
       if (!limit || limit.Max <= 0) return [];
       const used = Math.max(0, limit.Max - limit.Remaining);
       return [{ key, label, used, max: limit.Max, share: pct(used, limit.Max) }];
     });
-    const evidence = [ctx.ev(limits.source, { count: read.length, note: "Read as the connection was made, over Salesforce's rolling 24 hours. Calls this check had already made that day are included." })];
+    const evidence = [ctx.ev(limits.source, { count: read.length, note: "Read when this check first connected, before its own calls, over Salesforce's rolling 24 hours." })];
     if (read.length === 0) return { outcome: "not_measurable", reason: said`The org reported neither daily allowance with a maximum.`, evidence };
     // An allowance /limits didn't report can't be called within its limit (DECISIONS.md 291).
     const unread = Object.entries(ALLOWANCES).filter(([key]) => !read.some((r) => r.key === key)).map(([, label]) => label);
     const segments = [{ dimension: "allowance", segments: read.length }];
     const facts = Object.fromEntries(read.flatMap((r) => [[`${r.key}Used`, r.used], [`${r.key}Max`, r.max], [`${r.key}Share`, r.share]]));
-    const text = (r: (typeof read)[number]): Said => said`${r.share}% of its daily ${r.label} (${grouped(r.used)} of ${grouped(r.max)})`;
-    const over = read.filter((r) => r.share >= ALLOWANCE_WARNING);
+    // Past the allowance, "100,500 of 100,000" would read as a part larger than its whole, which the number check refuses (as storage, 502).
+    const amount = (r: (typeof read)[number]): Said => (r.used > r.max ? said`${grouped(r.used)}, over the ${grouped(r.max)} allowance` : said`${grouped(r.used)} of ${grouped(r.max)}`);
+    const text = (r: (typeof read)[number]): Said => said`${r.share}% of its daily ${r.label} (${amount(r)})`;
+    const over = read.filter((r) => r.share >= ALLOWANCE_NEAR_EXHAUSTION);
     if (over.length === 0 && unread.length) return { outcome: "not_measurable", reason: said`The org didn't report its daily allowance for ${andList(unread.map((label) => said`${label}`))}, so we can't say it's within it.`, evidence };
-    if (over.length === 0) return { outcome: "pass", summary: said`When we connected, the org had used ${andList(read.map(text))}.`, evidence, segmentsChecked: segments, facts };
+    if (over.length === 0) return { outcome: "pass", summary: said`When this check first connected, the org had used ${andList(read.map(text))}.`, evidence, segmentsChecked: segments, facts };
+    const usedUp = over.some((r) => r.used >= r.max);
     return {
       outcome: "issue",
-      title: said`The org is using up most of a daily allowance`,
-      summary: said`When we connected, the org had used ${andList(over.map(text))}. Past an allowance, Salesforce can refuse further calls or jobs until use falls back, and the integrations that depend on them stop.${unread.length ? said` The org didn't report its daily allowance for ${andList(unread.map((label) => said`${label}`))}, so that one isn't checked.` : ""}`,
+      title: usedUp ? said`A daily allowance is used up` : said`A daily allowance is nearly used up`,
+      summary: said`When this check first connected, the org had used ${andList(over.map(text))}, as read at that moment. Past an allowance, Salesforce can refuse further calls or jobs until use falls back, and the integrations that depend on them stop.${unread.length ? said` The org didn't report its daily allowance for ${andList(unread.map((label) => said`${label}`))}, so that one isn't checked.` : ""}`,
       recommendation: said`Find which integrations and jobs use the most, then cut repeats: combine calls, and use bulk loads or change events for large volumes.`,
       recommendationType: "investigate",
-      severity: over.some((r) => r.share >= ALLOWANCE_HIGH) ? "high" : "medium",
+      // Nearly used up is a warning, since the allowance resets; used up, calls or jobs are refused as we read it.
+      severity: usedUp ? "high" : "medium",
       // One reading, at one moment.
       confidence: "medium",
       evidence,

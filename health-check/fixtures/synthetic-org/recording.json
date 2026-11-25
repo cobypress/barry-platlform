@@ -11,7 +11,7 @@
    "key": "GET /services/data/v66.0/limits",
    "status": 200,
    "limitInfo": "api-usage=1000/100000",
-   "text": "{\"DailyApiRequests\":{\"Max\":100000,\"Remaining\":99000},\"DailyAsyncApexExecutions\":{\"Max\":250000,\"Remaining\":30000},\"DataStorageMB\":{\"Max\":10240,\"Remaining\":1300},\"FileStorageMB\":{\"Max\":20480,\"Remaining\":16000}}"
+   "text": "{\"DailyApiRequests\":{\"Max\":100000,\"Remaining\":99000},\"DailyAsyncApexExecutions\":{\"Max\":250000,\"Remaining\":10000},\"DataStorageMB\":{\"Max\":10240,\"Remaining\":1300},\"FileStorageMB\":{\"Max\":20480,\"Remaining\":16000}}"
   },
   {
    "key": "GET /services/data/v66.0/query?q=SELECT%20Id%2C%20Name%2C%20OrganizationType%2C%20IsSandbox%2C%20TimeZoneSidKey%2C%20FiscalYearStartMonth%2C%20DefaultAccountAccess%2C%20DefaultContactAccess%2C%20DefaultOpportunityAccess%2C%20DefaultLeadAccess%20FROM%20Organization",
@@ -317,7 +317,7 @@
    "key": "GET /services/data/v66.0/limits",
    "status": 200,
    "limitInfo": "api-usage=1050/100000",
-   "text": "{\"DailyApiRequests\":{\"Max\":100000,\"Remaining\":98950},\"DailyAsyncApexExecutions\":{\"Max\":250000,\"Remaining\":30000},\"DataStorageMB\":{\"Max\":10240,\"Remaining\":1300},\"FileStorageMB\":{\"Max\":20480,\"Remaining\":16000}}"
+   "text": "{\"DailyApiRequests\":{\"Max\":100000,\"Remaining\":98950},\"DailyAsyncApexExecutions\":{\"Max\":250000,\"Remaining\":10000},\"DataStorageMB\":{\"Max\":10240,\"Remaining\":1300},\"FileStorageMB\":{\"Max\":20480,\"Remaining\":16000}}"
   },
   {
    "key": "GET /services/data/v66.0/query?q=SELECT%20PermissionSetId%20FROM%20PermissionSetAssignment%20WHERE%20PermissionSet.IsOwnedByProfile%20%3D%20false%20AND%20Assignee.IsActive%20%3D%20true",
@@ -623,7 +623,7 @@
    "key": "GET /services/data/v66.0/limits",
    "status": 200,
    "limitInfo": "api-usage=1100/100000",
-   "text": "{\"DailyApiRequests\":{\"Max\":100000,\"Remaining\":98900},\"DailyAsyncApexExecutions\":{\"Max\":250000,\"Remaining\":30000},\"DataStorageMB\":{\"Max\":10240,\"Remaining\":1300},\"FileStorageMB\":{\"Max\":20480,\"Remaining\":16000}}"
+   "text": "{\"DailyApiRequests\":{\"Max\":100000,\"Remaining\":98900},\"DailyAsyncApexExecutions\":{\"Max\":250000,\"Remaining\":10000},\"DataStorageMB\":{\"Max\":10240,\"Remaining\":1300},\"FileStorageMB\":{\"Max\":20480,\"Remaining\":16000}}"
   },
   {
    "key": "GET /services/data/v66.0/query?q=SELECT%20Id%2C%20JobType%2C%20Status%2C%20NumberOfErrors%2C%20ApexClass.Name%2C%20CreatedDate%20FROM%20AsyncApexJob%20WHERE%20CreatedDate%20%3E%3D%202026-10-24T12%3A00%3A00Z%20AND%20CreatedDate%20%3C%3D%202026-10-31T12%3A00%3A00Z",
@@ -929,7 +929,7 @@
    "key": "GET /services/data/v66.0/limits",
    "status": 200,
    "limitInfo": "api-usage=1150/100000",
-   "text": "{\"DailyApiRequests\":{\"Max\":100000,\"Remaining\":98850},\"DailyAsyncApexExecutions\":{\"Max\":250000,\"Remaining\":30000},\"DataStorageMB\":{\"Max\":10240,\"Remaining\":1300},\"FileStorageMB\":{\"Max\":20480,\"Remaining\":16000}}"
+   "text": "{\"DailyApiRequests\":{\"Max\":100000,\"Remaining\":98850},\"DailyAsyncApexExecutions\":{\"Max\":250000,\"Remaining\":10000},\"DataStorageMB\":{\"Max\":10240,\"Remaining\":1300},\"FileStorageMB\":{\"Max\":20480,\"Remaining\":16000}}"
   },
   {
    "key": "GET /services/data/v66.0/sobjects/OrderItem/describe",

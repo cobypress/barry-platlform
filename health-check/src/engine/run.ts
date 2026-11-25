@@ -23,7 +23,7 @@ import { completeProfile, gateFor, orgProfileExtractor } from "../extract/org-pr
 import { buildInventory, errorClass, INVENTORY_FILE, inventoryExtractorsFor } from "../extract/inventory.ts";
 import { buildComplexity, COMPLEXITY_FILE } from "../complexity/read.ts";
 import { summariseFacts } from "../facts/summary.ts";
-import { monthsBefore, noteRefusals, type ConnectedUser, type ExtractContext, type Extractor, type PartialStore, type Sourced } from "../extract/types.ts";
+import { LIMITS_AT_START_FILE, monthsBefore, noteRefusals, parseLimitsReading, type ConnectedUser, type LimitsReading, type ExtractContext, type Extractor, type PartialStore, type Sourced } from "../extract/types.ts";
 import { buildHandbook, HANDBOOK_FILE, labelApexModifiers, labelComponentModifiers, recentChanges } from "../handbook/build.ts";
 import type { UserRow } from "../extract/users.ts";
 import { usersExtractor } from "../extract/users.ts";
@@ -269,6 +269,17 @@ export async function runHealthCheck(options: RunOptions): Promise<RunResult> {
       finishedAt: null,
     });
     writeJson(join(dir, "calibration.json"), calibration);
+    // /limits as this first sitting's connection read it, before any call of the run's
+    // own: a resumed run's limit steps take this, not its new connection's (DECISIONS.md 726).
+    writeJson(join(dir, LIMITS_AT_START_FILE), { all: client.allLimitsAtConnect, reported: client.limitsAtConnect, unread: client.limitsUnread });
+  }
+  const limitsPath = join(dir, LIMITS_AT_START_FILE);
+  // A run begun before the reading was kept, or a damaged file, reads the connection's, as before.
+  let limitsAtStart: LimitsReading | null = null;
+  try {
+    limitsAtStart = existsSync(limitsPath) ? parseLimitsReading(readJson(limitsPath)) : null;
+  } catch {
+    limitsAtStart = null;
   }
 
   // A resumed run keeps its original date and window, so all its steps agree.
@@ -289,6 +300,7 @@ export async function runHealthCheck(options: RunOptions): Promise<RunResult> {
     ...(options.keepApexSource === true ? { apexSource: apexSourceStore(dir) } : {}),
     ...(options.connectedUser ? { connectedUser: options.connectedUser } : {}),
     ...(options.codeLint ? { codeLint: options.codeLint } : {}),
+    ...(limitsAtStart ? { limitsAtStart } : {}),
   };
 
   let callsCounted = 0;

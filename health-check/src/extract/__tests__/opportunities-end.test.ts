@@ -343,29 +343,32 @@ describe("a run stopped part-way through the deals and resumed after the org cha
     runHealthCheck({ provider: syntheticProvider, connectedUser: org.CONNECTED_USER, calibration: loadCalibration(), modules: SALES_CLOUD_MODULES, outDir, now: T, transport: new Simulator({ records, used, ...simulator }), pageSize: 50, log: () => {}, ...overrides });
 
   /** A run on the org at its date stopped by the budget just before the request `at` picks out of an uninterrupted run's, as run.test.ts stops one. */
-  async function stoppedAt(at: (requests: Simulator["requests"]) => number): Promise<{ out: string; id: string; dir: string }> {
+  async function stoppedAt(at: (requests: Simulator["requests"]) => number): Promise<{ out: string; id: string; dir: string; used: number }> {
     const probe = new Simulator();
     await runHealthCheck({ provider: syntheticProvider, connectedUser: org.CONNECTED_USER, calibration: loadCalibration(), modules: SALES_CLOUD_MODULES, outDir: tempDir(), now: T, transport: probe, pageSize: 50 });
     const billable = probe.requests.slice(0, at(probe.requests)).filter((r) => !r.url.endsWith("/limits") && !r.url.endsWith("/services/data/")).length;
     const out = tempDir();
     const stopped = await simulatorRun(SYNTHETIC_RECORDS, out, 50_000 - billable);
     assert.equal(stopped.run.status, "stopped_budget");
-    return { out, id: stopped.run.id, dir: stopped.dir };
+    return { out, id: stopped.run.id, dir: stopped.dir, used: 50_000 - billable };
   }
   const query = (pattern: RegExp) => (requests: Simulator["requests"]) => requests.findIndex((r) => r.url.includes("query") && pattern.test(decodeURIComponent(r.url)));
 
   /** A run stopped a few pages into the deals, with the ids on the pages it kept. */
-  async function stoppedInTheDeals(): Promise<{ out: string; id: string; partial: string; kept: string[] }> {
+  async function stoppedInTheDeals(): Promise<{ out: string; id: string; partial: string; kept: string[]; used: number }> {
     const stopped = await stoppedAt((requests) => query(/FROM Opportunity WHERE \(CreatedDate/)(requests) + 3);
     const partial = join(stopped.dir, "checkpoints", "opportunities.partial.jsonl");
     assert.ok(existsSync(partial), "pages so far were saved");
     const kept = readFileSync(partial, "utf8").trim().split("\n").map((line) => (JSON.parse(line) as { Id: string }).Id);
-    return { out: stopped.out, id: stopped.id, partial, kept };
+    return { out: stopped.out, id: stopped.id, partial, kept, used: stopped.used };
   }
 
-  /** The step and figures an uninterrupted read at the run's date gives, with the same API use as a resumed session, which the limits read reports. */
-  async function uninterrupted(): Promise<{ dir: string; step: OpportunityExtract; findings: Finding[]; metrics: Metric[] }> {
-    const straight = await simulatorRun(SYNTHETIC_RECORDS, tempDir(), 1000, { answers: loadAnswers() });
+  /**
+   * The step and figures an uninterrupted read at the run's date gives, with the
+   * API use the stopped run's first sitting read: a resumed run keeps that reading (DECISIONS.md 726).
+   */
+  async function uninterrupted(used: number): Promise<{ dir: string; step: OpportunityExtract; findings: Finding[]; metrics: Metric[] }> {
+    const straight = await simulatorRun(SYNTHETIC_RECORDS, tempDir(), used, { answers: loadAnswers(), stopAtShare: 0.9 });
     return { dir: straight.dir, step: checkpoint<OpportunityExtract>(straight.dir, "opportunities"), ...straight.output! };
   }
 
@@ -387,13 +390,13 @@ describe("a run stopped part-way through the deals and resumed after the org cha
   test("keeps the pages it read and reads the rest to the run's date, so the step is what an uninterrupted read gives", async () => {
     // Without the deal that can't be wound back: it's as read, by design.
     const later = laterOrg({ unwindable: false });
-    const { out, id, kept } = await stoppedInTheDeals();
+    const { out, id, kept, used } = await stoppedInTheDeals();
     // One changed deal was read before the stop, at the run's date; three after it, late.
     assert.ok(kept.includes(later.planted.reworked) && ![later.planted.wonSince, later.planted.wonNoStep, later.planted.movedOn].some((d) => kept.includes(d)), kept.join(", "));
 
     const resumed = await simulatorRun(later.records, out, 1000, { resume: id, answers: loadAnswers() });
     assert.equal(resumed.run.status, "in_review");
-    const straight = await uninterrupted();
+    const straight = await uninterrupted(used);
     const step = checkpoint<OpportunityExtract>(resumed.dir, "opportunities");
     assert.deepEqual(step.opportunities, straight.step.opportunities);
     assert.deepEqual(step.history, straight.step.history);
@@ -418,7 +421,7 @@ describe("a run stopped part-way through the deals and resumed after the org cha
 
       const resumed = await simulatorRun(later.records, stopped.out, 1000, { resume: stopped.id, answers: loadAnswers() });
       assert.equal(resumed.run.status, "in_review");
-      const straight = await uninterrupted();
+      const straight = await uninterrupted(stopped.used);
       const [now, then] = [finding(resumed.output!.findings, NEXT_STEPS)[0]!, finding(straight.findings, NEXT_STEPS)[0]!];
       assert.deepEqual({ hits: now.facts.hits, n: now.facts.n, summary: now.summary }, { hits: then.facts.hits, n: then.facts.n, summary: then.summary });
       // Read after it was won, and listed, as it changed since the run's start.
@@ -446,7 +449,7 @@ describe("a run stopped part-way through the deals and resumed after the org cha
       assert.equal(resumed.run.status, "in_review");
       // Its history, read late, shows the win, so it's wound back, though it was open as read.
       assert.deepEqual(checkpoint<OpportunityExtract>(resumed.dir, "opportunities").sinceTheRun, { woundBack: 4, asRead: 0, madeSince: 0 });
-      const straight = await uninterrupted();
+      const straight = await uninterrupted(stopped.used);
       const [now, then] = [finding(resumed.output!.findings, NEXT_STEPS)[0]!, finding(straight.findings, NEXT_STEPS)[0]!];
       assert.deepEqual({ hits: now.facts.hits, n: now.facts.n, summary: now.summary }, { hits: then.facts.hits, n: then.facts.n, summary: then.summary });
       assert.ok(listed(resumed.dir, NEXT_STEPS).includes(wonNoStep) && !listed(resumed.dir, NEXT_STEPS).includes(wonSince));
@@ -476,7 +479,7 @@ describe("a run stopped part-way through the deals and resumed after the org cha
   }
 
   test("leaves out a deal made since that a page kept from a read without the end holds, with its history and name, and counts it", async () => {
-    const { later, made, records, out, id } = await keptMadeSince();
+    const { later, made, records, out, id, used } = await keptMadeSince();
     const resumed = await simulatorRun(records, out, 1000, { resume: id, answers: loadAnswers() });
     assert.equal(resumed.run.status, "in_review");
     const step = checkpoint<OpportunityExtract>(resumed.dir, "opportunities");
@@ -484,7 +487,7 @@ describe("a run stopped part-way through the deals and resumed after the org cha
     assert.ok(!ok(step.history).some((h) => h.OpportunityId === made.Id));
     assert.ok(step.names && !(made.Id in step.names));
     assert.deepEqual(step.sinceTheRun, { woundBack: 4, asRead: 0, madeSince: 1 });
-    const straight = await uninterrupted();
+    const straight = await uninterrupted(used);
     assert.deepEqual(step.opportunities, straight.step.opportunities);
     assert.deepEqual(step.history, straight.step.history);
     assert.deepEqual(step.names, straight.step.names);
@@ -507,7 +510,7 @@ describe("a run stopped part-way through the deals and resumed after the org cha
       return { ...later, edited: edited.Id, editedAt: { [edited.Id]: stamp(T.getTime() + 2 * HOUR) } };
     }
 
-    async function stoppedBeforeTheList(): Promise<{ out: string; id: string; dir: string }> {
+    async function stoppedBeforeTheList(): Promise<{ out: string; id: string; dir: string; used: number }> {
       const stopped = await stoppedAt((requests) => {
         const list = query(LIST)(requests);
         assert.ok(list > 0 && query(/FROM ForecastingFact/)(requests) < list, "the facts are read before the list");
@@ -527,11 +530,11 @@ describe("a run stopped part-way through the deals and resumed after the org cha
      * and every figure is the uninterrupted run's but the Commit figures, which
      * leave the one won since out, one deal fewer in each share's Commit.
      */
-    async function resumedAsAtTheRun(stopped: { out: string; id: string }, later: ReturnType<typeof wonAndEdited>): Promise<void> {
+    async function resumedAsAtTheRun(stopped: { out: string; id: string; used: number }, later: ReturnType<typeof wonAndEdited>): Promise<void> {
       const resumed = await simulatorRun(later.records, stopped.out, 1000, { resume: stopped.id, answers: loadAnswers() }, { editedAt: later.editedAt });
       assert.equal(resumed.run.status, "in_review");
       assert.deepEqual([...ok(checkpoint<ForecastData>(resumed.dir, "forecast").closedSinceTheRun)].sort(), [later.id, later.edited].sort());
-      const straight = await uninterrupted();
+      const straight = await uninterrupted(stopped.used);
       const quota = metric(resumed.output!.metrics, AGAINST_QUOTA)[0]!;
       assert.deepEqual([quota.status, quota.status === "not_measurable" && quota.reason], ["not_measurable", LEFT_OUT[1]!.reason]);
       for (const id of COMMIT_SHARES) {

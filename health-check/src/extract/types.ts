@@ -1,7 +1,7 @@
 import { AsyncLocalStorage } from "node:async_hooks";
 import type { Calibration, RefusedRead } from "../schemas/index.ts";
 import { refusalSentence, type RefusalKind } from "../salesforce/refusal-words.ts";
-import { classifyError, isUnavailable, lastDelivery, NotInOrgError, type QueryApi, type QueryOptions, type SalesforceClient, type SalesforceError } from "../salesforce/client.ts";
+import { classifyError, isUnavailable, lastDelivery, NotInOrgError, type OrgLimit, type QueryApi, type QueryOptions, type SalesforceClient, type SalesforceError } from "../salesforce/client.ts";
 import type { ApexSourceStore } from "./apex-source.ts";
 import type { CodeLintTools } from "./code-lint.ts";
 
@@ -51,7 +51,33 @@ export type ExtractContext = {
    * start and resume, and never written into the run folder.
    */
   connectedUser?: ConnectedUser;
+  /**
+   * /limits as the run's first sitting read it on connecting (DECISIONS.md
+   * 726). A resumed run's new connection reads the org after this run's own
+   * calls, so the limit steps take this one. Absent on a run that began before
+   * it was kept: those steps read the connection's own, as they always did.
+   */
+  limitsAtStart?: LimitsReading;
 };
+
+/** What the client read from /limits on connecting: every limit, the ones the rules read, and why none could be read. */
+export type LimitsReading = { all: Record<string, OrgLimit>; reported: Record<string, OrgLimit>; unread: string | null };
+
+/** Where a run keeps its first sitting's reading of /limits, in its folder. */
+export const LIMITS_AT_START_FILE = "limits-at-start.json";
+
+/** The reading the limit steps use: the run's first sitting's when it was kept, else this connection's. */
+export const limitsReadingOf = (ctx: Pick<ExtractContext, "client" | "limitsAtStart">): LimitsReading =>
+  ctx.limitsAtStart ?? { all: ctx.client.allLimitsAtConnect, reported: ctx.client.limitsAtConnect, unread: ctx.client.limitsUnread };
+
+/** A kept reading as the file holds it, or null when it isn't one, so a damaged file falls back to the connection's. */
+export function parseLimitsReading(value: unknown): LimitsReading | null {
+  const v = value as Partial<LimitsReading> | null;
+  const limitMap = (m: unknown): m is Record<string, OrgLimit> =>
+    typeof m === "object" && m !== null && !Array.isArray(m) && Object.values(m).every((l) => typeof (l as OrgLimit)?.Max === "number" && typeof (l as OrgLimit)?.Remaining === "number");
+  if (!v || typeof v !== "object" || !limitMap(v.all) || !limitMap(v.reported) || !(v.unread === null || typeof v.unread === "string")) return null;
+  return { all: v.all, reported: v.reported, unread: v.unread };
+}
 
 export type ConnectedUser = { id?: string; username?: string };
 

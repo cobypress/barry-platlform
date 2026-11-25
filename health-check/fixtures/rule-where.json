@@ -245,7 +245,7 @@
     "version": 1
   },
   "int.api-usage": {
-    "version": 2
+    "version": 3
   },
   "int.failed-async-jobs": {
     "version": 2,

@@ -31,6 +31,8 @@ export type SimulatorOptions = {
   asyncApex?: { Max: number; Remaining: number } | null;
   /** Data and file storage, as /limits reports them. The synthetic org's own by default. */
   storage?: typeof org.STORAGE_LIMITS;
+  /** More /limits entries, beside the four the synthetic org reports: a test's own names, never claimed as Salesforce's. */
+  extraLimits?: Record<string, unknown>;
   /**
    * Organization.OrganizationType as the org answers it (DECISIONS.md 710): the
    * synthetic org's "Enterprise Edition" by default, another edition's name, or
@@ -317,6 +319,7 @@ export class Simulator implements Transport {
   #failRetrieve: SimulatorOptions["failRetrieve"];
   #asyncApex: { Max: number; Remaining: number } | null;
   #storage: typeof org.STORAGE_LIMITS;
+  #extraLimits: Record<string, unknown>;
   #cpq: boolean;
   #pardot: boolean;
   #missing: Set<string>;
@@ -356,6 +359,7 @@ export class Simulator implements Transport {
     this.#failRetrieve = options.failRetrieve;
     this.#asyncApex = options.asyncApex === undefined ? org.ASYNC_APEX_LIMIT : options.asyncApex;
     this.#storage = options.storage ?? org.STORAGE_LIMITS;
+    this.#extraLimits = options.extraLimits ?? {};
     this.#cpq = options.cpq ?? true;
     this.#pardot = options.pardot ?? true;
     // A read-only connection can't see AuthProvider (DECISIONS.md 60).
@@ -382,7 +386,7 @@ export class Simulator implements Transport {
     const path = url.pathname;
 
     if (path === "/services/data/") return jsonResponse(200, [{ version: "60.0" }, { version: org.API_VERSION }], this.#limitInfo);
-    if (path.endsWith("/limits")) return jsonResponse(200, { DailyApiRequests: { Max: this.#limit, Remaining: this.#limit - this.#used }, ...(this.#asyncApex ? { DailyAsyncApexExecutions: this.#asyncApex } : {}), ...this.#storage }, this.#limitInfo);
+    if (path.endsWith("/limits")) return jsonResponse(200, { DailyApiRequests: { Max: this.#limit, Remaining: this.#limit - this.#used }, ...(this.#asyncApex ? { DailyAsyncApexExecutions: this.#asyncApex } : {}), ...this.#storage, ...this.#extraLimits }, this.#limitInfo);
 
     this.#used++;
     if (path.endsWith("/limits/recordCount")) return jsonResponse(200, { sObjects: this.#d.recordCounts }, this.#limitInfo);

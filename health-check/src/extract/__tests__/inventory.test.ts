@@ -112,7 +112,7 @@ describe("the inventory of the synthetic org, from the recording", async () => {
   test("limits: every limit the org reported, with used and maximum", () => {
     assert.deepEqual(rows(inventory.limits), [
       { name: "DailyApiRequests", max: 100_000, used: 1_000 },
-      { name: "DailyAsyncApexExecutions", max: 250_000, used: 220_000 },
+      { name: "DailyAsyncApexExecutions", max: 250_000, used: 240_000 },
       { name: "DataStorageMB", max: 10_240, used: 8_940 },
       { name: "FileStorageMB", max: 20_480, used: 4_480 },
     ]);

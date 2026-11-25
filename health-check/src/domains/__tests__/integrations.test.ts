@@ -118,12 +118,14 @@ describe("daily allowances", () => {
     assert.equal(f.status, "issue");
     assert.equal(f.severity, "medium");
     assert.deepEqual(f.subjects.map((s) => s.label), ["asynchronous Apex runs"]);
-    assert.match(f.summary, /88% of its daily asynchronous Apex runs \(220,000 of 250,000\)/);
+    assert.match(f.summary, /96% of its daily asynchronous Apex runs \(240,000 of 250,000\)/);
   });
 
-  test("high past 95%, and a pass when there's room", () => {
+  test("one reading is an issue only from 95% (DECISIONS.md 726): 88% passes", () => {
     const at = (remaining: number): Finding => one(edited<{ data: Record<string, { Remaining: number }> }>("api-limits", (l) => void (l.data.DailyAsyncApexExecutions!.Remaining = remaining)), "int.api-usage");
-    assert.equal(at(5_000).severity, "high");
+    assert.equal(at(5_000).severity, "medium");
+    assert.equal(at(0).severity, "high");
+    assert.equal(at(30_000).status, "passed");
     assert.equal(at(200_000).status, "passed");
   });
 
