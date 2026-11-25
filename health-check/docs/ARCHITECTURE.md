@@ -91,7 +91,7 @@ AI readiness (`src/narrative/readiness.ts`, DECISIONS.md 236 to 245) is built wi
 
 Filtering by HTTP method wouldn't work in Salesforce. `GET tooling/executeAnonymous` runs Apex, a GET on an Apex REST class can do anything, and `POST ?_HttpMethod=PATCH` is an update. So `allowlist.ts` lists exact routes.
 
-- GET is allowed for: versions, limits, record counts, query and query paging (REST and Tooling), describe, and a report's describe in the Analytics API (`analytics/reports/<00O id>/describe`, nothing else under `analytics`: a GET on the report runs it).
+- GET is allowed for: versions, limits, record counts, query and query paging (REST and Tooling), describe, and a report's describe in the Analytics API (`analytics/reports/<00O id>/describe`, nothing else under `analytics`: a GET on the report runs it), and the org's settings in the Connect REST API (`connect/organization` exactly, nothing else under `connect`; decision 740).
 - POST is allowed for two endpoints, each with its body inspected:
   - Composite batch: every subrequest must be a GET to the REST query route with safe SOQL.
   - Metadata SOAP: exactly one operation, either `retrieve` or `checkRetrieveStatus`, matching the `SOAPAction`.
