@@ -1177,6 +1177,11 @@ const SIGNED_OFF: string[] = [
   // The paths deals take (DECISIONS.md 703).
   // Numbers: the bars, counts, rates and median days the rule works out (each typed number).
   "src/domains/historic-pipeline/paths/variants.ts: closedOut",
+  // The paths block's unlock sentence (DECISIONS.md 758): the minimum and the count, numbers read from the engine's own reason.
+  "src/digest/paths.ts: found",
+  "src/digest/paths.ts: found",
+  "src/digest/paths.ts: needed",
+  "src/digest/paths.ts: needed",
   'src/domains/historic-pipeline/paths/insights.ts: plural(tried, "comparison")',
   "src/domains/historic-pipeline/paths/insights.ts: days",
   "src/domains/historic-pipeline/paths/insights.ts: days",

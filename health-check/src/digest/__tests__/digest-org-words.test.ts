@@ -111,7 +111,11 @@ describe("the digest marks the org's words (decision 655)", () => {
     // The areas', plan's and value groups' marks (DECISIONS.md 663) come from the engine's own tables, not the findings, so they are taken out of both.
     assert.deepEqual(unmarked(digest), unmarked(before));
     // AI readiness (DECISIONS.md 742) reads the same; a reason quoting a title takes the title's marks, so without them it has none.
-    assert.deepEqual({ ...digest, findings: digest.findings.map(strip), readiness: unmarked(digest.readiness) }, { ...before, findings: before.findings.map(strip), ...unmarkedParts(digest), readiness: unmarked(before.readiness) });
+    // The paths block (DECISIONS.md 758) the same: its sentences are its findings', so without their marks they have none.
+    assert.deepEqual(
+      { ...digest, findings: digest.findings.map(strip), readiness: unmarked(digest.readiness), paths: unmarked(digest.paths) },
+      { ...before, findings: before.findings.map(strip), ...unmarkedParts(digest), readiness: unmarked(before.readiness), paths: unmarked(before.paths) },
+    );
     const quoting = buildReport({ ...loaded.input }).readiness.pillars.flatMap((p, i) => (p.quoted ? [i] : []));
     assert.ok(quoting.length > 0);
     for (const i of quoting) assert.equal(before.readiness!.pillars[i]!.orgWords?.reason, undefined);

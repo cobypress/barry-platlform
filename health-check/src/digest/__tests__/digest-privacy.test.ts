@@ -1,6 +1,7 @@
 import { describe, test } from "node:test";
 import assert from "node:assert/strict";
 import { buildDigest, guardDigest, holdsPersonOrSecret, ID_MAPS, READINESS_CODE_PATHS, STRUCTURAL_KEYS } from "../build.ts";
+import { PATHS_CODE_PATHS } from "../paths.ts";
 import { GROUPS } from "../../value/model.ts";
 import { holdsNameOrSecret } from "../../narrative/guard.ts";
 import { buildReport } from "../../narrative/sections.ts";
@@ -115,12 +116,12 @@ function leaves(value: unknown, key = "", path: string[] = [], at = ""): Array<{
   if (value && typeof value === "object") return Object.entries(value).flatMap(([k, v]) => leaves(v, ID_MAPS.has(key) ? key : k, [...path, k], at ? `${at}.${k}` : k));
   return [];
 }
-/** A leaf the guard leaves as it is: under a structural key, or at one of readiness's code paths (DECISIONS.md 742). */
-const structuralLeaf = (l: { key: string; at: string }): boolean => STRUCTURAL_KEYS.has(l.key) || ID_MAPS.has(l.key) || READINESS_CODE_PATHS.has(l.at);
+/** A leaf the guard leaves as it is: under a structural key, or at one of readiness's or the paths block's code paths (DECISIONS.md 742, 758). */
+const structuralLeaf = (l: { key: string; at: string }): boolean => STRUCTURAL_KEYS.has(l.key) || ID_MAPS.has(l.key) || READINESS_CODE_PATHS.has(l.at) || PATHS_CODE_PATHS.has(l.at);
 
 /** The same value with every string outside the structural keys and paths replaced by `text`. */
 function plantEverywhere(value: unknown, text: string, key = "", at = ""): unknown {
-  if (STRUCTURAL_KEYS.has(key) || ID_MAPS.has(key) || READINESS_CODE_PATHS.has(at)) return value;
+  if (STRUCTURAL_KEYS.has(key) || ID_MAPS.has(key) || READINESS_CODE_PATHS.has(at) || PATHS_CODE_PATHS.has(at)) return value;
   if (typeof value === "string") return text;
   if (Array.isArray(value)) return value.map((v) => plantEverywhere(v, text, key, `${at}[]`));
   if (value && typeof value === "object") return Object.fromEntries(Object.entries(value).map(([k, v]) => [k, plantEverywhere(v, text, k, at ? `${at}.${k}` : k)]));

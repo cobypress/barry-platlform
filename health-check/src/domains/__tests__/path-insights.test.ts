@@ -683,10 +683,13 @@ function digestsOf(runDir: string): [string, string] {
   const loaded = loadRun(runDir);
   const madeAt = "2026-11-24T09:00:00.000Z";
   const without = { ...loaded.input, findings: loaded.input.findings.filter((f) => f.ruleId !== RULE), metrics: loaded.input.metrics.filter((m) => m.id !== PATH_VARIANTS) };
-  return [JSON.stringify(checkedDigest({ input: loaded.input, pseudonyms: loaded.pseudonyms, inventory: null, madeAt })), JSON.stringify(checkedDigest({ input: without, pseudonyms: loaded.pseudonyms, inventory: null, madeAt }))];
+  // Apart from the digest's own paths block (DECISIONS.md 758), which serves the raised insights alone.
+  const { digest, pathsWithheld: _w, ...counts } = checkedDigest({ input: loaded.input, pseudonyms: loaded.pseudonyms, inventory: null, madeAt });
+  const { paths: _p, ...rest } = digest ?? {};
+  return [JSON.stringify({ digest: digest ? rest : null, ...counts }), JSON.stringify(checkedDigest({ input: without, pseudonyms: loaded.pseudonyms, inventory: null, madeAt }))];
 }
 
-describe("the synthetic org keeps the insights in its files and serves none of them yet (decision 703)", async () => {
+describe("the synthetic org keeps the insights in its files and serves none of them outside the digest's paths block (decisions 703, 758)", async () => {
   const automatic = await runFromRecording({ calibration: await automaticSyntheticCalibration(), reviewMode: "automatic", transport: new AutomaticReplay() });
 
   test("the consultant-led run's files hold the rule and the table; what the rule says is the honest result", () => {
@@ -697,7 +700,7 @@ describe("the synthetic org keeps the insights in its files and serves none of t
     assert.ok(loaded.input.metrics.some((m) => m.id === PATH_VARIANTS));
   });
 
-  test("the digest of a consultant-led and an automatic run is byte for byte the one without them", () => {
+  test("the digest of a consultant-led and an automatic run, apart from its paths block, is byte for byte the one without them", () => {
     for (const runDir of [dir, automatic.dir]) {
       const [withThem, without] = digestsOf(runDir);
       assert.equal(withThem, without);

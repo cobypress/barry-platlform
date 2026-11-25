@@ -81,7 +81,7 @@ const plantedIds = new Set(plantedFindings.map((f) => f.id));
 describe("every rule's prompt has the org's words marked, exactly (decision 672)", () => {
   test("for every rule that can raise an issue, each planted string is one span wherever the prompt says it, and nothing else is", () => {
     const rows = plantedDigest.findings.filter((f) => plantedIds.has(f.id));
-    // Every rule in the table but the path insights, which no digest serves yet (decision 703).
+    // Every rule in the table but the path insights, which no digest serves as findings (decisions 703, 758).
     assert.equal(rows.length, Object.keys(FIX_TABLE).filter((id) => !INSIGHT_RULES.has(id)).length);
     for (const f of rows) {
       const text = f.fixPrompt!;
