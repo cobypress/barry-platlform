@@ -94,12 +94,17 @@ describe("rule 10 on the digest: figures trace, an untraceable detail is withhel
   });
 
   test("a mask through the org's own words leaves the sentence unknown, so held", () => {
-    // The figure planted inside a marked span: masking it would cut the org's words.
+    // The number inside a marked span: the org's name, never a figure (DECISIONS.md 764), so alone it is served as it is.
     const target = loaded.input.findings.find((f) => f.status === "issue" && f.orgWords?.summary && f.orgWords.summary.spans.length > 0)!;
     const span = target.orgWords!.summary!.spans[0]!;
     const summary = `${target.summary.slice(0, span.end)} ${PLANTED}${target.summary.slice(span.end)}`;
     const marked = { ...target, summary, orgWords: { ...target.orgWords, summary: { spans: [{ start: span.start, end: span.end + 1 + String(PLANTED).length }], textSha256: sha(summary) } } };
-    const c = checkedWithout({ ...loaded.input, findings: loaded.input.findings.map((f) => (f.id === target.id ? marked : f)) });
+    const alone = checkedWithout({ ...loaded.input, findings: loaded.input.findings.map((f) => (f.id === target.id ? marked : f)) });
+    assert.deepEqual([alone.held, alone.masks, alone.unmatched, alone.unmarked], [null, 0, 0, 0]);
+    // The same number planted in our words too is untraced: masking it where the data writes it cuts the org's words.
+    const both = `${summary} It took ${PLANTED} steps.`;
+    const cut = { ...marked, summary: both, orgWords: { ...marked.orgWords, summary: { ...marked.orgWords.summary, textSha256: sha(both) } } };
+    const c = checkedWithout({ ...loaded.input, findings: loaded.input.findings.map((f) => (f.id === target.id ? cut : f)) });
     assert.ok(c.masks >= 1);
     assert.ok(c.unmarked >= 1);
     assert.equal(c.held, "digest_held");
