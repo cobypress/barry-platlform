@@ -30,7 +30,7 @@ export function caseStudyDraft(report: BuiltReport): CaseStudy | null {
   const m = (n: number): string => compactMoney(n, report.value.currency);
   const customer = intake.customerName ?? report.input.run.customerRef ?? "The customer";
   const scored = p.score.before !== null && p.score.after !== null;
-  const saved = p.worth.before - p.worth.after;
+  const saved = p.worth ? p.worth.before - p.worth.after : 0;
   const headline = scored && p.score.after! > p.score.before! ? `From a Barometer score of ${p.score.before} to ${p.score.after}` : saved > 0 ? `${m(saved)} a year no longer being missed` : "What changed after their health check";
   const moved = p.areas.filter((a) => a.before !== null && a.after !== null && a.after > a.before).sort((a, b) => b.after! - b.before! - (a.after! - a.before!));
   return {
@@ -39,12 +39,12 @@ export function caseStudyDraft(report: BuiltReport): CaseStudy | null {
     challenge: intake.statedProblems.length ? intake.statedProblems.map((s) => s.statement) : [intake.summary],
     found: [
       ...(p.score.before !== null ? [`A Barometer score of ${p.score.before} out of 100.`] : []),
-      `Issues worth about ${m(p.worth.before)} over 12 months.`,
+      ...(p.worth ? [`Issues worth about ${m(p.worth.before)} over 12 months.`] : []),
       `${p.fixed.length + p.remaining.length + p.unknown.length} kinds of issue across their Salesforce.`,
     ],
     changed: [
       ...(scored ? [`The Barometer score went from ${p.score.before} to ${p.score.after}.`] : []),
-      saved > 0 ? `What the remaining issues are worth fell from ${m(p.worth.before)} to ${m(p.worth.after)}: ${m(saved)} no longer being missed. Some of that can come from the business itself, not only from fixes.` : `What the remaining issues are worth is ${m(p.worth.after)}, from ${m(p.worth.before)}.`,
+      ...(!p.worth ? [] : [saved > 0 ? `What the remaining issues are worth fell from ${m(p.worth.before)} to ${m(p.worth.after)}: ${m(saved)} no longer being missed. Some of that can come from the business itself, not only from fixes.` : `What the remaining issues are worth is ${m(p.worth.after)}, from ${m(p.worth.before)}.`]),
       `${p.fixed.length} kinds of issue fixed${p.added.length ? `, and ${p.added.length} new ones found and planned` : ""}.`,
       ...(moved.length ? [`Biggest improvements: ${moved.slice(0, 3).map((a) => `${domainLabel(a.domain)} (${a.before} to ${a.after})`).join(", ")}.`] : []),
     ],

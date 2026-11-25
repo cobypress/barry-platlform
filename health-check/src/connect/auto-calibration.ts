@@ -1,4 +1,4 @@
-import { Calibration } from "../schemas/calibration.ts";
+import { Calibration, isCurrencyCode } from "../schemas/calibration.ts";
 import { NO_CURRENCY } from "../engine/currency.ts";
 import type { OrgCurrency } from "./org-currency.ts";
 import type { OrgStage } from "./org-stages.ts";
@@ -59,13 +59,21 @@ const REASONS: Record<HoldCause, string> = { stages_unread: STAGES_UNREAD, no_wo
  * which case it is, so the schema's pounds never apply. Only no stages, no won
  * stage, or a calibration the schema refuses holds it, and the hold says
  * which, with its counts. Never throws.
+ *
+ * `answered` is the currency the org's customer named in the portal (KAN-41).
+ * It names the currency only where connect read that the org has one
+ * currency (INVALID_FIELD, "single"): never where Salesforce gave the org's
+ * own code (several currencies), and never where the read failed, since that
+ * org may hold several and its amounts can't all be in the one named. The
+ * locale's suggestion never stands in for it.
  */
-export function automaticCalibration(stages: OrgStage[] | null, options: { orgId: string; at: string; currency: OrgCurrency | string | null }): AutomaticCalibration {
+export function automaticCalibration(stages: OrgStage[] | null, options: { orgId: string; at: string; currency: OrgCurrency | string | null; answered?: string | null }): AutomaticCalibration {
   const won = (stages ?? []).filter((s) => s.isClosed && s.isWon);
   const hold = (cause: HoldCause): AutomaticCalibration => ({ ok: false, heldReason: CALIBRATION_UNREADABLE, cause, reason: REASONS[cause], counts: { stages: stages?.length ?? 0, won: won.length } });
   if (!stages) return hold("stages_unread");
   if (won.length === 0) return hold("no_won_stage");
   const currency: OrgCurrency = typeof options.currency === "string" ? { kind: "code", code: options.currency } : (options.currency ?? { kind: "unread" });
+  const answered = currency.kind === "single" && isCurrencyCode(options.answered) ? options.answered : null;
   // In sort order, ties by API name, whatever order they came in.
   const open = stages
     .filter((s) => s.isActive && !s.isClosed && !s.isWon && s.sortOrder !== null)
@@ -86,7 +94,9 @@ export function automaticCalibration(stages: OrgStage[] | null, options: { orgId
     // The org's own code is written as before 700, with no mark.
     ...(currency.kind === "code"
       ? { currency: currency.code }
-      : { currency: NO_CURRENCY, currencyFrom: currency.kind === "single" ? "org" : "unread", ...(currency.kind === "single" && currency.suggested ? { currencySuggested: currency.suggested } : {}) }),
+      : answered
+        ? { currency: answered, currencyFrom: "customer" }
+        : { currency: NO_CURRENCY, currencyFrom: currency.kind === "single" ? "org" : "unread", ...(currency.kind === "single" && currency.suggested ? { currencySuggested: currency.suggested } : {}) }),
   });
   if (!parsed.success) return hold("calibration_refused");
   return { ok: true, calibration: parsed.data };

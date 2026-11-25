@@ -6,6 +6,7 @@ import type { Complexity } from "../schemas/complexity.ts";
 import type { ScanResult } from "../scan/result.ts";
 import type { PulseResult } from "../pulse/result.ts";
 import { DIGEST_KEYS, type RunDigest } from "../schemas/digest.ts";
+import { isCurrencyCode } from "../schemas/calibration.ts";
 import { unstorableAt } from "./inventory.ts";
 import { randomUUID } from "node:crypto";
 import { z } from "zod";
@@ -507,6 +508,8 @@ export function calibrationFromRow(row: Record<string, unknown>): Calibration {
   const fields = read.fields as Record<string, unknown> | undefined;
   const from = fields?.currencyFrom;
   const suggested = fields?.currencySuggested;
+  // A currency the customer named (KAN-41): its code is the column's own, and nothing is suggested beside it.
+  if (read.source === "org_settings" && from === "customer") return Calibration.parse({ ...read, currencyFrom: from });
   if (read.source === "org_settings" && (from === "org" || from === "unread")) return Calibration.parse({ ...read, currencyFrom: from, ...(typeof suggested === "string" && /^[A-Z]{3}$/.test(suggested) ? { currencySuggested: suggested } : {}) });
   return Calibration.parse(read);
 }
@@ -579,6 +582,15 @@ const CLAIM_RUN_SQL = `UPDATE "HealthCheckRun" SET "status" = CASE WHEN "status"
  * (its orgId, set at connect or by the console) or connected to it (a link's
  * connectedOrgId), after $3. Org ids compare on 15 characters, so either form matches.
  */
+/**
+ * The currency an org's customer named in the portal (KAN-41): the newest
+ * answer of the active customer whose org this is. The console keeps every
+ * answer (who and when), so the newest is the one that stands.
+ */
+export const CUSTOMER_CURRENCY_SQL =
+  `SELECT a."value" FROM "HealthCheckCustomerAnswer" a JOIN "HealthCheckCustomer" c ON c."id" = a."customerId" ` +
+  `WHERE c."orgId15" = $1 AND c."status" = 'active' AND a."question" = 'currency' ORDER BY a."answeredAt" DESC, a."id" DESC LIMIT 1`;
+
 export const LAST_SCAN_SQL = `SELECT to_char(MAX("at"), 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"') AS "at" FROM (` +
   `SELECT r."startedAt" AS "at" FROM "HealthCheckRun" r WHERE r."product" = 'scan' AND r."id" <> $2 AND LEFT(r."orgId", 15) = $1 AND r."startedAt" > $3::timestamp(3)` +
   ` UNION ALL ` +
@@ -594,6 +606,8 @@ export class PostgresWorkerStore implements WorkerStore {
   /** Said once: a console without the summaries' table says so on every save and every make otherwise. */
   #saidNoSummariesTable = false;
   #saidNoOrgStagesTable = false;
+  #saidNoAnswersTable = false;
+  #saidUnknownAnswer = false;
 
   constructor(pool: SqlPool, options: { log?: (line: string) => void } = {}) {
     this.#pool = pool;
@@ -1187,6 +1201,33 @@ export class PostgresWorkerStore implements WorkerStore {
       const code = (err as { code?: unknown }).code;
       if (code === "42703") return "no_source_column";
       throw new StoreError(`the console's database refused the calibration (SQLSTATE ${sqlState(code)})`);
+    }
+  }
+
+  /**
+   * The currency the org's customer named (KAN-41), or null. A console
+   * without the answers table (42P01) has none, said once a process; any
+   * other error is thrown by its SQLSTATE alone.
+   */
+  async customerCurrency(orgId15: string): Promise<string | null> {
+    try {
+      const value = one(await this.#pool.query(CUSTOMER_CURRENCY_SQL, [orgId15.slice(0, 15)]))?.value;
+      if (value === undefined || value === null) return null;
+      if (isCurrencyCode(value)) return value;
+      // A stored code off the engine's list (a console on a newer list): ignored, never the run's currency, and said once.
+      if (!this.#saidUnknownAnswer) {
+        this.#saidUnknownAnswer = true;
+        this.#log("A customer's stored currency isn't on the engine's list of currencies, so it was ignored and the amounts are shown with none. Check the list in src/schemas/calibration.ts against the console's copy.");
+      }
+      return null;
+    } catch (err) {
+      const code = (err as { code?: unknown }).code;
+      if (code !== "42P01") throw new StoreError(`the console's database refused the customer's answer (SQLSTATE ${sqlState(code)})`);
+      if (!this.#saidNoAnswersTable) {
+        this.#saidNoAnswersTable = true;
+        this.#log("The console's database has no HealthCheckCustomerAnswer table yet, so no customer's currency is read. Apply the console's 20261219_health_check_portal_answers.sql migration.");
+      }
+      return null;
     }
   }
 
