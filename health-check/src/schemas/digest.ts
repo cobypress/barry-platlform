@@ -431,13 +431,20 @@ export const DigestReadiness = z
     overall: z.enum(["ready", "not_yet"]).nullable(),
     /** The verdict in a sentence, or the pillars' spread, all ours. No figures. */
     opening: Text,
+    /**
+     * What the verdicts are and aren't, all ours, as the raw notes print it under
+     * the opening (DECISIONS.md 762): decided by code, and no money figure. Absent
+     * on a digest made before it.
+     */
+    caveat: Text.optional(),
     pillars: z.array(DigestReadinessPillar),
     /** What to fix before an agent goes live, in order: at most five finding ids. */
     fixIds: Ids.max(5),
-    orgWords: z.object({ opening: SentenceOrgWords.optional() }).optional(),
+    orgWords: z.object({ opening: SentenceOrgWords.optional(), caveat: SentenceOrgWords.optional() }).optional(),
   })
   .superRefine((r, ctx) => {
     if (!fits(r.opening, r.orgWords?.opening)) ctx.addIssue({ code: "custom", path: ["orgWords", "opening"], message: "Spans must fit the opening" });
+    if (!fits(r.caveat, r.orgWords?.caveat)) ctx.addIssue({ code: "custom", path: ["orgWords", "caveat"], message: "Spans must fit the caveat" });
   });
 export type DigestReadiness = z.infer<typeof DigestReadiness>;
 

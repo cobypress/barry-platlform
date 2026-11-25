@@ -183,6 +183,7 @@ export const TEXT_SLOTS: Readonly<Record<string, Slot | "fixed">> = {
   "overall.caveat": slotOf((d) => (d.overall.status === "measured" ? d.overall : undefined), "caveat"),
   // AI readiness (DECISIONS.md 742).
   "readiness.opening": slotOf((d) => d.readiness, "opening"),
+  "readiness.caveat": slotOf((d) => d.readiness, "caveat"),
   "readiness.pillars[].label": slotOf((d, at) => d.readiness?.pillars[at[0]!], "label"),
   "readiness.pillars[].question": slotOf((d, at) => d.readiness?.pillars[at[0]!], "question"),
   "readiness.pillars[].reason": slotOf((d, at) => d.readiness?.pillars[at[0]!], "reason"),

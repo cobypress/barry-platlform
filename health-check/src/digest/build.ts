@@ -3,7 +3,7 @@ import { createHash } from "node:crypto";
 import { averageBeside } from "../domains/average.ts";
 import { CURRENCY_NOT_NAMED } from "../engine/currency.ts";
 import { holdsNameOrSecret } from "../narrative/guard.ts";
-import { readinessOpening, type BuiltReport } from "../narrative/sections.ts";
+import { READINESS_CAVEAT, readinessOpening, type BuiltReport } from "../narrative/sections.ts";
 import { PILLARS, type Readiness } from "../narrative/readiness.ts";
 import { buildPlan, DOMAIN_LABELS, domainLabel, PHASE_TITLES } from "../narrative/select.ts";
 import type { Pseudonymiser } from "../privacy/pseudonymiser.ts";
@@ -419,6 +419,8 @@ function digestReadiness(r: Readiness): DigestReadiness {
   return {
     overall: r.overall,
     opening: readinessOpening(r),
+    // The raw notes' sentence under the opening, the same text (DECISIONS.md 762).
+    caveat: READINESS_CAVEAT,
     pillars: r.pillars.map((p) => ({
       key: p.key,
       label: p.label,
@@ -471,7 +473,11 @@ function readinessWords(d: RunDigest, before: DigestReadiness, report: BuiltRepo
     const kept = p.reason === NAMED_PEOPLE_SENTENCE ? bare : p;
     return Object.keys(words).length ? { ...kept, orgWords: words } : kept;
   });
-  return { ...after, pillars, ...(opening ? { orgWords: { opening } } : {}) };
+  // The caveat is ours where the engine's source writes it whole (DECISIONS.md 739, 762), or the fixed sentence the guard put in.
+  const caveatGuarded = after.caveat === undefined ? null : guardedTo(before.caveat ?? "", after.caveat);
+  const caveat = after.caveat === undefined ? undefined : caveatGuarded !== null ? caveatGuarded : engineWords(after.caveat);
+  const words = { ...(opening ? { opening } : {}), ...(caveat ? { caveat } : {}) };
+  return { ...after, pillars, ...(Object.keys(words).length ? { orgWords: words } : {}) };
 }
 
 /** A reason's marks, from where its words came (Pillar.quoted and passedOn), or unknown. */
