@@ -69,7 +69,7 @@ async function inTime(work: Promise<unknown>, timeoutMs: number): Promise<Read<u
  * What the org says of its currency. Never throws, and logs only the kind of
  * each answer: never a value the org chose beyond a code.
  */
-export async function readOrgCurrency(client: SalesforceClient, options: { log: (line: string) => void; timeoutMs?: number; suggest?: boolean }): Promise<OrgCurrency> {
+export async function readOrgCurrency(client: SalesforceClient, options: { log: (line: string) => void; timeoutMs?: number; suggest?: boolean; unread?: (kind: string) => void }): Promise<OrgCurrency> {
   const timeoutMs = options.timeoutMs ?? CURRENCY_TIMEOUT_MS;
   // False for a calibration already saved (745): its currency is only ever named, never suggested again, so
   // the locale isn't read and a settings answer we can't use leaves the calibration exactly as it was.
@@ -78,10 +78,12 @@ export async function readOrgCurrency(client: SalesforceClient, options: { log: 
   if (own.ok) {
     if (typeof own.value === "string" && ISO_CODE.test(own.value)) return { kind: "code", code: own.value };
     options.log("The org's currency wasn't read: the reply held no currency code, so the run decides from its opportunities.");
+    options.unread?.("no code");
     return UNREAD;
   }
   if (own.kind !== "INVALID_FIELD") {
     options.log(`The org's currency wasn't read (${own.kind === "timeout" ? "the read didn't finish in time" : own.kind}), so the run decides from its opportunities.`);
+    options.unread?.(own.kind);
     return UNREAD;
   }
   // The normal answer of an org with one currency, not a failure (DECISIONS.md 700).

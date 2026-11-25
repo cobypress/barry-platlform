@@ -24,7 +24,7 @@ import { appFor, appNotSetUp, needsReconnection } from "./apps.ts";
 import { withJobLock } from "./lock.ts";
 import { automaticRefusal } from "./automatic.ts";
 import { recalibrateForRunAgain, type Recalibrated } from "./connect-job.ts";
-import { nameCurrencyBeforeRun } from "./name-currency.ts";
+import { CalibrationUnsettled, nameCurrencyBeforeRun } from "./name-currency.ts";
 import { checkedDigest } from "../digest/checked.ts";
 import { checkSections, decideRelease, lossesOf, sameAsLast, SERVER_FAULT_CODES, type ReleaseDecision, type RunLosses, type SameAsLast } from "./release.ts";
 import { letGoAfterRun, type SeenRun } from "./scan-release.ts";
@@ -406,7 +406,14 @@ async function runLocked(runId: string, deps: WorkerDeps, attempt: Attempt, seen
   // has just had that read, so its folder is only marked. Never throws, and anything else leaves the calibration as it was.
   if (!resume && input.run.reviewMode === "automatic") {
     const own = new OAuthConnectionProvider(name, { store: deps.tokens, client: app, transport: deps.oauthTransport, env: approvedFromConsole(name), log });
-    input = { ...input, calibration: await nameCurrencyBeforeRun({ runId, input, stored, provider: own, dir, deps, log, readThisStart: recalibrated }) };
+    try {
+      input = { ...input, calibration: await nameCurrencyBeforeRun({ runId, input, stored, provider: own, dir, deps, log, readThisStart: recalibrated, final: attempt.final === true }) };
+    } catch (err) {
+      // Only a delivery the queue makes again, before anything records a calibration (745, fix round).
+      if (!(err instanceof CalibrationUnsettled)) throw err;
+      log(err.message);
+      throw new Error(err.message);
+    }
   }
   const provider = new OAuthConnectionProvider(name, { store: deps.tokens, client: app, transport: deps.oauthTransport, env: approvedFromConsole(name), log });
   const secrets = [stored.accessToken, stored.refreshToken];

@@ -224,12 +224,12 @@ describe("a first delivery of an automatic run whose saved calibration has no cu
     assert.ok(!same.deps.lines.some((l) => /customer named/.test(l)));
   });
 
-  test("a store that can't save the code: the run goes on with the calibration it had, released, one line", async () => {
+  test("a store that can't save the code: the run goes on with the calibration as stored (here, the one it had), released, one line", async () => {
     const before = await unnamed();
     const r = await start({ calibration: before, prepare: (d) => (d.store.failCurrencyName = true) });
     assert.equal(r.outcome.outcome, "done", r.outcome.detail);
     assert.deepEqual(r.stored.calibration, before);
-    assert.equal(r.deps.lines.filter((l) => /couldn't be saved .*so the run goes on with the calibration it had/.test(l)).length, 1);
+    assert.equal(r.deps.lines.filter((l) => /may not have been saved .*so the run goes on with the calibration as stored/.test(l)).length, 1);
     assert.equal(JSON.parse(readFileSync(join(r.dir, "calibration.json"), "utf8")).currency, "XXX", "the run used the one it had");
   });
 

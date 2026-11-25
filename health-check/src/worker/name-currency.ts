@@ -6,7 +6,7 @@ import { CURRENCY_TIMEOUT_MS, readOrgCurrency, type OrgCurrency } from "../conne
 import { NO_CURRENCY } from "../engine/currency.ts";
 import { ApiBudget } from "../salesforce/budget.ts";
 import { SalesforceClient } from "../salesforce/client.ts";
-import type { OAuthConnectionProvider } from "../salesforce/oauth-provider.ts";
+import type { ConnectionProvider, OrgConnection } from "../salesforce/connection.ts";
 import type { StoredConnection } from "../salesforce/token-store.ts";
 import { Calibration, isCurrencyCode } from "../schemas/calibration.ts";
 import { answeredCurrency, logCurrency } from "./connect-job.ts";
@@ -54,21 +54,74 @@ async function inTime<T>(work: Promise<T>, ms: number): Promise<T | "timeout"> {
   }
 }
 
-/** Why a currency read that wasn't the settings' leaves the calibration as it was, for the log. */
-function notNamed(runId: string, currency: OrgCurrency): string | null {
-  if (currency.kind === "code") return `Automatic run ${runId}'s org now gives its own currency code, so it may have several currencies: the org's settings weren't read and the calibration's currency is left as it was.`;
-  if (currency.kind === "unread") return `Automatic run ${runId}'s org couldn't say whether it has one currency, so the org's settings weren't read and the calibration's currency is left as it was.`;
-  // "single": readOrgCurrency has said why the org's settings couldn't name it, in one line.
-  return null;
+/** A query's failure in our words: the real cause, so a budget stop or a lost token reads as itself. */
+function causeOf(kind: string): string {
+  if (kind === "timeout") return "the read didn't finish in time";
+  if (kind === "BudgetStopError") return "the API budget stopped it";
+  if (kind === "ReconnectionNeeded") return "Salesforce refused the connection's token";
+  if (kind === "no code") return "the reply held no currency code";
+  return kind;
 }
+
+/**
+ * The naming step's connection, its token work tracked (DECISIONS.md 745, fix
+ * round): a refresh a time-out left running must finish, and store any token
+ * it rotated, before the run's own connection loads the stored one, or the run
+ * would present a refresh token Salesforce has already rotated out.
+ */
+class SettlingProvider implements ConnectionProvider {
+  readonly kind: ConnectionProvider["kind"];
+  readonly #inner: ConnectionProvider;
+  readonly #pending = new Set<Promise<unknown>>();
+  constructor(inner: ConnectionProvider) {
+    this.#inner = inner;
+    this.kind = inner.kind;
+  }
+  connect(): Promise<OrgConnection> {
+    return this.#track(this.#inner.connect());
+  }
+  refresh(): Promise<OrgConnection> {
+    return this.#track(this.#inner.refresh());
+  }
+  accepted(): void {
+    this.#inner.accepted?.();
+  }
+  #track<T>(work: Promise<T>): Promise<T> {
+    this.#pending.add(work);
+    const done = () => void this.#pending.delete(work);
+    work.then(done, done);
+    return work;
+  }
+  /** Every connect and refresh begun has finished, its token stored. Each is bounded by the transport's own time limit. */
+  async settled(): Promise<void> {
+    while (this.#pending.size > 0) await Promise.allSettled([...this.#pending]);
+  }
+}
+
+/** A delivery that can't tell which calibration is stored, before its run has started: thrown so the queue delivers it again, with nothing pinned. */
+export class CalibrationUnsettled extends Error {}
 
 /**
  * The calibration the run goes on with: the saved one with its currency named
  * from the org's settings, or the saved one as it was. The caller has checked
  * the run (automatic, the switch on, an OAuth connection to the run's own org)
- * and that this delivery starts it afresh. Never throws.
+ * and that this delivery starts it afresh. Throws only CalibrationUnsettled,
+ * and only on a delivery that isn't the last (fix round): after a write that
+ * threw or matched nothing, the run goes on with the row as stored, never one
+ * that may differ from it, or a resumed delivery would find its calibration
+ * changed. On the last delivery an unreadable row costs nothing more than
+ * before: the run goes on with the calibration it had, and nothing resumes it.
  */
-export async function nameCurrencyBeforeRun(o: { runId: string; input: RunJobInput; stored: StoredConnection; provider: OAuthConnectionProvider; dir: string; deps: WorkerDeps; log: (line: string) => void; readThisStart?: boolean }): Promise<Calibration> {
+export async function nameCurrencyBeforeRun(o: { runId: string; input: RunJobInput; stored: StoredConnection; provider: ConnectionProvider; dir: string; deps: WorkerDeps; log: (line: string) => void; readThisStart?: boolean; final?: boolean }): Promise<Calibration> {
+  const provider = new SettlingProvider(o.provider);
+  try {
+    return await naming({ ...o, provider });
+  } finally {
+    await provider.settled();
+  }
+}
+
+async function naming(o: { runId: string; input: RunJobInput; stored: StoredConnection; provider: ConnectionProvider; dir: string; deps: WorkerDeps; log: (line: string) => void; readThisStart?: boolean; final?: boolean }): Promise<Calibration> {
   const { runId, input, stored, deps, log } = o;
   const c = input.calibration!;
   const was = unnamedBySalesforce(input);
@@ -92,23 +145,30 @@ export async function nameCurrencyBeforeRun(o: { runId: string; input: RunJobInp
     return c;
   }
   let currency: OrgCurrency;
+  let unread = "the org couldn't say whether it has one currency";
   try {
-    // Its own small budget, as a connect's reads have: one query and one settings call, retried only by the client's policy.
+    // Its own small budget, as a connect's reads have (a fixed half of the daily limit, as connect-job's: neither takes HC_API_BUDGET_SHARE).
     const opened = await inTime(SalesforceClient.connect(o.provider, { budget: new ApiBudget({ stopAtShare: 0.5 }), transport: deps.dataTransport, sleep: deps.dataTransport ? async () => {} : undefined }), timeoutMs);
     if (opened === "timeout") {
       log(`Automatic run ${runId}'s org's settings weren't read for its currency (the connection didn't open in time), so the calibration's currency is left as it was.`);
       return c;
     }
-    currency = await readOrgCurrency(opened, { log, timeoutMs, suggest: false });
+    currency = await readOrgCurrency(opened, { log, timeoutMs, suggest: false, unread: (kind) => (unread = causeOf(kind)) });
   } catch (err) {
-    log(`Automatic run ${runId}'s org's settings weren't read for its currency (${safeReason(err, [stored.accessToken, stored.refreshToken])}), so the calibration's currency is left as it was.`);
+    const kind = err instanceof Error ? err.name : "";
+    log(`Automatic run ${runId}'s org's settings weren't read for its currency (${kind === "BudgetStopError" || kind === "ReconnectionNeeded" ? causeOf(kind) : safeReason(err, [stored.accessToken, stored.refreshToken])}), so the calibration's currency is left as it was.`);
     return c;
   }
-  if (currency.kind !== "settings") {
-    const line = notNamed(runId, currency);
-    if (line) log(line);
+  if (currency.kind === "code") {
+    log(`Automatic run ${runId}'s org now gives its own currency code, so it may have several currencies: the org's settings weren't read and the calibration's currency is left as it was.`);
     return c;
   }
+  if (currency.kind === "unread") {
+    log(`Automatic run ${runId}'s org's settings weren't read for its currency (the currency query failed: ${unread}), so the calibration's currency is left as it was.`);
+    return c;
+  }
+  // "single": readOrgCurrency has said why the org's settings couldn't name it, in one line.
+  if (currency.kind !== "settings") return c;
   const { currencySuggested: _suggested, ...rest } = c;
   const named = Calibration.safeParse({ ...rest, currency: currency.code, currencyFrom: "connect_api" });
   if (!named.success) {
@@ -121,17 +181,35 @@ export async function nameCurrencyBeforeRun(o: { runId: string; input: RunJobInp
   try {
     saved = await deps.store.nameCalibrationCurrency(runId, was, currency.code);
   } catch (err) {
+    // The write may have been committed before the error reached us (a connection dropped after COMMIT): the row decides.
     const reason = err instanceof StoreError ? err.message : "an unexpected error";
-    log(`Automatic run ${runId}'s currency from the org's settings (${currency.code}) couldn't be saved (${reason}), so the run goes on with the calibration it had.`);
-    return c;
+    log(`Automatic run ${runId}'s currency from the org's settings (${currency.code}) may not have been saved (${reason}), so the run goes on with the calibration as stored.`);
+    return asStored(o, c);
   }
   if (saved === "unchanged") {
     // Another delivery named it, or a person confirmed one, since this run read it: the store's is the one kept.
-    const now = await deps.store.loadRunJob(runId).catch(() => null);
     log(`Automatic run ${runId}'s calibration changed while the org's settings were read, so the run goes on with the one saved now.`);
-    return now?.calibration ?? c;
+    return asStored(o, c);
   }
   logCurrency(runId, named.data, answered, log);
   log(`Automatic run ${runId}'s saved calibration named no currency from Salesforce, so the org's settings were read before it ran: its currency is now ${currency.code}, and nothing else in it changed.`);
   return named.data;
+}
+
+/**
+ * The calibration as the store holds it now. Unreadable, a delivery the queue
+ * will make again stops here, before the run's folder records any calibration;
+ * the last goes on with the one it had, as before 745.
+ */
+async function asStored(o: { runId: string; deps: WorkerDeps; log: (line: string) => void; final?: boolean }, c: Calibration): Promise<Calibration> {
+  let now: Awaited<ReturnType<WorkerDeps["store"]["loadRunJob"]>>;
+  try {
+    now = await o.deps.store.loadRunJob(o.runId);
+  } catch {
+    now = null;
+  }
+  if (now?.calibration) return now.calibration;
+  if (!o.final) throw new CalibrationUnsettled(`Automatic run ${o.runId}'s calibration couldn't be read again after the currency from the org's settings was saved, so this delivery stops before the run starts and the queue delivers it again.`);
+  o.log(`Automatic run ${o.runId}'s calibration couldn't be read again after the currency from the org's settings was saved, and this is the last delivery, so the run goes on with the calibration it had.`);
+  return c;
 }
