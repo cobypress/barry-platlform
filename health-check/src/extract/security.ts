@@ -1,5 +1,6 @@
 import { redactSecrets } from "../privacy/secrets.ts";
-import { readSoql, type Extractor, type Sourced } from "./types.ts";
+import { readSoql, type Extractor, type Sourced, type SourceInfo } from "./types.ts";
+import type { UserRow } from "./users.ts";
 
 export type HealthRiskRow = { RiskType: string; Setting: string; SettingGroup: string | null; OrgValue: string | null; StandardValue: string | null };
 export type HealthCheckData = { score: Sourced<Array<{ Score: string | null }>>; risks: Sourced<HealthRiskRow[]> };
@@ -48,6 +49,51 @@ export const privilegedPermissionsExtractor: Extractor<PrivilegedPermissions> = 
     };
   },
 };
+
+/** The rule that judges each privileged permission: the inventory's count links to it (DECISIONS.md 735). */
+export const PRIVILEGED_RULES = { PermissionsModifyAllData: "sec.modify-all-data", PermissionsViewAllData: "sec.view-all-data" } as const;
+export type PrivilegedPermission = keyof typeof PRIVILEGED_RULES;
+
+/** A profile's or permission set's grant, as the reads give it. */
+export type GrantingSet = { Id: string; IsOwnedByProfile: boolean; Profile: { Name: string } | null };
+
+/** Who holds a permission, and how. */
+export type Holding = {
+  active: UserRow[];
+  holders: UserRow[];
+  holds: (u: UserRow) => boolean;
+  fromProfile: (u: UserRow) => boolean;
+  /** Everyone assigned a granting permission set, active or not. */
+  fromSet: Set<string>;
+  /** The granting sets that aren't a profile's own. */
+  added: Set<string>;
+};
+
+/**
+ * Who holds a permission: the active users whose profile grants it, or who are
+ * assigned a permission set that does. A permission set group's assignment
+ * counts through the group's own set, as the reads give it (DECISIONS.md 487);
+ * a mute isn't read. One count for the Modify and View All Data checks and the
+ * inventory's holders, so the two can't disagree (DECISIONS.md 735).
+ */
+export function holding(granting: GrantingSet[], assignments: ReadonlyArray<{ AssigneeId: string; PermissionSetId: string | null }>, users: UserRow[]): Holding {
+  const profiles = new Set(granting.flatMap((s) => (s.IsOwnedByProfile && s.Profile ? [s.Profile.Name] : [])));
+  const added = new Set(granting.filter((s) => !s.IsOwnedByProfile).map((s) => s.Id));
+  const fromSet = new Set(assignments.filter((a) => a.PermissionSetId !== null && added.has(a.PermissionSetId)).map((a) => a.AssigneeId));
+  const fromProfile = (u: UserRow): boolean => profiles.has(u.Profile?.Name ?? "");
+  const holds = (u: UserRow): boolean => fromProfile(u) || fromSet.has(u.Id);
+  const active = users.filter((u) => u.IsActive);
+  return { active, holders: active.filter(holds), holds, fromProfile, fromSet, added };
+}
+
+/** Who holds Modify or View All Data, from the reads their checks make, or why it can't be told, in the checks' own words. */
+export function privilegedHolding(data: PrivilegedPermissions, users: Sourced<UserRow[]>, permission: PrivilegedPermission): { ok: true; holding: Holding } | { ok: false; reason: string; source: SourceInfo } {
+  const { sets, assignments } = data;
+  if (users.status !== "ok") return { ok: false, reason: `Users couldn't be read: ${users.reason}`, source: users.source };
+  if (sets.status !== "ok") return { ok: false, reason: `Permission sets couldn't be read: ${sets.reason}`, source: sets.source };
+  if (assignments.status !== "ok") return { ok: false, reason: `Permission set assignments couldn't be read: ${assignments.reason}`, source: assignments.source };
+  return { ok: true, holding: holding(sets.data.filter((s) => s[permission]), assignments.data, users.data) };
+}
 
 export type ProfileSetRow = { Id: string; IsCustom: boolean; Profile: { Name: string; UserType: string | null } | null };
 /** A set or a group, never both. Each active user also has one row for their profile's own set. */

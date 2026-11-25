@@ -6,6 +6,14 @@ import type { Sourced } from "../extract/types.ts";
 // (DECISIONS.md 361, 394). LastLoginDate is where a user starts; the login log is
 // the fuller record, and a login it shows inside the period clears them.
 
+/**
+ * On an integration licence (API only): its users never log in by design, so not
+ * logging in says nothing, and no count of who has stopped logging in takes them
+ * (DECISIONS.md 735). A real org showed the Sales Insights integration user as a
+ * licence to release.
+ */
+export const onIntegrationLicence = (user: { Profile?: { UserLicense?: { Name: string } | null } | null }): boolean => /\bintegration\b/i.test(user.Profile?.UserLicense?.Name ?? "Unknown");
+
 /** How a user's last-login date reads against the start of the dormant period. */
 export type Lapse = "dormant" | "never";
 

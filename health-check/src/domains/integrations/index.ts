@@ -3,7 +3,7 @@ import { userKinds } from "../user-kinds.ts";
 import { customObjectsExtractor, orgExtractor, recordCountsExtractor } from "../../extract/configuration.ts";
 import { orgDocumentationExtractor } from "../../extract/documentation.ts";
 import { fieldDescribeExtractor, missingFieldReason } from "../../extract/fields.ts";
-import { apiLimitsExtractor, apiOnlyExtractor, ASYNC_JOB_DAYS, asyncJobsExtractor } from "../../extract/integrations.ts";
+import { apiLimitsExtractor, apiOnlyExtractor, apiOnlyOf, ASYNC_JOB_DAYS, asyncJobsExtractor } from "../../extract/integrations.ts";
 import { licencesExtractor, loginsExtractor, usersExtractor, type UserRow } from "../../extract/users.ts";
 import { looksShared } from "../../guards/user-guards.ts";
 import { COMPLIMENTARY_LICENCES } from "../../money/licences.ts";
@@ -225,15 +225,7 @@ const apiOnlyRead = new WeakMap<object, ApiOnly>();
 function apiOnlyUsers(ctx: RuleContext): ApiOnly {
   const data = ctx.data(apiOnlyExtractor);
   if (apiOnlyRead.has(data)) return apiOnlyRead.get(data)!;
-  const { sets, assignments } = data;
-  const apiOnly =
-    sets.status === "ok" && assignments.status === "ok"
-      ? (() => {
-          const profiles = new Set(sets.data.flatMap((s) => (s.IsOwnedByProfile && s.Profile ? [s.Profile.Name] : [])));
-          const assigned = new Set(assignments.data.map((a) => a.AssigneeId));
-          return (u: UserRow): boolean => profiles.has(u.Profile?.Name ?? "") || assigned.has(u.Id);
-        })()
-      : null;
+  const apiOnly = apiOnlyOf(data);
   apiOnlyRead.set(data, apiOnly);
   return apiOnly;
 }

@@ -90,6 +90,48 @@ export const RiskyPermissionRow = z
   })
   .strict();
 
+/** The check a holders row links to, by its id. */
+const RuleId = z.string().min(1).max(100);
+
+/**
+ * One permission from the list checked, by Salesforce's label, and how many
+ * active people hold it, each counted once (DECISIONS.md 735). Counts only,
+ * never who. No verdict: where a check judges the permission, `rule` names it
+ * and this count is that check's.
+ */
+export const RiskyPermissionHoldersRow = z.union([
+  z
+    .object({
+      permission: Name,
+      /** The check that judges this permission, where one does: its finding is the verdict, and its count is this one. */
+      rule: RuleId.nullable(),
+      /** Active users of the standard type holding it, each once, however many profiles, permission sets or groups grant it. */
+      holders: Count,
+      /** Of them, those holding it through their profile. */
+      byProfile: Count,
+      /** Of them, those assigned a permission set that grants it. Null where sets and groups couldn't be told apart. */
+      byPermissionSet: Count.nullable(),
+      /** Of them, those holding it through a permission set group. Null where sets and groups couldn't be told apart. */
+      byGroup: Count.nullable(),
+      /** Of them, integration accounts: calibrated as one, on an integration licence, or set to API only. Null when who is API only couldn't be read. */
+      integration: Count.nullable(),
+      /**
+       * Of them, those who haven't logged in for the dormant period, or never have, as the
+       * dormant-user checks tell it: anyone set up within the period, and anyone on an
+       * integration licence (counted under `integration`), is left out, as those checks leave them.
+       */
+      notLoggedIn: Count,
+      /**
+       * Active users not counted who are assigned a permission set group holding a set
+       * that grants it. A group can mute a permission and mutes aren't read, so we
+       * can't say they hold it. Null when the groups, or who is assigned one, couldn't be read.
+       */
+      unconfirmedThroughGroups: Count.nullable(),
+    })
+    .strict(),
+  z.object({ permission: Name, rule: RuleId.nullable(), unavailable: z.string().min(1) }).strict(),
+]);
+
 /**
  * As Salesforce reports it: `used` is the maximum less what remains, so it is
  * below zero where Salesforce reports more remaining than the maximum, and
@@ -110,6 +152,13 @@ export const Inventory = z
       Unavailable,
     ]),
     limits: section(LimitRow),
+    /**
+     * Added after version 1 was first written, so an older file has none
+     * (DECISIONS.md 735). `dormantDays` is the period `notLoggedIn` counts.
+     */
+    riskyPermissionHolders: z
+      .union([z.object({ rows: z.array(RiskyPermissionHoldersRow), notes: z.array(z.string()), dormantDays: z.number().int().positive() }).strict(), Unavailable])
+      .optional(),
   })
   .strict();
 
@@ -119,3 +168,4 @@ export type PackageRow = z.infer<typeof PackageRow>;
 export type ConnectedAppRow = z.infer<typeof ConnectedAppRow>;
 export type RiskyPermissionRow = z.infer<typeof RiskyPermissionRow>;
 export type LimitRow = z.infer<typeof LimitRow>;
+export type RiskyPermissionHoldersRow = z.infer<typeof RiskyPermissionHoldersRow>;

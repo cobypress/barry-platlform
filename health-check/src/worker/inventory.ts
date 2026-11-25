@@ -7,7 +7,7 @@ import { FillRateField, FillRateObject, Inventory, INVENTORY_VERSION, NAME_MAX }
 import { RunScope } from "../schemas/run.ts";
 
 // The org's inventory as the worker hands it to the console (DECISIONS.md 605
-// and 618). It is never dropped whole and never silently: each of the five
+// and 618). It is never dropped whole and never silently: each of the
 // sections is checked on its own, and within fill rates each object and each
 // field (DECISIONS.md 668), so only that part is marked, with why, and the rest
 // is saved as it was. A run with no file at all still gets a row that says so. The log
@@ -18,8 +18,10 @@ export const INVENTORY_MAX_BYTES = 8 * 1024 * 1024;
 /** The most of inventory.json the worker reads at all. Fill rates stop at 300 objects, so a real file is well under it. */
 export const INVENTORY_READ_MAX_BYTES = 64 * 1024 * 1024;
 
-export const SECTIONS = ["fillRates", "packages", "connectedApps", "riskyPermissions", "limits"] as const;
+export const SECTIONS = ["fillRates", "packages", "connectedApps", "riskyPermissions", "limits", "riskyPermissionHolders"] as const;
 type Section = (typeof SECTIONS)[number];
+/** Sections added after version 1 was first written: an older file has none, and the row then has none (DECISIONS.md 735). */
+const LATER_SECTIONS: ReadonlySet<Section> = new Set(["riskyPermissionHolders"]);
 
 export const NO_FILE = "The inventory wasn't written for this run, so none of it can be shown.";
 export const UNREADABLE = "The inventory couldn't be read back after the run, so none of it can be shown.";
@@ -35,7 +37,7 @@ export type InventoryFor = { runId: string; madeAt: string; scope: RunScope };
 /** Every section unavailable, for the same reason. */
 export function inventoryUnavailable(made: Omit<InventoryFor, "runId">, reason: string): Inventory {
   const none = { unavailable: reason };
-  return { version: INVENTORY_VERSION, madeAt: made.madeAt, scope: made.scope, fillRates: none, packages: none, connectedApps: none, riskyPermissions: none, limits: none };
+  return { version: INVENTORY_VERSION, madeAt: made.madeAt, scope: made.scope, fillRates: none, packages: none, connectedApps: none, riskyPermissions: none, limits: none, riskyPermissionHolders: none };
 }
 
 /**
@@ -70,6 +72,7 @@ const SECTION_SCHEMA: Record<Section, z.ZodType> = {
   connectedApps: Inventory.shape.connectedApps,
   riskyPermissions: Inventory.shape.riskyPermissions,
   limits: Inventory.shape.limits,
+  riskyPermissionHolders: Inventory.shape.riskyPermissionHolders,
 };
 
 /** How fill rates are put right object by object; a test may give its own to prove the save's guard catches what it gets wrong. */
@@ -98,6 +101,7 @@ export function settleInventory(raw: unknown, say: (line: string) => void, made:
   const sections = {} as Record<Section, unknown>;
   for (const key of SECTIONS) {
     const value = file[key];
+    if (value === undefined && LATER_SECTIONS.has(key)) continue;
     const parsed = SECTION_SCHEMA[key].safeParse(value);
     const bad = parsed.success ? unstorableAt(parsed.data) : null;
     if (parsed.success && bad === null) {
@@ -144,6 +148,7 @@ function guarded(inventory: Inventory, say: (line: string) => void): Inventory {
     }
   }
   for (const key of SECTIONS) {
+    if (out[key] === undefined && LATER_SECTIONS.has(key)) continue;
     const got = check(SECTION_SCHEMA[key], out[key]);
     if (got.ok) continue;
     say(`at the last check before saving, ${key} still ${got.why}, so it's saved as unavailable.`);
@@ -297,7 +302,7 @@ function fillRatesByObject(value: unknown, say: (line: string) => void): Invento
  * made unavailable, the largest first.
  */
 function withinCap(inventory: Inventory, say: (line: string) => void): Inventory {
-  const size = (v: unknown): number => Buffer.byteLength(JSON.stringify(v), "utf8");
+  const size = (v: unknown): number => (v === undefined ? 0 : Buffer.byteLength(JSON.stringify(v), "utf8"));
   if (size(inventory) < INVENTORY_MAX_BYTES) return inventory;
   const total = size(inventory);
   const fill = inventory.fillRates;
@@ -326,7 +331,7 @@ function withinCap(inventory: Inventory, say: (line: string) => void): Inventory
   }
   for (const key of [...SECTIONS].sort((a, b) => size(inventory[b]) - size(inventory[a]))) {
     if (size(inventory) < INVENTORY_MAX_BYTES) break;
-    if (key === "fillRates") continue;
+    if (key === "fillRates" || inventory[key] === undefined) continue;
     say(`the inventory is still larger than the worker sends, so ${key} is saved as unavailable.`);
     inventory = { ...inventory, [key]: { unavailable: SECTION_TOO_BIG } };
   }
@@ -351,6 +356,7 @@ const KNOWN_KEYS = new Set([
   "packageId", "namespace", "name", "version", "versionName", "installed", "deprecated", "managed", "licence", "status", "allowed", "siteWide", "used", "expiresOn",
   "adminApprovedOnly", "firstAuthorised", "lastUsed", "users", "uses",
   "kind", "apiName", "grants", "activeUsers", "max",
+  "permission", "rule", "holders", "byProfile", "byPermissionSet", "byGroup", "integration", "notLoggedIn", "unconfirmedThroughGroups", "dormantDays",
 ]);
 
 const pathOf = (path: ReadonlyArray<PropertyKey>, keys: ReadonlySet<string> = KNOWN_KEYS): string => path.map((p) => (typeof p === "number" ? String(p) : keys.has(String(p)) ? String(p) : "?")).join(".") || "(top)";

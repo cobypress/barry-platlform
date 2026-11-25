@@ -3,7 +3,7 @@ import { userKinds } from "../user-kinds.ts";
 import { loginsExtractor, usersExtractor, type UserRow } from "../../extract/users.ts";
 import { customObjectsExtractor, orgExtractor, recordCountsExtractor, type SharingDefaults } from "../../extract/configuration.ts";
 import { orgDocumentationExtractor } from "../../extract/documentation.ts";
-import { accessExtractor, holdersOf, privilegedPermissionsExtractor, securityHealthExtractor, type AccessData, type HealthRiskRow } from "../../extract/security.ts";
+import { accessExtractor, holdersOf, PRIVILEGED_RULES, privilegedHolding, privilegedPermissionsExtractor, securityHealthExtractor, type AccessData, type HealthRiskRow, type PrivilegedPermission } from "../../extract/security.ts";
 import { notSized, plural, segmentRate, type NotMeasurableResult, type Rule, type RuleContext, type RuleResult } from "../../engine/rule.ts";
 import type { DomainModule } from "../types.ts";
 import { WHERE } from "../where.ts";
@@ -107,37 +107,29 @@ const healthRisks: Rule = {
   },
 };
 
-type Permission = "PermissionsModifyAllData" | "PermissionsViewAllData";
-
 /** `label` and `why` are our own sentences, made with said where each rule is declared. */
-function privilegeRule(options: { id: string; title: string; permission: Permission; label: Said; severity: "high" | "medium"; why: Said }): Rule {
+function privilegeRule(options: { id: (typeof PRIVILEGED_RULES)[PrivilegedPermission]; title: string; permission: PrivilegedPermission; label: Said; severity: "high" | "medium"; why: Said }): Rule {
   return {
     id: options.id,
     version: 1,
     domain: "security",
     title: options.title,
     evaluate(ctx): RuleResult | RuleResult[] {
-      const { sets, assignments } = ctx.data(privilegedPermissionsExtractor);
-      const users = ctx.data(usersExtractor);
-      if (users.status !== "ok") return { outcome: "not_measurable", reason: `Users couldn't be read: ${users.reason}`, evidence: [ctx.ev(users.source, { count: null })] };
-      if (sets.status !== "ok") return { outcome: "not_measurable", reason: `Permission sets couldn't be read: ${sets.reason}`, evidence: [ctx.ev(sets.source, { count: null })] };
-      if (assignments.status !== "ok") return { outcome: "not_measurable", reason: `Permission set assignments couldn't be read: ${assignments.reason}`, evidence: [ctx.ev(assignments.source, { count: null })] };
-
+      const privileged = ctx.data(privilegedPermissionsExtractor);
+      // The inventory's holders count the same way, so its figure is this one (DECISIONS.md 735).
+      const held = privilegedHolding(privileged, ctx.data(usersExtractor), options.permission);
+      if (!held.ok) return { outcome: "not_measurable", reason: held.reason, evidence: [ctx.ev(held.source, { count: null })] };
+      const { sets, assignments } = privileged;
+      if (sets.status !== "ok" || assignments.status !== "ok") throw new Error("unreachable");
+      const { active, holders, holds, fromProfile, fromSet } = held.holding;
       const granting = sets.data.filter((s) => s[options.permission]);
-      const profiles = new Set(granting.flatMap((s) => (s.IsOwnedByProfile && s.Profile ? [s.Profile.Name] : [])));
-      const added = new Set(granting.filter((s) => !s.IsOwnedByProfile).map((s) => s.Id));
-      const fromSet = new Set(assignments.data.filter((a) => added.has(a.PermissionSetId)).map((a) => a.AssigneeId));
-      const fromProfile = (u: UserRow): boolean => profiles.has(u.Profile?.Name ?? "");
-      const holds = (u: UserRow): boolean => fromProfile(u) || fromSet.has(u.Id);
       const expected = (u: UserRow): boolean => {
         const kind = kindOf(ctx, u.Id);
         if (kind) return EXPECTED_PRIVILEGED_KINDS.has(kind);
         return u.Profile?.Name === ADMIN_PROFILE;
       };
 
-      const active = users.data.filter((u) => u.IsActive);
       const result = segmentRate(active, holds, { profile: (u) => u.Profile?.Name ?? "No profile", "how it's granted": (u) => (fromSet.has(u.Id) ? "permission set" : fromProfile(u) ? "profile" : "not held") }, { segmentLimit: 100, minSegment: 1 });
-      const holders = active.filter(holds);
       const unexpected = holders.filter((u) => !expected(u));
       const tooMany = holders.length >= PRIVILEGED_MIN_USERS && result.rate > PRIVILEGED_SHARE_LIMIT;
       const evidence = [ctx.ev(sets.source, { count: granting.length }), ctx.ev(assignments.source, { count: assignments.data.length, exclusions: ["Inactive users", "Non-standard user types"] })];
@@ -166,7 +158,7 @@ function privilegeRule(options: { id: string; title: string; permission: Permiss
 }
 
 const modifyAllData = privilegeRule({
-  id: "sec.modify-all-data",
+  id: PRIVILEGED_RULES.PermissionsModifyAllData,
   title: "Who can change every record",
   permission: "PermissionsModifyAllData",
   label: said`Modify All Data`,
@@ -175,7 +167,7 @@ const modifyAllData = privilegeRule({
 });
 
 const viewAllData = privilegeRule({
-  id: "sec.view-all-data",
+  id: PRIVILEGED_RULES.PermissionsViewAllData,
   title: "Who can read every record",
   permission: "PermissionsViewAllData",
   label: said`View All Data`,
