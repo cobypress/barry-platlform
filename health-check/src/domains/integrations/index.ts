@@ -364,6 +364,8 @@ const apiUsage: Rule = {
   // 3: an issue only at or near exhaustion (95%), not from 80%; a reading past the
   // allowance reads "over the ... allowance"; a reported 0 is no allowance, and more remaining
   // than the maximum can't be read; read before this check's own calls (DECISIONS.md 726).
+  // Version 3 loosened the rule from 1 and 2: declared in src/engine/loosened.ts (DECISIONS.md 732),
+  // so a pass that only the higher line allows is never called a fix.
   version: 3,
   domain: DOMAIN,
   title: "Daily API and async Apex use against the allowance",

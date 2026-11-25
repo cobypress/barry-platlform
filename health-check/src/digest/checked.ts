@@ -65,6 +65,8 @@ export const STRUCTURAL_PATHS: ReadonlySet<string> = new Set([
   "value.lines[].id", "value.lines[].kind", "value.lines[].ruleId", "value.total.lineIds", "version", "withheldNames",
   // Rule ids only (DECISIONS.md 718).
   "rulesRun", "rulesKnown",
+  // A rule's version and versions (DECISIONS.md 732): numbers, never text.
+  "findings[].ruleVersion", "findings[].issueUnder", "findings[].carriedFrom",
 ]);
 
 /** Every string the digest serves as text: everything outside its structural paths and its marks. */

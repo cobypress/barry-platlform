@@ -10,6 +10,7 @@ import { knownPeople } from "../fix/prompt.ts";
 import { spansIfCurrent, textSha256, type OrgSpan } from "../engine/org-words.ts";
 import { engineOwn, orgValuesOf } from "../engine/automatic-words.ts";
 import { UNSCORED_RULES } from "../domains/scoring.ts";
+import { hasLoosened, issueUnder } from "../engine/loosened.ts";
 import { DIGEST_VERSION, NAMED_PEOPLE_SENTENCE, RunDigest, type DigestArea, type DigestFinding, type DigestMetric, type DigestTotal, type DigestValueModel, type SentenceOrgWords } from "../schemas/digest.ts";
 import { FIX_PROMPT_MAX, type Finding, type Metric } from "../schemas/index.ts";
 import type { Inventory } from "../schemas/inventory.ts";
@@ -108,7 +109,7 @@ export function withheldNames(inventory: Inventory | null, pseudonyms: Pseudonym
 
 // Each part is put together from the report as it stands; guardDigest then takes every string in it through the guard.
 
-function digestFinding(f: Finding): DigestFinding {
+function digestFinding(f: Finding, change: RuleChangeContext): DigestFinding {
   const v = f.value;
   return {
     id: f.id,
@@ -131,6 +132,7 @@ function digestFinding(f: Finding): DigestFinding {
     ...(f.difficulty ? { difficulty: f.difficulty } : {}),
     ...fixPromptOf(f),
     ...checkerReadOf(f),
+    ...ruleChangeOf(f, change),
     ...(f.amountsUnnamed ? { amountsUnnamed: true as const } : {}),
     ...orgWordsOf(f),
   };
@@ -143,6 +145,23 @@ function checkerReadOf(f: Finding): { checkerRead?: DigestFinding["checkerRead"]
   const count = (n: number | undefined): n is number => typeof n === "number" && Number.isInteger(n) && n >= 0;
   if (!count(readClasses) || !count(readTriggers) || !count(alreadyListed)) return {};
   return { checkerRead: { readClasses, readTriggers, alreadyListed } };
+}
+
+type RuleChangeContext = { ownCalls: number; carried: Readonly<Record<string, number>> };
+
+/**
+ * Every finding's rule version (DECISIONS.md 732), so a rule loosened later can be
+ * told apart from its first run on. For a rule we have loosened, a pass also carries
+ * the earlier versions its reading would still have been an issue under, and where
+ * this run's comparison kept the rule apart, the version of the issue it stands apart
+ * from. The console needs these to tell a fix from a pass that came only from our
+ * change, since a later run may have no link to the run that raised the issue.
+ */
+function ruleChangeOf(f: Finding, change: RuleChangeContext): Pick<DigestFinding, "ruleVersion" | "issueUnder" | "carriedFrom"> {
+  if (!hasLoosened(f.ruleId)) return { ruleVersion: f.ruleVersion };
+  const under = issueUnder(f, change.ownCalls);
+  const from = Object.hasOwn(change.carried, f.ruleId) && f.status !== "issue" ? change.carried[f.ruleId] : undefined;
+  return { ruleVersion: f.ruleVersion, ...(under ? { issueUnder: under } : {}), ...(from !== undefined ? { carriedFrom: from } : {}) };
 }
 
 /**
@@ -346,7 +365,7 @@ export function buildDigest({ report, pseudonyms, inventory, madeAt }: DigestFor
         ? { status: "measured", score: overall.score, grade: overall.grade, areaDomains: overall.areas.map((a) => a.domain), ...(scoreCaveatFor(report) ? { caveat: scoreCaveatFor(report)! } : {}) }
         : { status: "not_measurable", reason: overall.status === "not_measurable" ? overall.reason : "The overall score couldn't be kept." },
     areas: digestAreas(report),
-    findings: report.teamFindings.map(digestFinding),
+    findings: report.teamFindings.map((f) => digestFinding(f, { ownCalls: run.budget.callsMade, carried: report.progress?.carried ?? {} })),
     metrics: report.metrics.map(digestMetric),
     value: digestValue(report),
     plan: {

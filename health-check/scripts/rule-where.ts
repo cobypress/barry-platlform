@@ -11,19 +11,26 @@ import { writeFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { ALL_MODULES } from "../src/domains/index.ts";
 import type { Rule } from "../src/engine/rule.ts";
+import { loosenedFrom, loosenedOn } from "../src/engine/loosened.ts";
 
 export const RULE_WHERE_FILE = fileURLToPath(new URL("../fixtures/rule-where.json", import.meta.url));
 /** How the file is made again, from the health-check folder. */
 export const REMAKE = "npm run rule-where";
 
-export type RuleWhere = Record<string, { version: number; where?: string[] }>;
+/**
+ * `loosenedFrom` (DECISIONS.md 732), only for a rule we have loosened: by version, the
+ * earlier versions whose issues may no longer be issues under it, and `loosenedOn` the day
+ * each such version was first committed (src/engine/loosened.ts).
+ */
+export type RuleWhere = Record<string, { version: number; where?: string[]; loosenedFrom?: Record<string, number[]>; loosenedOn?: Record<string, string> }>;
 
 /** Each rule once, by id in code-point order, so the file is the same bytes wherever it's made. */
 export function ruleWhere(rules: readonly Rule[] = ALL_MODULES.flatMap((m) => m.rules)): RuleWhere {
   const out: RuleWhere = {};
   for (const rule of [...rules].sort((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0))) {
     if (Object.hasOwn(out, rule.id)) throw new Error(`Two rules have the id ${rule.id}`);
-    out[rule.id] = { version: rule.version, ...(rule.where ? { where: [...rule.where] } : {}) };
+    const loosened = loosenedFrom(rule.id);
+    out[rule.id] = { version: rule.version, ...(rule.where ? { where: [...rule.where] } : {}), ...(loosened ? { loosenedFrom: loosened, loosenedOn: loosenedOn(rule.id)! } : {}) };
   }
   return out;
 }

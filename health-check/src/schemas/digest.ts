@@ -131,6 +131,24 @@ export const DigestFinding = z.object({
    * Counts only. Absent everywhere else, and when the finding's facts lack them.
    */
   checkerRead: z.object({ readClasses: z.number().int().nonnegative(), readTriggers: z.number().int().nonnegative(), alreadyListed: z.number().int().nonnegative() }).optional(),
+  /**
+   * The rule's version (DECISIONS.md 732), on every finding of a digest made since;
+   * absent on an older digest, where the console reads it from the stored row.
+   */
+  ruleVersion: z.number().int().positive().optional(),
+  /**
+   * Only on such a rule's pass, where the engine can judge it: the earlier versions,
+   * ascending, under which this pass's reading would still have been an issue. Empty: it
+   * would have passed under every one, so a pass after any earlier issue is a fix. Absent:
+   * unknown, never a fix we can show.
+   */
+  issueUnder: z.array(z.number().int().positive()).optional(),
+  /**
+   * Only on such a rule's pass or not measurable finding, where this run's comparison
+   * kept the rule apart: the version of the issue it stands apart from (passing only
+   * because we loosened the rule since). Absent: nothing kept apart.
+   */
+  carriedFrom: z.number().int().positive().optional(),
   /** Its amounts are plain numbers in a currency not known by name (DECISIONS.md 700): show value.currencyNote beside them. Absent otherwise. */
   amountsUnnamed: z.literal(true).optional(),
   /** By sentence, the ones the engine can vouch for, with the org's characters marked (DECISIONS.md 655). */
@@ -424,5 +442,5 @@ export const DIGEST_KEYS: ReadonlySet<string> = new Set([
   "time_cost", "exposure", "groups", "lines", "leftOut", "realisation", "counted", "lineIds", "low", "expected", "high", "group", "annual", "added",
   "phases", "later", "quickWins", "quickFixes", "difficulty", "alsoFor", "key", "effortHours", "basis", "partial", "timeBand", "fixComplexity", "hoursTotal", "partialFindingIds", "withoutHoursFindingIds", "notTotalledFindingIds", "note",
   "checkerRead", "readClasses", "readTriggers", "alreadyListed", "orgWords", "orgWordsMarked", "start", "end", "valueReason", "valueAssumptions", "hoursBasis", "fixPrompt", "textSha256",
-  "valueUnit", "valuePeriod", "editionNote", "caveat", "rulesRun", "rulesKnown",
+  "valueUnit", "valuePeriod", "editionNote", "caveat", "rulesRun", "rulesKnown", "ruleVersion", "issueUnder", "carriedFrom",
 ]);
