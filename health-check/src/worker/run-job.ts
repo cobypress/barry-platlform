@@ -562,7 +562,8 @@ async function runLocked(runId: string, deps: WorkerDeps, attempt: Attempt, seen
       const checked = checkSections(report, pseudonyms);
       if (checked.fellBack || checked.failed) log(`Run ${runId}: ${checked.fellBack} section${checked.fellBack === 1 ? "" : "s"} fell back to the engine's own text, and ${checked.failed} didn't pass its check.`);
     }
-    keepRuleChanges(dir, report.progress?.carried);
+    // A pulse keeps it beside its own result, from the report that result is built from (finishPulse).
+    if (input.run.product !== "pulse") keepRuleChanges(dir, report.progress?.carried);
     const outputs = Object.values(report.outputs);
     // The survey's metrics as this report made them, stored with the run's own,
     // so its sections cite only what the run holds (DECISIONS.md 645). Before the
