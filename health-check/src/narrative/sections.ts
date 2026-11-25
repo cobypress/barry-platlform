@@ -64,6 +64,11 @@ export type ReportInput = {
   stageMeanings?: Record<string, "open" | "won" | "lost"> | null;
   /** The rules the run's analysis ran and those its engine knew (DECISIONS.md 718), for the digest alone. Null for a run analysed before they were kept. */
   rules?: RulesRun | null;
+  /**
+   * When the run's kept /limits reading was taken (DECISIONS.md 726), from its folder: a resumed
+   * run's limits step finishes in a later sitting than the reading it uses. Absent: the step's finish.
+   */
+  limitsReadAt?: string | null;
   now?: Date;
 };
 
@@ -928,8 +933,8 @@ export function buildReport(all: ReportInput): BuiltReport {
     const first = buildReport({ ...input.baseline, baseline: null });
     baselineRefused = first.refused.length;
     progress = compareWithBaseline(
-      { runId: first.input.run.id, asOf: first.input.run.asOf, findings: first.teamFindings, scores: first.input.scores ?? [], overall: first.overall, value: first.value, limitsReadAt: limitsReadAt(first.input.run) },
-      { runId: run.id, asOf: run.asOf, findings: team, scores, overall, value, limitsReadAt: limitsReadAt(run) },
+      { runId: first.input.run.id, asOf: first.input.run.asOf, findings: first.teamFindings, scores: first.input.scores ?? [], overall: first.overall, value: first.value, limitsReadAt: limitsReadAt(first.input.run, first.input.limitsReadAt) },
+      { runId: run.id, asOf: run.asOf, findings: team, scores, overall, value, limitsReadAt: limitsReadAt(run, input.limitsReadAt) },
     );
   }
   // Every compared figure comes from deals, which a set-up review never reads.

@@ -117,8 +117,8 @@ describe("daily allowances", () => {
     const f = one(output!.findings, "int.api-usage");
     assert.equal(f.status, "issue");
     assert.equal(f.severity, "medium");
-    assert.deepEqual(f.subjects.map((s) => s.label), ["asynchronous Apex runs"]);
-    assert.match(f.summary, /96% of its daily asynchronous Apex runs \(240,000 of 250,000\)/);
+    assert.deepEqual(f.subjects.map((s) => s.label), ["background jobs"]);
+    assert.match(f.summary, /96% of its daily background \(asynchronous Apex\) jobs \(240,000 of 250,000\)/);
   });
 
   test("one reading is an issue only from 95% (DECISIONS.md 726): 88% passes", () => {

@@ -187,9 +187,9 @@ describe("the synthetic org", () => {
     // probability field, then 709's averages beside the medians, then 714's difficulty on each issue, added to the run's
     // files, then 712's period start in 706's sentence and closing-out count in 703's table, then 726's daily allowance
     // rule and its trap at 96%, which the fingerprint test holds.
-    assert.equal(print["findings.json"], "7cd1fd89413e1841");
+    assert.equal(print["findings.json"], "5030e28f0b262677");
     assert.equal(print["metrics.json"], "2a25c522746883d7");
-    assert.equal(print["raw-notes.md"], "ed81d63e6f2a6bb6");
+    assert.equal(print["raw-notes.md"], "7de1b0095cde85c2");
     const scores = JSON.parse(readFileSync(join(dir, "scores.json"), "utf8")) as Score[];
     const findings = JSON.parse(readFileSync(join(dir, "findings.json"), "utf8")) as Finding[];
     const overall = overallScore(scores, findings);

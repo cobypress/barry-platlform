@@ -86,6 +86,20 @@ function fixedAsRead(then: Finding[], now: Finding[]): boolean {
   return (pass.facts.alreadyListed ?? 0) === 0;
 }
 
+// Decision 726 raised int.api-usage's line from 80% to 95% in version 3. An earlier
+// issue of version 1 or 2 with every share under 95 is one today's rule wouldn't
+// raise, so its pass now isn't a fix: it's left out of Fixed. This rule only; no
+// general handling of rule versions.
+const API_USAGE = "int.api-usage";
+const API_USAGE_LINE_RAISED = 3;
+function raisedOnlyBelowToday(thenIssues: Finding[]): boolean {
+  return thenIssues.every((f) => {
+    if (f.ruleId !== API_USAGE || f.ruleVersion >= API_USAGE_LINE_RAISED) return false;
+    const shares = Object.entries(f.facts).filter(([key]) => key.endsWith("Share")).map(([, value]) => value);
+    return shares.length > 0 && shares.every((share) => share < 95);
+  });
+}
+
 export function compareWithBaseline(baseline: ProgressSide, current: ProgressSide): Progress {
   const before = byRule(baseline.findings);
   const now = byRule(current.findings);
@@ -102,6 +116,7 @@ export function compareWithBaseline(baseline: ProgressSide, current: ProgressSid
     // without it, says nothing of them, never "can't tell" (DECISIONS.md 673).
     if (MEASURED_LATER.has(ruleId) && nowFindings.length === 0) continue;
     const nowIssues = nowFindings.filter((f) => f.status === "issue");
+    if (!nowIssues.length && raisedOnlyBelowToday(thenIssues)) continue;
     if (nowIssues.length) remaining.push(change(ruleId, nowIssues));
     else if (nowFindings.some((f) => f.status === "passed") && (!MEASURED_LATER.has(ruleId) || fixedAsRead(thenIssues, nowFindings))) fixed.push(change(ruleId, thenIssues));
     else unknown.push({ ...change(ruleId, thenIssues), ...kindNow(nowFindings) });
@@ -159,8 +174,12 @@ const STORAGE_KINDS = [
 export const STORAGE_AVERAGE_DAYS = 30;
 const DAY_MS = 86_400_000;
 
-/** When the run read its limits: its `api-limits` step's finish. A reused checkpoint keeps the first one, as it keeps that connection's limits. */
-export const limitsReadAt = (run: Run): string | null => run.steps.find((s) => s.id === apiLimitsExtractor.id)?.finishedAt ?? null;
+/**
+ * When the run read its limits: the kept reading's own time where its folder has one
+ * (DECISIONS.md 726), since a resumed run's step uses its first sitting's reading;
+ * otherwise its `api-limits` step's finish. A reused checkpoint keeps the first one, as it keeps that connection's limits.
+ */
+export const limitsReadAt = (run: Run, kept?: string | null): string | null => kept ?? run.steps.find((s) => s.id === apiLimitsExtractor.id)?.finishedAt ?? null;
 
 /** A kind's used and allowance figures, when both are whole MB and the allowance is above 0. */
 function readingOf(f: Finding, key: string): StorageReading | null {

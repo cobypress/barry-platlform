@@ -48,6 +48,8 @@ const SORTED: readonly Sorted[] = [
   // S-controls and Sites: Salesforce's own guides say Professional Edition has neither (DECISIONS.md 710).
   // Not the Metadata API: an edition without it can still have the flows it would have read.
   { kind: "not_in_use", pattern: /^Needs (?:Apex|s-controls|Sites), which Professional Edition doesn't include\./ },
+  // Daily allowances: /limits reported each with a maximum of 0, so the org has none to use up (DECISIONS.md 726).
+  { kind: "not_in_use", pattern: /^This org has no daily allowance for\b/ },
 
   // What was read can't support a fair figure: too few records, a field mostly
   // empty, or nothing at all. A read that found nothing is never "not in use":

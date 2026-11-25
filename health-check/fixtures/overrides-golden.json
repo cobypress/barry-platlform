@@ -18738,7 +18738,7 @@
     "domain": "integrations",
     "status": "issue",
     "title": "A daily allowance is nearly used up",
-    "summary": "When this check first connected, the org had used 96% of its daily asynchronous Apex runs (240,000 of 250,000), as read at that moment. Past an allowance, Salesforce can refuse further calls or jobs until use falls back, and the integrations that depend on them stop.",
+    "summary": "When this check first connected, the org had used 96% of its daily background (asynchronous Apex) jobs (240,000 of 250,000). Past an allowance, Salesforce can refuse further calls or jobs until use falls back, and the integrations that depend on them stop.",
     "recommendation": "Find which integrations and jobs use the most, then cut repeats: combine calls, and use bulk loads or change events for large volumes.",
     "recommendationType": "investigate",
     "severity": "medium",
@@ -18774,7 +18774,7 @@
     "subjects": [
      {
       "type": "allowance",
-      "label": "asynchronous Apex runs"
+      "label": "background jobs"
      }
     ],
     "facts": {
@@ -18795,7 +18795,7 @@
     "timeBand": "medium",
     "fixComplexity": "complex",
     "difficulty": "needs_planning",
-    "fixPrompt": "You are helping a Salesforce administrator act on one finding from a Black Cloud Barometer health check of their org. You can read the org's metadata. Work only from what you can see, and say where you can't confirm something.\n\nWhat we found: A daily allowance is nearly used up. When this check first connected, the org had used 96% of its daily asynchronous Apex runs (240,000 of 250,000), as read at that moment. Past an allowance, Salesforce can refuse further calls or jobs until use falls back, and the integrations that depend on them stop.\n\nWhat our report recommends, for the people who own this to decide and carry out. It is not your task: your task is only the steps below.\nThe report says: Find which integrations and jobs use the most, then cut repeats: combine calls, and use bulk loads or change events for large volumes.\n\nWork on the integrations and jobs listed in this finding.\n\nThis is for people to decide, not a change to the org. Do not change the org: prepare the analysis, the list and the options so the people who own it can decide.\n\nSteps:\n1. From the API usage and event logs you can see, list which users, apps and jobs make the most calls.\n2. Find repeats: calls that could be combined, polled less often, or moved to bulk loads or change events.\n3. Propose the changes to each integration's owner.\n\nDo not:\n- Change any setting, metadata or record: this task is analysis only.\n- Change a record (an owner, a field's value, a user) or delete anything.\n- Switch anything off before checking what depends on it: flows, Apex, validation rules, layouts, reports, sharing and integrations.\n- Change production first: use a sandbox, test, then deploy, and only make changes that can be undone.\n- Take away access, or stop an integration, before its replacement is in place and tested.\n- Change anything outside the integrations and jobs this finding is about.\n- Put a name, email or record detail in your reply.\n\nTo check it worked:\n- Each heavy user of the API has a proposal its owner has seen."
+    "fixPrompt": "You are helping a Salesforce administrator act on one finding from a Black Cloud Barometer health check of their org. You can read the org's metadata. Work only from what you can see, and say where you can't confirm something.\n\nWhat we found: A daily allowance is nearly used up. When this check first connected, the org had used 96% of its daily background (asynchronous Apex) jobs (240,000 of 250,000). Past an allowance, Salesforce can refuse further calls or jobs until use falls back, and the integrations that depend on them stop.\n\nWhat our report recommends, for the people who own this to decide and carry out. It is not your task: your task is only the steps below.\nThe report says: Find which integrations and jobs use the most, then cut repeats: combine calls, and use bulk loads or change events for large volumes.\n\nWork on the integrations and jobs listed in this finding.\n\nThis is for people to decide, not a change to the org. Do not change the org: prepare the analysis, the list and the options so the people who own it can decide.\n\nSteps:\n1. From the API usage and event logs you can see, list which users, apps and jobs make the most calls.\n2. Find repeats: calls that could be combined, polled less often, or moved to bulk loads or change events.\n3. Propose the changes to each integration's owner.\n\nDo not:\n- Change any setting, metadata or record: this task is analysis only.\n- Change a record (an owner, a field's value, a user) or delete anything.\n- Switch anything off before checking what depends on it: flows, Apex, validation rules, layouts, reports, sharing and integrations.\n- Change production first: use a sandbox, test, then deploy, and only make changes that can be undone.\n- Take away access, or stop an integration, before its replacement is in place and tested.\n- Change anything outside the integrations and jobs this finding is about.\n- Put a name, email or record detail in your reply.\n\nTo check it worked:\n- Each heavy user of the API has a proposal its owner has seen."
    },
    {
     "id": "f-fc01ab6a9fcf",

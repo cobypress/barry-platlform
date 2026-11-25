@@ -70,6 +70,17 @@ export const LIMITS_AT_START_FILE = "limits-at-start.json";
 export const limitsReadingOf = (ctx: Pick<ExtractContext, "client" | "limitsAtStart">): LimitsReading =>
   ctx.limitsAtStart ?? { all: ctx.client.allLimitsAtConnect, reported: ctx.client.limitsAtConnect, unread: ctx.client.limitsUnread };
 
+/**
+ * When the kept reading was taken, from the run folder's file: its own time, or the
+ * run's start for a file written before the time was kept. Null with no file, or a
+ * damaged one, and the caller then goes by when the limits step finished, as before.
+ */
+export function keptLimitsReadAt(file: unknown, runStartedAt: string): string | null {
+  if (parseLimitsReading(file) === null) return null;
+  const at = (file as { readAt?: unknown }).readAt;
+  return typeof at === "string" && Number.isFinite(Date.parse(at)) ? at : runStartedAt;
+}
+
 /** A kept reading as the file holds it, or null when it isn't one, so a damaged file falls back to the connection's. */
 export function parseLimitsReading(value: unknown): LimitsReading | null {
   const v = value as Partial<LimitsReading> | null;

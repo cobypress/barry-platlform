@@ -212,6 +212,8 @@ export async function runHealthCheck(options: RunOptions): Promise<RunResult> {
   // An automatic run spends at most a tenth of the org's daily limit as well (DECISIONS.md 710).
   const budget = new ApiBudget({ stopAtShare: options.stopAtShare ?? BUDGET_DEFAULTS.stopAtShare, ...(options.reviewMode === "automatic" ? { maxShareOfLimit: BUDGET_DEFAULTS.automaticShareOfLimit } : {}) });
   const client = await SalesforceClient.connect(provider, { budget, transport: options.transport, apiVersion: options.apiVersion, sleep: options.transport ? async () => {} : undefined });
+  // When /limits was read: on connecting, just now. A re-check's storage comparison is dated by it (DECISIONS.md 726).
+  const limitsReadAt = new Date().toISOString();
 
   if (calibration.orgId && calibration.orgId.slice(0, 15) !== client.orgId.slice(0, 15)) {
     throw new Error("This calibration was written for a different org.");
@@ -271,7 +273,7 @@ export async function runHealthCheck(options: RunOptions): Promise<RunResult> {
     writeJson(join(dir, "calibration.json"), calibration);
     // /limits as this first sitting's connection read it, before any call of the run's
     // own: a resumed run's limit steps take this, not its new connection's (DECISIONS.md 726).
-    writeJson(join(dir, LIMITS_AT_START_FILE), { all: client.allLimitsAtConnect, reported: client.limitsAtConnect, unread: client.limitsUnread });
+    writeJson(join(dir, LIMITS_AT_START_FILE), { all: client.allLimitsAtConnect, reported: client.limitsAtConnect, unread: client.limitsUnread, readAt: limitsReadAt });
   }
   const limitsPath = join(dir, LIMITS_AT_START_FILE);
   // A run begun before the reading was kept, or a damaged file, reads the connection's, as before.

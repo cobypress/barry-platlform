@@ -38,7 +38,13 @@ export const INTEGRATION_LICENCE = "Salesforce Integration";
 // left can go in an hour or two of an ordinary day (medium); with none left,
 // calls or jobs are being refused as we read it (high) (DECISIONS.md 726).
 const ALLOWANCE_NEAR_EXHAUSTION = 95;
-const ALLOWANCES = { DailyApiRequests: "API requests", DailyAsyncApexExecutions: "asynchronous Apex runs" } as const;
+// Each allowance's plain name, and the fuller one its figure is first given with.
+const ALLOWANCES = {
+  DailyApiRequests: { label: "API requests", first: "API requests" },
+  DailyAsyncApexExecutions: { label: "background jobs", first: "background (asynchronous Apex) jobs" },
+} as const;
+/** The highest share printed for an allowance with some left, so it never reads as 100% under "nearly used up". */
+const SHARE_BELOW_MAX = 99.9;
 // The jobs someone starts. A batch's own chunks (BatchApexWorker) are counted through the batch.
 const JOB_TYPES = new Set(["BatchApex", "Queueable", "Future", "ScheduledApex"]);
 // Our judgement: one or two failures a week can be a blip, three is a pattern.
@@ -356,37 +362,57 @@ const interactiveIntegrations: Rule = {
 const apiUsage: Rule = {
   id: "int.api-usage",
   // 3: an issue only at or near exhaustion (95%), not from 80%; a reading past the
-  // allowance reads "over the ... allowance"; read before this check's own calls (DECISIONS.md 726).
+  // allowance reads "over the ... allowance"; a reported 0 is no allowance, and more remaining
+  // than the maximum can't be read; read before this check's own calls (DECISIONS.md 726).
   version: 3,
   domain: DOMAIN,
   title: "Daily API and async Apex use against the allowance",
   evaluate(ctx): RuleResult | RuleResult[] {
     const limits = ctx.data(apiLimitsExtractor);
     if (limits.status !== "ok") return { outcome: "not_measurable", reason: `The org's limits couldn't be read: ${limits.reason}`, evidence: [ctx.ev(limits.source, { count: null })] };
-    // A maximum of 0 or none: the org has no such allowance, so it's neither an issue nor a pass.
-    const read = Object.entries(ALLOWANCES).flatMap(([key, label]) => {
+    type Named = (typeof ALLOWANCES)[keyof typeof ALLOWANCES];
+    type Read = { key: string; label: Named["label"]; first: Named["first"]; used: number; max: number; share: number };
+    const read: Read[] = [];
+    // Not reported at all; reported with a maximum of 0, so the org has no such allowance;
+    // reported with more remaining than the maximum, so how much was used can't be said.
+    const absent: Array<Named["label"]> = [];
+    const none: Array<Named["label"]> = [];
+    const odd: Array<Named["label"]> = [];
+    for (const [key, { label, first }] of Object.entries(ALLOWANCES) as Array<[string, Named]>) {
       const limit = limits.data[key];
-      if (!limit || limit.Max <= 0) return [];
-      const used = Math.max(0, limit.Max - limit.Remaining);
-      return [{ key, label, used, max: limit.Max, share: pct(used, limit.Max) }];
-    });
+      if (!limit) absent.push(label);
+      else if (limit.Max === 0) none.push(label);
+      else if (!(limit.Max > 0) || limit.Remaining > limit.Max) odd.push(label);
+      else {
+        const used = limit.Max - limit.Remaining;
+        read.push({ key, label, first, used, max: limit.Max, share: used < limit.Max ? Math.min(pct(used, limit.Max), SHARE_BELOW_MAX) : pct(used, limit.Max) });
+      }
+    }
+    const listed = (labels: Array<Named["label"]>): Said => andList(labels.map((label) => said`${label}`));
     const evidence = [ctx.ev(limits.source, { count: read.length, note: "Read when this check first connected, before its own calls, over Salesforce's rolling 24 hours." })];
-    if (read.length === 0) return { outcome: "not_measurable", reason: said`The org reported neither daily allowance with a maximum.`, evidence };
-    // An allowance /limits didn't report can't be called within its limit (DECISIONS.md 291).
-    const unread = Object.entries(ALLOWANCES).filter(([key]) => !read.some((r) => r.key === key)).map(([, label]) => label);
     const segments = [{ dimension: "allowance", segments: read.length }];
     const facts = Object.fromEntries(read.flatMap((r) => [[`${r.key}Used`, r.used], [`${r.key}Max`, r.max], [`${r.key}Share`, r.share]]));
     // Past the allowance, "100,500 of 100,000" would read as a part larger than its whole, which the number check refuses (as storage, 502).
-    const amount = (r: (typeof read)[number]): Said => (r.used > r.max ? said`${grouped(r.used)}, over the ${grouped(r.max)} allowance` : said`${grouped(r.used)} of ${grouped(r.max)}`);
-    const text = (r: (typeof read)[number]): Said => said`${r.share}% of its daily ${r.label} (${amount(r)})`;
+    const amount = (r: Read): Said => (r.used > r.max ? said`${grouped(r.used)}, over the ${grouped(r.max)} allowance` : said`${grouped(r.used)} of ${grouped(r.max)}`);
+    const text = (r: Read): Said => said`${r.share}% of its daily ${r.first} (${amount(r)})`;
+    const noAllowance = none.length ? said`This org has no daily allowance for ${listed(none)}, so there's nothing to use up.` : null;
+    const oddText = odd.length ? said`Salesforce reported more remaining than the maximum for ${listed(odd)}, so we can't say how much was used.` : null;
+    const unreadText = absent.length ? said`The org didn't report its daily allowance for ${listed(absent)}, so we can't say it's within it.` : null;
     const over = read.filter((r) => r.share >= ALLOWANCE_NEAR_EXHAUSTION);
-    if (over.length === 0 && unread.length) return { outcome: "not_measurable", reason: said`The org didn't report its daily allowance for ${andList(unread.map((label) => said`${label}`))}, so we can't say it's within it.`, evidence };
-    if (over.length === 0) return { outcome: "pass", summary: said`When this check first connected, the org had used ${andList(read.map(text))}.`, evidence, segmentsChecked: segments, facts };
-    const usedUp = over.some((r) => r.used >= r.max);
+    if (over.length === 0) {
+      // What can't be read is said first; with nothing read and every allowance at 0, the check doesn't apply.
+      if (oddText) return { outcome: "not_measurable", reason: oddText, evidence };
+      if (unreadText) return { outcome: "not_measurable", reason: unreadText, evidence };
+      if (read.length === 0) return { outcome: "not_measurable", reason: noAllowance ?? said`The org reported neither daily allowance.`, evidence };
+      return { outcome: "pass", summary: said`When this check first connected, the org had used ${andList(read.map(text))}.${noAllowance ? said` ${noAllowance}` : ""}`, evidence, segmentsChecked: segments, facts };
+    }
+    const usedUp = over.filter((r) => r.used >= r.max).length;
+    const title = over.length === 1 ? (usedUp ? said`A daily allowance is used up` : said`A daily allowance is nearly used up`) : usedUp === over.length ? said`Daily allowances are used up` : usedUp ? said`Daily allowances are used up or nearly used up` : said`Daily allowances are nearly used up`;
+    const notChecked = [...(oddText ? [said` Salesforce reported more remaining than the maximum for ${listed(odd)}, so that isn't checked.`] : []), ...(absent.length ? [said` The org didn't report its daily allowance for ${listed(absent)}, so that isn't checked.`] : [])];
     return {
       outcome: "issue",
-      title: usedUp ? said`A daily allowance is used up` : said`A daily allowance is nearly used up`,
-      summary: said`When this check first connected, the org had used ${andList(over.map(text))}, as read at that moment. Past an allowance, Salesforce can refuse further calls or jobs until use falls back, and the integrations that depend on them stop.${unread.length ? said` The org didn't report its daily allowance for ${andList(unread.map((label) => said`${label}`))}, so that one isn't checked.` : ""}`,
+      title,
+      summary: said`When this check first connected, the org had used ${andList(over.map(text))}. Past an allowance, Salesforce can refuse further calls or jobs until use falls back, and the integrations that depend on them stop.${joinSaid(notChecked, "")}`,
       recommendation: said`Find which integrations and jobs use the most, then cut repeats: combine calls, and use bulk loads or change events for large volumes.`,
       recommendationType: "investigate",
       // Nearly used up is a warning, since the allowance resets; used up, calls or jobs are refused as we read it.

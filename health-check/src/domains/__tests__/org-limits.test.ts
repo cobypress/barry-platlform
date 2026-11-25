@@ -1,10 +1,18 @@
 import { test, describe } from "node:test";
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
+import { mkdtempSync, readFileSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { SALES_CLOUD_MODULES } from "../index.ts";
 import { apiLimitsExtractor } from "../../extract/integrations.ts";
-import { LIMITS_AT_START_FILE, parseLimitsReading } from "../../extract/types.ts";
+import { keptLimitsReadAt, LIMITS_AT_START_FILE, parseLimitsReading, type ExtractContext } from "../../extract/types.ts";
+import { limitsExtractor } from "../../extract/inventory.ts";
+import { compareWithBaseline, limitsReadAt, storageSentences, type ProgressSide } from "../../progress/compare.ts";
+import { buildReport } from "../../narrative/sections.ts";
+import { loadRun } from "../../render/render-run.ts";
+import { EARLIER_AS_OF, plantRecheck, stampLimitsReading } from "../../testing/recheck.ts";
+import { LIMITS_NO_PERMISSION } from "../../salesforce/refusal-words.ts";
+import type { Transport } from "../../salesforce/transport.ts";
 import { runHealthCheck } from "../../engine/run.ts";
 import { benchmarkFigures } from "../../benchmark/export.ts";
 import type { Finding } from "../../schemas/index.ts";
@@ -77,7 +85,7 @@ describe("a daily allowance: one reading, an issue only at or near exhaustion", 
     assert.equal(outcome(near), "medium", "95%");
     assert.equal(outcome(api(99_900)), "medium", "99.9%");
     assert.equal(near.title, "A daily allowance is nearly used up");
-    assert.match(near.summary, /^When this check first connected, the org had used 95% of its daily API requests \(95,000 of 100,000\), as read at that moment\. /);
+    assert.match(near.summary, /^When this check first connected, the org had used 95% of its daily API requests \(95,000 of 100,000\)\. Past /);
     const all = api(100_000);
     assert.equal(outcome(all), "high");
     assert.equal(all.title, "A daily allowance is used up");
@@ -86,20 +94,68 @@ describe("a daily allowance: one reading, an issue only at or near exhaustion", 
     assert.match(over.summary, /100\.5% of its daily API requests \(100,500, over the 100,000 allowance\)/);
   });
 
-  test("async Apex in the synthetic org, 96% used, is the trap: medium, and API requests are left out of it", () => {
+  test("background jobs in the synthetic org, 96% used, is the trap: medium, and API requests are left out of it", () => {
     const f = one(output!.findings, "int.api-usage");
     assert.equal(outcome(f), "medium");
-    assert.deepEqual(f.subjects.map((s) => s.label), ["asynchronous Apex runs"]);
-    assert.match(f.summary, /96% of its daily asynchronous Apex runs \(240,000 of 250,000\)/);
+    assert.equal(f.title, "A daily allowance is nearly used up");
+    assert.deepEqual(f.subjects.map((s) => s.label), ["background jobs"]);
+    assert.equal(f.summary, "When this check first connected, the org had used 96% of its daily background (asynchronous Apex) jobs (240,000 of 250,000). Past an allowance, Salesforce can refuse further calls or jobs until use falls back, and the integrations that depend on them stop.");
     assert.notEqual(f.difficulty, "quick_fix");
   });
 
-  test("an allowance whose maximum is 0 is not applicable: both at 0 is not measurable, never a pass", () => {
+  test("with some left, the share never prints as 100%: 99.96% reads 99.9%, under nearly used up", () => {
+    const f = api(99_960);
+    assert.equal(f.title, "A daily allowance is nearly used up");
+    assert.equal(outcome(f), "medium");
+    assert.match(f.summary, /99\.9% of its daily API requests \(99,960 of 100,000\)/);
+    assert.equal(f.facts.DailyApiRequestsShare, 99.9);
+  });
+
+  test("both allowances: the title is plural", () => {
+    const both = (api: number, jobs: number): Finding => one(withLimits({ ...ROOMY_STORAGE, DailyApiRequests: { Max: 100_000, Remaining: 100_000 - api }, DailyAsyncApexExecutions: { Max: 250_000, Remaining: 250_000 - jobs } }), "int.api-usage");
+    assert.equal(both(96_000, 240_000).title, "Daily allowances are nearly used up");
+    assert.equal(both(100_000, 240_000).title, "Daily allowances are used up or nearly used up");
+    assert.equal(both(100_000, 250_000).title, "Daily allowances are used up");
+    assert.equal(both(100_000, 250_000).severity, "high");
+  });
+
+  test("a reported maximum of 0 is no allowance: both at 0 doesn't apply (not in use), never a pass; one at 0 is said truly beside the other", () => {
     const zero = one(withLimits({ ...ROOMY_STORAGE, DailyApiRequests: { Max: 0, Remaining: 0 }, DailyAsyncApexExecutions: { Max: 0, Remaining: 0 } }), "int.api-usage");
     assert.equal(zero.status, "not_measurable");
-    const oneZero = one(withLimits({ ...ROOMY_STORAGE, DailyApiRequests: { Max: 100_000, Remaining: 1_000 }, DailyAsyncApexExecutions: { Max: 0, Remaining: 0 } }), "int.api-usage");
-    assert.equal(outcome(oneZero), "medium");
-    assert.deepEqual(oneZero.subjects.map((s) => s.label), ["API requests"]);
+    assert.equal(zero.notMeasurableReason, "This org has no daily allowance for API requests and background jobs, so there's nothing to use up.");
+    assert.equal(zero.notMeasurableKind, "not_in_use");
+    const jobsZero = one(withLimits({ ...ROOMY_STORAGE, DailyApiRequests: { Max: 100_000, Remaining: 99_000 }, DailyAsyncApexExecutions: { Max: 0, Remaining: 0 } }), "int.api-usage");
+    assert.equal(jobsZero.status, "passed");
+    assert.equal(jobsZero.summary, "When this check first connected, the org had used 1% of its daily API requests (1,000 of 100,000). This org has no daily allowance for background jobs, so there's nothing to use up.");
+    const near = one(withLimits({ ...ROOMY_STORAGE, DailyApiRequests: { Max: 100_000, Remaining: 1_000 }, DailyAsyncApexExecutions: { Max: 0, Remaining: 0 } }), "int.api-usage");
+    assert.equal(outcome(near), "medium");
+    assert.deepEqual(near.subjects.map((s) => s.label), ["API requests"]);
+    // Absent is still its own case: not reported, so not measurable and not "not in use".
+    const absent = one(withLimits({ ...ROOMY_STORAGE, DailyApiRequests: { Max: 100_000, Remaining: 99_000 } }), "int.api-usage");
+    assert.equal(absent.notMeasurableReason, "The org didn't report its daily allowance for background jobs, so we can't say it's within it.");
+    assert.notEqual(absent.notMeasurableKind, "not_in_use");
+  });
+
+  test("more remaining than the maximum can't be read: not measurable with a true reason, never 0% and a pass", () => {
+    const odd = one(withLimits({ ...ROOMY_STORAGE, DailyApiRequests: { Max: 15_000, Remaining: 15_200 }, DailyAsyncApexExecutions: { Max: 250_000, Remaining: 200_000 } }), "int.api-usage");
+    assert.equal(odd.status, "not_measurable");
+    assert.equal(odd.notMeasurableReason, "Salesforce reported more remaining than the maximum for API requests, so we can't say how much was used.");
+    assert.doesNotMatch(JSON.stringify(odd), /0% of its daily API requests/);
+    const beside = one(withLimits({ ...ROOMY_STORAGE, DailyApiRequests: { Max: 15_000, Remaining: 15_200 }, DailyAsyncApexExecutions: { Max: 250_000, Remaining: 1_000 } }), "int.api-usage");
+    assert.equal(beside.status, "issue");
+    assert.match(beside.summary, /Salesforce reported more remaining than the maximum for API requests, so that isn't checked\.$/);
+  });
+
+  test("the 99.9% case passes the number check in every document section", async () => {
+    const run = await runHealthCheck({ provider: syntheticProvider, connectedUser: CONNECTED_USER, calibration: loadCalibration(), modules: SALES_CLOUD_MODULES, outDir: tempDir(), now: new Date(AS_OF), transport: new Simulator({ asyncApex: { Max: 250_000, Remaining: 10 } }), answers: loadAnswers() });
+    assert.match(one(run.output!.findings, "int.api-usage").summary, /99\.9% of its daily background \(asynchronous Apex\) jobs \(249,990 of 250,000\)/);
+    const report = buildReport(loadRun(run.dir).input);
+    for (const built of Object.values(report.outputs)) {
+      for (const s of built.sections) {
+        const v = built.versions.find((x) => x.id === s.currentVersionId)!;
+        assert.deepEqual(v.numberCheck.unmatched, [], `${built.sections[0]?.output} ${s.key}`);
+      }
+    }
   });
 });
 
@@ -121,16 +177,93 @@ describe("our own calls never make the finding", () => {
     const out = tempDir();
     // 949,490 of 1,000,000 is 94.9%; the run stops at 94.95%, ten calls in, before the limit steps run.
     const org = new Simulator({ used: 949_490, dailyLimit: 1_000_000, asyncApex: { Max: 250_000, Remaining: 200_000 } });
-    const stopped = await simulated(org, out, { stopAtShare: 0.9495 });
+    const stopped = await simulated(org, out, { stopAtShare: 0.9495, inventory: true });
     assert.equal(stopped.run.status, "stopped_budget");
-    assert.notEqual(stopped.run.steps.find((s) => s.id === apiLimitsExtractor.id)?.status, "done", "the limit step runs only after the resume");
-    const resumed = await simulated(org, out, { resume: stopped.run.id, stopAtShare: 1 });
+    for (const id of [apiLimitsExtractor.id, limitsExtractor.id]) assert.notEqual(stopped.run.steps.find((s) => s.id === id)?.status, "done", `${id} runs only after the resume`);
+    const resumed = await simulated(org, out, { resume: stopped.run.id, stopAtShare: 1, inventory: true });
     assert.ok(resumed.output);
     // The resume's own connection reads 949,500 or more, 95%, with our first sitting's calls in it.
     assert.ok(stopped.run.budget.callsMade >= 10, `${stopped.run.budget.callsMade} calls before the stop`);
     const f = one(resumed.output.findings, "int.api-usage");
     assert.equal(f.status, "passed");
     assert.equal(f.facts.DailyApiRequestsUsed, 949_490);
+    // The inventory's limits step uses the same kept reading (decision 726).
+    const inventory = Inventory.parse(JSON.parse(readFileSync(join(resumed.dir, "inventory.json"), "utf8")));
+    assert.ok("rows" in inventory.limits);
+    assert.deepEqual(inventory.limits.rows.find((r) => r.name === "DailyApiRequests"), { name: "DailyApiRequests", max: 1_000_000, used: 949_490 });
+  });
+
+  test("both limit steps take the kept reading over the connection's, its reason when it couldn't be read included", async () => {
+    const client = { apiVersion: "66.0", limitsAtConnect: { DailyApiRequests: { Max: 100, Remaining: 1 } }, allLimitsAtConnect: { DailyApiRequests: { Max: 100, Remaining: 1 } }, limitsUnread: null };
+    const ctx = (limitsAtStart: ExtractContext["limitsAtStart"]) => ({ client, limitsAtStart }) as unknown as ExtractContext;
+    const kept = { all: { DailyApiRequests: { Max: 100, Remaining: 90 } }, reported: { DailyApiRequests: { Max: 100, Remaining: 90 } }, unread: null };
+    assert.deepEqual(await apiLimitsExtractor.run(ctx(kept)), { status: "ok", data: kept.reported, source: { kind: "rest", path: "/services/data/v66.0/limits" }, truncated: false });
+    assert.deepEqual(await limitsExtractor.run(ctx(kept)), { status: "ok", data: kept.all, source: { kind: "rest", path: "/services/data/v66.0/limits" }, truncated: false });
+    const refused = { all: {}, reported: {}, unread: LIMITS_NO_PERMISSION };
+    assert.equal(parseLimitsReading(JSON.parse(JSON.stringify(refused)))?.unread, LIMITS_NO_PERMISSION, "the reason survives the file");
+    for (const step of [apiLimitsExtractor, limitsExtractor]) assert.deepEqual(await step.run(ctx(refused)), { status: "unavailable", reason: LIMITS_NO_PERMISSION, source: { kind: "rest", path: "/services/data/v66.0/limits" } });
+  });
+
+  test("a first sitting that couldn't read the limits keeps why, and the resume says so though its own connection could read them", async () => {
+    const out = tempDir();
+    const org = new Simulator({ used: 949_490, dailyLimit: 1_000_000 });
+    let refuse = true;
+    const transport: Transport = {
+      send: (request) =>
+        refuse && new URL(request.url).pathname.endsWith("/limits")
+          ? Promise.resolve({ status: 403, header: () => null, text: JSON.stringify([{ errorCode: "INSUFFICIENT_ACCESS", message: "Not for this test's user." }]) })
+          : org.send(request),
+    };
+    const stopped = await simulated(org, out, { transport, stopAtShare: 0.9495 });
+    assert.equal(stopped.run.status, "stopped_budget");
+    assert.notEqual(stopped.run.steps.find((s) => s.id === apiLimitsExtractor.id)?.status, "done");
+    assert.equal(JSON.parse(readFileSync(join(stopped.dir, LIMITS_AT_START_FILE), "utf8")).unread, LIMITS_NO_PERMISSION);
+    refuse = false;
+    const resumed = await simulated(org, out, { transport, resume: stopped.run.id, stopAtShare: 1 });
+    const f = one(resumed.output!.findings, "int.api-usage");
+    assert.equal(f.status, "not_measurable");
+    assert.equal(f.notMeasurableReason, `The org's limits couldn't be read: ${LIMITS_NO_PERMISSION}`);
+  });
+});
+
+describe("a re-check's storage comparison is dated by when the kept reading was taken (decision 726)", () => {
+  test("the file's own time; the run's start for a file without one; nothing for a damaged file", () => {
+    const reading = { all: {}, reported: {}, unread: null };
+    assert.equal(keptLimitsReadAt({ ...reading, readAt: "2026-11-01T10:00:00.000Z" }, "2026-10-01T00:00:00.000Z"), "2026-11-01T10:00:00.000Z");
+    assert.equal(keptLimitsReadAt(reading, "2026-10-01T00:00:00.000Z"), "2026-10-01T00:00:00.000Z");
+    assert.equal(keptLimitsReadAt({ readAt: "2026-11-01T10:00:00.000Z" }, "2026-10-01T00:00:00.000Z"), null);
+    assert.equal(limitsReadAt(loadRun(dir).input.run, null), loadRun(dir).input.run.steps.find((s) => s.id === apiLimitsExtractor.id)!.finishedAt);
+  });
+
+  test("a resumed re-check whose limits step finished 108 days after its reading counts the days from the reading", () => {
+    const root = mkdtempSync(join(tmpdir(), "hc-limits-at-"));
+    const recheck = join(root, "hc-2026-11-09-recheck");
+    plantRecheck(dir, recheck);
+    // The step finished on the re-check's date; the kept reading was taken 10 days after the earlier health check's.
+    stampLimitsReading(recheck, new Date(Date.parse(EARLIER_AS_OF) + 10 * 86_400_000).toISOString());
+    const { input } = loadRun(recheck);
+    assert.match(storageSentences(buildReport(input).progress!).join(" "), /in 10 days/);
+  });
+});
+
+describe("an earlier issue today's rule wouldn't raise isn't counted as fixed (decision 726)", () => {
+  const { input } = loadRun(dir);
+  const report = buildReport(input);
+  const side = (findings: Finding[]): ProgressSide => ({ runId: "r", asOf: input.run.asOf, findings, scores: input.scores ?? [], overall: report.overall, value: report.value, limitsReadAt: null });
+  const usage = report.teamFindings.find((f) => f.ruleId === "int.api-usage")!;
+  const passed: Finding = { ...usage, status: "passed", facts: { DailyApiRequestsShare: 1, DailyAsyncApexExecutionsShare: 40 } };
+  const earlier = (version: number, share: number): Finding => ({ ...usage, ruleVersion: version, facts: { DailyApiRequestsShare: 1, DailyAsyncApexExecutionsShare: share } });
+  const others = report.teamFindings.filter((f) => f.ruleId !== "int.api-usage");
+  const progress = (then: Finding) => compareWithBaseline(side([...others, then]), side([...others, passed]));
+  const listed = (p: ReturnType<typeof progress>): string[] => [...p.fixed, ...p.remaining, ...p.unknown].map((c) => c.ruleId).filter((id) => id === "int.api-usage");
+
+  test("version 2 at 88%: left out of Fixed", () => {
+    assert.deepEqual(listed(progress(earlier(2, 88))), []);
+  });
+
+  test("version 2 at 96%, and version 3: a pass now is fixed", () => {
+    assert.deepEqual(progress(earlier(2, 96)).fixed.map((c) => c.ruleId).filter((id) => id === "int.api-usage"), ["int.api-usage"]);
+    assert.deepEqual(progress(earlier(3, 96)).fixed.map((c) => c.ruleId).filter((id) => id === "int.api-usage"), ["int.api-usage"]);
   });
 });
 
