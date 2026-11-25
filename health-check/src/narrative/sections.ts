@@ -2,7 +2,7 @@ import { compareWithBaseline, limitsReadAt, progressDays, progressFigures, progr
 import { factsText, type FactsSummary } from "../facts/summary.ts";
 import { currencyStanding } from "../engine/currency.ts";
 import { addedByFinding, buildValueModel, valueCurrency, MONEY_FACTS, worthOf, HEADLINE_KINDS, KIND_LABELS, TEAM_TIME_GROUP, UK_HOURLY_BENCHMARK, WORKING_WEEKS, type TeamTime, type ValueModel } from "../value/model.ts";
-import { AREA_WEIGHTS, CRITICAL_CAP, GRADES, INSIGHT_METRICS, INSIGHT_RULES, overallScore, type OverallScore } from "../domains/scoring.ts";
+import { AREA_WEIGHTS, CRITICAL_CAP, GRADES, INSIGHT_METRICS, INSIGHT_RULES, overallScore, PATH_INSIGHTS_RULE, type OverallScore } from "../domains/scoring.ts";
 import { comparisonId, comparisonNotes, compareRun, OWN_RANGE_MIN, type BenchmarkInput, type Comparison } from "../benchmark/compare.ts";
 import { quarterOf } from "../benchmark/export.ts";
 import { buildInvestment, investmentText, INVESTMENT_METRIC_IDS, type Investment } from "../money/investment.ts";
@@ -126,6 +126,11 @@ export type BuiltReport = {
   causes: Cause[];
   /** Could this org put an AI agent to work safely (DECISIONS.md 236 to 243). Decided by code from the findings and the AI metrics. */
   readiness: Readiness;
+  /**
+   * The path insights' findings as the run keeps them (DECISIONS.md 703, 758), for the
+   * digest's `paths` block alone: no document, section, dataset, score or plan reads them.
+   */
+  pathInsights?: Finding[];
 };
 
 export const TOP_ISSUE_COUNT = 5;
@@ -1050,6 +1055,7 @@ export function buildReport(all: ReportInput): BuiltReport {
     interviews,
     causes,
     readiness,
+    pathInsights: all.findings.filter((f) => f.ruleId === PATH_INSIGHTS_RULE),
     outputs: {
       raw_notes: build("raw_notes", noted(value.currencyNote, () => rawNotesSpecs(input, overall, comparisons, value, investment, effective.findings, effective.metrics, progress, survey, causes, interviews, readiness))),
       executive_summary: build("executive_summary", noted(value.currencyNote, () => executiveSpecs(input, team, effective.metrics, survey, interviews, added))),

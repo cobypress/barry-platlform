@@ -16,6 +16,7 @@ import { DIGEST_VERSION, NAMED_PEOPLE_SENTENCE, RunDigest, type DigestArea, type
 import { FIX_PROMPT_MAX, type Finding, type Metric } from "../schemas/index.ts";
 import type { Inventory } from "../schemas/inventory.ts";
 import { GROUPS, HEADLINE_KINDS, type ValueKind } from "../value/model.ts";
+import { digestPaths, PATHS_CODE_PATHS, pathsWords } from "./paths.ts";
 
 // The run digest (DECISIONS.md 632): made by code, with no Claude, from the
 // built report the documents are made from, so a consultant's corrections are
@@ -358,6 +359,7 @@ export function buildDigest({ report, pseudonyms, inventory, madeAt }: DigestFor
   const overall = report.overall;
   const hoursTotal = planHours(plan);
   const quickFixes = quickFixesOf(plan);
+  const paths = digestPaths(report);
   // Typed by the parse below, which holds every id and code to its shape.
   const raw = {
     version: DIGEST_VERSION,
@@ -391,6 +393,8 @@ export function buildDigest({ report, pseudonyms, inventory, madeAt }: DigestFor
     ...(report.input.rules ? { rulesRun: [...report.input.rules.rulesRun], rulesKnown: [...report.input.rules.rulesKnown] } : {}),
     // AI readiness as the full report's slide has it (DECISIONS.md 742); none for a report built without it.
     ...(report.readiness ? { readiness: digestReadiness(report.readiness) } : {}),
+    // The path insights the engine raised, or why it says none (DECISIONS.md 758); none for a run with no path analysis.
+    ...(paths ? { paths } : {}),
   };
   orgValues = orgValuesOf({ metrics: report.metrics, findings: report.input.findings, stages: report.input.calibration.stages.map((s) => s.name) });
   const guarded = guardDigest(raw, pseudonyms);
@@ -401,7 +405,8 @@ export function buildDigest({ report, pseudonyms, inventory, madeAt }: DigestFor
   const merged = { ...guarded, findings, ...fixedWords(guarded, findings), ...caveat, ...(guarded.editionNote !== undefined && isEditionNote(guarded.editionNote) ? { orgWords: { editionNote: ENGINE_WORDS } } : {}) };
   const done = { ...merged, ...moreWords(merged as unknown as RunDigest, report) } as unknown as RunDigest;
   // Typed by the parse below, as the raw digest is.
-  return RunDigest.parse(raw.readiness && done.readiness ? { ...done, readiness: readinessWords(done, raw.readiness, report) } : done);
+  const withReadiness = raw.readiness && done.readiness ? { ...done, readiness: readinessWords(done, raw.readiness, report) } : done;
+  return RunDigest.parse(done.paths ? { ...withReadiness, paths: pathsWords(done.paths, report) } : withReadiness);
 }
 
 /** The readiness block before the guard: codes, ids and the texts as the report has them. */
@@ -593,7 +598,7 @@ export const ID_MAPS: ReadonlySet<string> = new Set(["alsoFor"]);
 
 /** Every string in the digest outside STRUCTURAL_KEYS, through digestText: the one route text takes into a digest. */
 export function guardDigest<T>(value: T, pseudonyms: Pseudonymiser, key = "", path = ""): T {
-  if (STRUCTURAL_KEYS.has(key) || ID_MAPS.has(key) || READINESS_CODE_PATHS.has(path)) return value;
+  if (STRUCTURAL_KEYS.has(key) || ID_MAPS.has(key) || READINESS_CODE_PATHS.has(path) || PATHS_CODE_PATHS.has(path)) return value;
   if (typeof value === "string") return digestText(value, pseudonyms) as T;
   if (Array.isArray(value)) return value.map((v) => guardDigest(v, pseudonyms, key, `${path}[]`)) as T;
   if (value && typeof value === "object") return Object.fromEntries(Object.entries(value).map(([k, v]) => [k, guardDigest(v, pseudonyms, k, path ? `${path}.${k}` : k)])) as T;

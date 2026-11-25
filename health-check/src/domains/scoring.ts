@@ -33,6 +33,13 @@ export const UNSCORED_RULES: ReadonlySet<string> = new Set(["tech.lint-data-acce
  * UNSCORED_RULES, which a re-check reads as the code checker's groups.
  */
 export const INSIGHT_RULES: ReadonlySet<string> = new Set(["pipe.path-insights", "pipe.probability-vs-reality"]);
+/** The path insights' rule (DECISIONS.md 703): the only insight the digest serves, in its own `paths` block (758). */
+export const PATH_INSIGHTS_RULE = "pipe.path-insights";
+/**
+ * The rules that score the same stage moves the path insights compare (the note
+ * above): the issues a digest's `paths` block links to (DECISIONS.md 758).
+ */
+export const PATH_RELATED_RULES: ReadonlySet<string> = new Set(["pipe.skipped-stages", "pipe.going-backwards", "pipe.dead-end-stage"]);
 /**
  * The measures the insights are read from, which go where they go (DECISIONS.md
  * 703). The stage probabilities against what happens (706) join them: a setting

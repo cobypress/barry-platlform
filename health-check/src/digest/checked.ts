@@ -8,6 +8,7 @@ import { HELD_FOR_US_MASKS } from "../render/render-released.ts";
 import { RunDigest, type SentenceOrgWords } from "../schemas/digest.ts";
 import type { Inventory } from "../schemas/inventory.ts";
 import { buildDigest, READINESS_CODE_PATHS } from "./build.ts";
+import { PATHS_CODE_PATHS } from "./paths.ts";
 
 // An automatic run's digest, checked before the run is released (DECISIONS.md
 // 693). The portal shows the digest and nothing else of an automatic run, and
@@ -41,6 +42,12 @@ export type CheckedDigest = {
    * it would be without it.
    */
   readinessWithheld: number;
+  /**
+   * The path insights' texts withheld (DECISIONS.md 758), counted as readiness's are:
+   * never in masks, unmatched or unmarked, and never a reason to hold. Present only
+   * on a digest made with a `paths` block.
+   */
+  pathsWithheld?: number;
 };
 
 export type CheckedDigestFor = {
@@ -78,6 +85,8 @@ export const STRUCTURAL_PATHS: ReadonlySet<string> = new Set([
   "findings[].passedUnder",
   // AI readiness's codes and ids (DECISIONS.md 742): a figure's value is a number, never text.
   ...READINESS_CODE_PATHS,
+  // The path insights' codes and ids (DECISIONS.md 758).
+  ...PATHS_CODE_PATHS,
 ]);
 
 /** Every string the digest serves as text: everything outside its structural paths and its marks. */
@@ -177,6 +186,14 @@ export const TEXT_SLOTS: Readonly<Record<string, Slot | "fixed">> = {
   "readiness.pillars[].label": slotOf((d, at) => d.readiness?.pillars[at[0]!], "label"),
   "readiness.pillars[].question": slotOf((d, at) => d.readiness?.pillars[at[0]!], "question"),
   "readiness.pillars[].reason": slotOf((d, at) => d.readiness?.pillars[at[0]!], "reason"),
+  // The path insights (DECISIONS.md 758).
+  "paths.insights[].stages[]": slotOf((d, at) => d.paths?.insights[at[0]!], "stages", true),
+  "paths.insights[].title": slotOf((d, at) => d.paths?.insights[at[0]!], "title"),
+  "paths.insights[].summary": slotOf((d, at) => d.paths?.insights[at[0]!], "summary"),
+  "paths.insights[].recommendation": slotOf((d, at) => d.paths?.insights[at[0]!], "recommendation"),
+  "paths.headline.text": slotOf((d) => d.paths?.headline, "text"),
+  "paths.notStated.reason": slotOf((d) => d.paths?.notStated, "reason"),
+  "paths.notStated.unlock": slotOf((d) => d.paths?.notStated, "unlock"),
 };
 
 export type DigestText = { path: string; at: number[]; text: string };
@@ -200,6 +217,7 @@ export function marksOf(d: RunDigest, t: DigestText): SentenceOrgWords | null {
 
 const METRIC_TEXT = /^metrics\[\]\./;
 const READINESS_TEXT = /^readiness\./;
+const PATHS_TEXT = /^paths\./;
 
 /**
  * Every text that lost its marks to a mask (682: they no longer fit its hash)
@@ -238,7 +256,7 @@ export function enforceMarks(digest: RunDigest): { digest: RunDigest; withheld: 
   // A metric whose label can't be marked goes whole: a value beside "(detail withheld)" would say nothing true.
   const dropped = new Set<number>();
   for (const t of digestTextsAt(digest)) {
-    if (READINESS_TEXT.test(t.path) || marksOf(digest, t)) continue;
+    if (READINESS_TEXT.test(t.path) || PATHS_TEXT.test(t.path) || marksOf(digest, t)) continue;
     const slot = TEXT_SLOTS[t.path];
     if (t.path === "metrics[].label") dropped.add(t.at[0]!);
     else if (METRIC_TEXT.test(t.path) && slot && slot !== "fixed") {
@@ -278,9 +296,13 @@ export function unmarkedSentences(digest: RunDigest): number {
 
 const masksIn = (digest: RunDigest): number => digestTexts(digest).reduce((n, text) => n + text.split(MASK).length - 1, 0);
 
-/** The digest as the counts read it: without AI readiness, which restates what they already count (DECISIONS.md 742). */
+/**
+ * The digest as the counts read it: without AI readiness, which restates what they
+ * already count (DECISIONS.md 742), and without the path insights, settled apart so
+ * they never move a count or a hold (758).
+ */
 const counted = (digest: RunDigest): RunDigest => {
-  const { readiness: _r, ...rest } = digest;
+  const { readiness: _r, paths: _p, ...rest } = digest;
   return rest as RunDigest;
 };
 
@@ -305,7 +327,45 @@ export function settleReadiness(digest: RunDigest, set: FigureSet): { digest: Ru
     withheld++;
   }
   const parsed = RunDigest.safeParse(out);
-  return parsed.success ? { digest: parsed.data, withheld } : { digest: counted(digest), withheld: withheld + 1 };
+  if (parsed.success) return { digest: parsed.data, withheld };
+  const { readiness: _r, ...rest } = digest;
+  return { digest: rest as RunDigest, withheld: withheld + 1 };
+}
+
+/**
+ * The set the path insights' texts are traced against: every output's, and their
+ * own findings' texts and facts, each under its finding's id, as a served
+ * finding's are in the report's set. Only here: the counts never read it (758).
+ */
+export function pathsDataset(report: BuiltReport, set: FigureSet): FigureSet {
+  const own = buildDataset({ findings: report.pathInsights ?? [], metrics: [] });
+  return { figures: [...set.figures, ...own.figures], dates: [...set.dates, ...own.dates], identifiers: [...set.identifiers, ...own.identifiers], tokens: [...set.tokens, ...own.tokens], labels: [...set.labels, ...own.labels] };
+}
+
+/**
+ * The path insights' texts (DECISIONS.md 758), settled as AI readiness's are (742):
+ * each that has no marks, or holds a figure that doesn't trace, is withheld whole
+ * as "(detail withheld)", marked as ours, and a withheld summary's figures go
+ * with it. If the block then didn't parse, it goes whole.
+ */
+export function settlePaths(digest: RunDigest, set: FigureSet): { digest: RunDigest; withheld: number } {
+  if (!digest.paths) return { digest, withheld: 0 };
+  const out = structuredClone(digest);
+  let withheld = 0;
+  for (const t of digestTextsAt(digest)) {
+    if (!PATHS_TEXT.test(t.path) || t.text === MASK) continue;
+    if (marksOf(digest, t) && checkNumbers(t.text, set).unmatched.length === 0) continue;
+    const slot = TEXT_SLOTS[t.path];
+    if (!slot || slot === "fixed") continue;
+    setText(out, t, MASK);
+    slot.set(out, t.at, OURS);
+    if (t.path === "paths.insights[].summary") delete out.paths!.insights[t.at[0]!]!.figures;
+    withheld++;
+  }
+  const parsed = RunDigest.safeParse(out);
+  if (parsed.success) return { digest: parsed.data, withheld };
+  const { paths: _p, ...rest } = digest;
+  return { digest: rest as RunDigest, withheld: withheld + 1 };
 }
 
 export function checkedDigest({ input, pseudonyms, inventory, madeAt, build = buildReport }: CheckedDigestFor): CheckedDigest {
@@ -335,10 +395,13 @@ export function checkedDigest({ input, pseudonyms, inventory, madeAt, build = bu
   const enforced = enforceMarks(digest);
   // Readiness's texts after, apart: withheld where they can't be vouched for, and never counted (742).
   const settled = settleReadiness(enforced.digest, set);
-  digest = settled.digest;
+  // The path insights' after, apart, the same way (758).
+  const hadPaths = settled.digest.paths !== undefined;
+  const paths = settlePaths(settled.digest, pathsDataset(report, set));
+  digest = paths.digest;
   // Each metric left out whole counts as one mask, as each "(detail withheld)" does.
   const masks = masksIn(counted(digest)) + enforced.dropped;
   const unmarked = enforced.unmarked;
   const held = unmatched > 0 || masks > HELD_FOR_US_MASKS || unmarked > 0 ? "digest_held" : null;
-  return { digest, masks, unmatched, unmarked, held, readinessWithheld: settled.withheld };
+  return { digest, masks, unmatched, unmarked, held, readinessWithheld: settled.withheld, ...(hadPaths ? { pathsWithheld: paths.withheld } : {}) };
 }

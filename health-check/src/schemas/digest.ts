@@ -441,6 +441,87 @@ export const DigestReadiness = z
   });
 export type DigestReadiness = z.infer<typeof DigestReadiness>;
 
+/**
+ * What each number in a path insight's summary is (DECISIONS.md 758), in the
+ * order the summary says them: the deals made in the period that reached the
+ * point compared, the ones a last move back closed out and the ones still open
+ * (each left out), the closed deals compared, the group's deals and win rate,
+ * the other side's win rate and deals, won deals' median days on each side
+ * when said, and the groups the gap held in of those compared; then any count
+ * in the note the engine adds to every pipeline finding after them (such as how
+ * many record types the deals use).
+ */
+export const PATH_FIGURES = [
+  "considered", "closedOut", "open", "closed", "groupDeals", "groupWinRate", "otherWinRate", "otherDeals", "groupWonMedianDays", "otherWonMedianDays", "segmentsHeld", "segmentsCompared", "inNote",
+] as const;
+
+/** Why no path insight is said, as a code (DECISIONS.md 758); `other` when the engine's reason is one this list doesn't know. */
+export const PATHS_NOT_STATED = [
+  "no_gap_found", "nothing_to_compare", "too_few_won_and_lost", "too_many_open", "too_slow_to_close",
+  "deals_not_read", "stages_not_mapped", "history_not_tracked", "too_few_closed", "every_path_different", "no_usual_path", "too_few_won", "other",
+] as const;
+
+/**
+ * One insight the engine raised from the paths closed deals took (DECISIONS.md
+ * 703, 712, 758): deals that skipped a stage against deals that went through it,
+ * or deals sent back from one stage to another against the rest that reached
+ * it. Its sentences are the finding's as the engine wrote them, each marked;
+ * `stages` the stage or the two stages, each the org's words whole; `figures`
+ * each number in the summary, by what it is. How often two things went
+ * together, never a cause, and never set against a "standard" path.
+ */
+export const DigestPathInsight = z
+  .object({
+    /** The finding's id: stable across runs for the same rule, kind and stages. */
+    id: Id,
+    kind: z.enum(["skipped", "sent_back"]),
+    /** The skipped stage; or the stage sent back from, then the stage sent back to. */
+    stages: z.array(Text).min(1).max(2),
+    title: Text,
+    summary: Text,
+    recommendation: Text,
+    confidence: z.enum(["high", "medium", "low"]),
+    figures: z.array(z.object({ name: z.enum(PATH_FIGURES), value: Amount })).optional(),
+    orgWords: z
+      .object({ stages: z.array(SentenceOrgWords.nullable()).optional(), title: SentenceOrgWords.optional(), summary: SentenceOrgWords.optional(), recommendation: SentenceOrgWords.optional() })
+      .optional(),
+  })
+  .superRefine((p, ctx) => {
+    for (const key of ["title", "summary", "recommendation"] as const) if (!fits(p[key], p.orgWords?.[key])) ctx.addIssue({ code: "custom", path: ["orgWords", key], message: "Spans must fit their text" });
+    p.orgWords?.stages?.forEach((m, i) => {
+      if (m && !fits(p.stages[i], m)) ctx.addIssue({ code: "custom", path: ["orgWords", "stages", i], message: "Spans must fit their stage" });
+    });
+  });
+export type DigestPathInsight = z.infer<typeof DigestPathInsight>;
+
+/**
+ * The paths closed deals took, as far as the engine will say (DECISIONS.md
+ * 758): only the insights it raised, never the table of path variants. With one
+ * or more raised, `headline` is the engine's choice of the one to lead with: the
+ * first insight's title, the insights being in the engine's order (confidence,
+ * then the size of the gap, then the deals compared). With none raised, or the
+ * analysis unable to run, `notStated` is the engine's own reason, its kind as a
+ * code, and where the engine knows it, what would let it say more.
+ * `relatedFindingIds` are the issues in `findings` about the same stage moves.
+ */
+export const DigestPaths = z
+  .object({
+    insights: z.array(DigestPathInsight),
+    headline: z.object({ insightId: Id, text: Text, orgWords: z.object({ text: SentenceOrgWords.optional() }).optional() }).optional(),
+    notStated: z
+      .object({ kind: z.enum(PATHS_NOT_STATED), reason: Text, unlock: Text.optional(), orgWords: z.object({ reason: SentenceOrgWords.optional(), unlock: SentenceOrgWords.optional() }).optional() })
+      .optional(),
+    relatedFindingIds: Ids,
+  })
+  .superRefine((p, ctx) => {
+    if ((p.insights.length > 0) !== (p.headline !== undefined)) ctx.addIssue({ code: "custom", path: ["headline"], message: "A headline goes with raised insights, and only with them" });
+    if ((p.insights.length === 0) !== (p.notStated !== undefined)) ctx.addIssue({ code: "custom", path: ["notStated"], message: "A reason nothing is said goes only where nothing is" });
+    if (p.headline && !p.insights.some((i) => i.id === p.headline!.insightId)) ctx.addIssue({ code: "custom", path: ["headline", "insightId"], message: "The headline is one of the insights" });
+    if (p.headline && !fits(p.headline.text, p.headline.orgWords?.text)) ctx.addIssue({ code: "custom", path: ["headline", "orgWords"], message: "Spans must fit the headline" });
+    if (p.notStated) for (const key of ["reason", "unlock"] as const) if (!fits(p.notStated[key], p.notStated.orgWords?.[key])) ctx.addIssue({ code: "custom", path: ["notStated", "orgWords", key], message: "Spans must fit their text" });
+  });
+export type DigestPaths = z.infer<typeof DigestPaths>;
+
 export const RunDigest = z.object({
   version: z.literal(DIGEST_VERSION),
   runId: Id,
@@ -485,6 +566,12 @@ export const RunDigest = z.object({
   rulesKnown: Ids.optional(),
   /** AI readiness (DECISIONS.md 742). Absent on a digest made before it. */
   readiness: DigestReadiness.optional(),
+  /**
+   * The path insights (DECISIONS.md 758): what the engine raised from the paths
+   * closed deals took, or why it says nothing. Absent when the run made no path
+   * analysis (a set-up review) and on a digest made before it.
+   */
+  paths: DigestPaths.optional(),
 });
 export type RunDigest = z.infer<typeof RunDigest>;
 
@@ -499,4 +586,5 @@ export const DIGEST_KEYS: ReadonlySet<string> = new Set([
   "checkerRead", "readClasses", "readTriggers", "alreadyListed", "orgWords", "orgWordsMarked", "start", "end", "valueReason", "valueAssumptions", "hoursBasis", "fixPrompt", "textSha256",
   "valueUnit", "valuePeriod", "editionNote", "caveat", "rulesRun", "rulesKnown", "ruleVersion", "issueUnder", "carriedFrom", "passedUnder",
   "readiness", "opening", "pillars", "question", "verdict", "metricIds", "figures", "metricId", "stat", "fixIds",
+  "paths", "insights", "stages", "headline", "insightId", "text", "notStated", "unlock", "relatedFindingIds", "name",
 ]);
