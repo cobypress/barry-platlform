@@ -963,7 +963,7 @@ async function finishPulse(runId: string, dir: string, deps: WorkerDeps, at: str
     // loadRun reads the baseline from the folder beside this one, if it's there and readable.
     // The earlier folder's corrections as they stand: a pulse is built once, here, and never printed (DECISIONS.md 528).
     const result = pulseResultOf(runId, dir, log, served);
-    await deps.store.savePulseResult(runId, result, at);
+    await deps.store.savePulseResult(runId, result, at, served ? { gated: true } : {});
     log(`Pulse ${runId}'s result is ready${result.baselineRunId ? `, against ${result.baselineRunId}` : ", with no baseline we could read"}.`);
   } catch (err) {
     log(`Pulse ${runId}'s result couldn't be saved: ${safeReason(err)}`);
