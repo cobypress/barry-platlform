@@ -3,7 +3,8 @@ import { createHash } from "node:crypto";
 import { averageBeside } from "../domains/average.ts";
 import { CURRENCY_NOT_NAMED } from "../engine/currency.ts";
 import { holdsNameOrSecret } from "../narrative/guard.ts";
-import type { BuiltReport } from "../narrative/sections.ts";
+import { readinessOpening, type BuiltReport } from "../narrative/sections.ts";
+import { PILLARS, type Readiness } from "../narrative/readiness.ts";
 import { buildPlan, DOMAIN_LABELS, domainLabel, PHASE_TITLES } from "../narrative/select.ts";
 import type { Pseudonymiser } from "../privacy/pseudonymiser.ts";
 import { knownPeople } from "../fix/prompt.ts";
@@ -11,7 +12,7 @@ import { spansIfCurrent, textSha256, type OrgSpan } from "../engine/org-words.ts
 import { engineOwn, orgValuesOf } from "../engine/automatic-words.ts";
 import { UNSCORED_RULES } from "../domains/scoring.ts";
 import { hasLoosened, issueUnder } from "../engine/loosened.ts";
-import { DIGEST_VERSION, NAMED_PEOPLE_SENTENCE, RunDigest, type DigestArea, type DigestFinding, type DigestMetric, type DigestTotal, type DigestValueModel, type SentenceOrgWords } from "../schemas/digest.ts";
+import { DIGEST_VERSION, NAMED_PEOPLE_SENTENCE, RunDigest, type DigestArea, type DigestReadiness, type DigestFinding, type DigestMetric, type DigestTotal, type DigestValueModel, type SentenceOrgWords } from "../schemas/digest.ts";
 import { FIX_PROMPT_MAX, type Finding, type Metric } from "../schemas/index.ts";
 import type { Inventory } from "../schemas/inventory.ts";
 import { GROUPS, HEADLINE_KINDS, type ValueKind } from "../value/model.ts";
@@ -381,6 +382,8 @@ export function buildDigest({ report, pseudonyms, inventory, madeAt }: DigestFor
     ...(editionNoteFor(report) ? { editionNote: editionNoteFor(report)! } : {}),
     // Which rules the analysis ran and which the engine knew, as the run folder keeps them (DECISIONS.md 718): ids, never text.
     ...(report.input.rules ? { rulesRun: [...report.input.rules.rulesRun], rulesKnown: [...report.input.rules.rulesKnown] } : {}),
+    // AI readiness as the full report's slide has it (DECISIONS.md 742); none for a report built without it.
+    ...(report.readiness ? { readiness: digestReadiness(report.readiness) } : {}),
   };
   orgValues = orgValuesOf({ metrics: report.metrics, findings: report.input.findings, stages: report.input.calibration.stages.map((s) => s.name) });
   const guarded = guardDigest(raw, pseudonyms);
@@ -389,8 +392,87 @@ export function buildDigest({ report, pseudonyms, inventory, madeAt }: DigestFor
   const said = (guarded.overall as { caveat?: string }).caveat;
   const caveat = said !== undefined && isScoreCaveat(said) ? { overall: { ...guarded.overall, orgWords: { caveat: ENGINE_WORDS } } } : {};
   const merged = { ...guarded, findings, ...fixedWords(guarded, findings), ...caveat, ...(guarded.editionNote !== undefined && isEditionNote(guarded.editionNote) ? { orgWords: { editionNote: ENGINE_WORDS } } : {}) };
+  const done = { ...merged, ...moreWords(merged as unknown as RunDigest, report) } as unknown as RunDigest;
   // Typed by the parse below, as the raw digest is.
-  return RunDigest.parse({ ...merged, ...moreWords(merged as unknown as RunDigest, report) });
+  return RunDigest.parse(raw.readiness && done.readiness ? { ...done, readiness: readinessWords(done, raw.readiness, report) } : done);
+}
+
+/** The readiness block before the guard: codes, ids and the texts as the report has them. */
+function digestReadiness(r: Readiness): DigestReadiness {
+  return {
+    overall: r.overall,
+    opening: readinessOpening(r),
+    pillars: r.pillars.map((p) => ({
+      key: p.key,
+      label: p.label,
+      question: p.question,
+      verdict: p.verdict,
+      reason: p.reason,
+      findingIds: [...p.findingIds],
+      metricIds: [...p.metricIds],
+      ...(p.figures.length ? { figures: p.figures.map((f) => ({ ...f })) } : {}),
+    })),
+    fixIds: r.fixes.map((f) => f.id),
+  };
+}
+
+/**
+ * Readiness's texts marked (DECISIONS.md 742), each only while it reads as the
+ * report made it. The opening is ours when every label put into it is the
+ * table's; a label and a question are ours while each is the table's word for
+ * its pillar. A reason is ours where the engine put in only numbers and its own
+ * words; where it quotes a finding's title, it takes the title's marks, as the
+ * digest serves that title, moved to where the title sits; where it passes a
+ * metric's not measurable reason on, that metric's reason's marks. One the guard
+ * replaced with the fixed sentence is ours; anything else is left unknown, for
+ * the checked digest to withhold.
+ */
+function readinessWords(d: RunDigest, before: DigestReadiness, report: BuiltReport): DigestReadiness {
+  const r = report.readiness;
+  const after = d.readiness!;
+  const guardedTo = (was: string, now: string): SentenceOrgWords | undefined | null => (was === now ? null : now === NAMED_PEOPLE_SENTENCE ? ENGINE_WORDS : undefined);
+  const findings = new Map(d.findings.map((f) => [f.id, f]));
+  const metrics = new Map(d.metrics.map((m) => [m.id, m]));
+  const asMade = new Map(report.teamFindings.map((f) => [f.id, f.title]));
+  const ownLabels = r.pillars.every((p) => Object.hasOwn(PILLARS, p.key) && p.label === PILLARS[p.key].label);
+  const opening = guardedTo(before.opening, after.opening) ?? (after.opening === readinessOpening(r) && ownLabels ? ENGINE_WORDS : undefined);
+  const pillars = after.pillars.map((p, i) => {
+    const made = r.pillars[i];
+    const table = Object.hasOwn(PILLARS, p.key) ? PILLARS[p.key] : undefined;
+    const label = guardedTo(before.pillars[i]!.label, p.label) ?? (table && p.label === table.label ? ENGINE_WORDS : undefined);
+    const question = guardedTo(before.pillars[i]!.question, p.question) ?? (table && p.question === table.question ? ENGINE_WORDS : undefined);
+    const { figures: _figures, ...bare } = p;
+    // A quoted title the digest doesn't serve as made, because the guard replaced or changed it, is never served
+    // here either, in any product's digest: the reason has its first letter lower-cased, which can hide a name the
+    // guard finds only with its capital ("Mark approvals..." quoted as "mark approvals..."). The fixed sentence instead.
+    const quotedAway = made?.quoted !== undefined && findings.get(made.quoted.findingId)?.title !== asMade.get(made.quoted.findingId);
+    if (quotedAway) return { ...bare, reason: NAMED_PEOPLE_SENTENCE, orgWords: { ...(label ? { label } : {}), ...(question ? { question } : {}), reason: ENGINE_WORDS } };
+    const guarded = guardedTo(before.pillars[i]!.reason, p.reason);
+    const reason = guarded !== null ? guarded : made && made.key === p.key && made.reason === p.reason ? reasonWords(made, findings, metrics) : undefined;
+    const words = { ...(label ? { label } : {}), ...(question ? { question } : {}), ...(reason ? { reason } : {}) };
+    // The fixed sentence holds no number, so no figures go with it.
+    const kept = p.reason === NAMED_PEOPLE_SENTENCE ? bare : p;
+    return Object.keys(words).length ? { ...kept, orgWords: words } : kept;
+  });
+  return { ...after, pillars, ...(opening ? { orgWords: { opening } } : {}) };
+}
+
+/** A reason's marks, from where its words came (Pillar.quoted and passedOn), or unknown. */
+function reasonWords(p: Readiness["pillars"][number], findings: Map<string, DigestFinding>, metrics: Map<string, DigestMetric>): SentenceOrgWords | undefined {
+  if (p.passedOn !== undefined) {
+    const m = metrics.get(p.passedOn);
+    return m?.status === "not_measurable" && m.reason === p.reason ? m.orgWords?.reason : undefined;
+  }
+  if (p.quoted === undefined) return ENGINE_WORDS;
+  const served = findings.get(p.quoted.findingId);
+  const marks = served?.orgWords?.title;
+  if (!served || !marks) return undefined;
+  // The title as the digest serves it is the one quoted, whole, or with only its first letter lower-cased (inSentence): the same length, so its spans stay where they were.
+  const { at } = p.quoted;
+  const quoted = p.reason.slice(at, at + served.title.length);
+  const lower = `${served.title.charAt(0).toLowerCase()}${served.title.slice(1)}`;
+  if (served.title.length === 0 || (quoted !== served.title && quoted !== lower) || lower.length !== served.title.length || p.reason.length !== at + served.title.length + 1 || !p.reason.endsWith(".")) return undefined;
+  return { orgWordsMarked: true, orgWords: marks.orgWords.map((s) => ({ start: s.start + at, end: s.end + at })) };
 }
 
 const ENGINE_WORDS: SentenceOrgWords = { orgWordsMarked: true, orgWords: [] };
@@ -490,14 +572,23 @@ export const STRUCTURAL_KEYS: ReadonlySet<string> = new Set([
   "lineIds", "leftOut", "later", "quickWins", "quickFixes", "key", "grade", "withheldNames", "partialFindingIds", "withoutHoursFindingIds", "notTotalledFindingIds", "textSha256",
   "rulesRun", "rulesKnown",
 ]);
+/**
+ * Readiness's codes and ids by full path (DECISIONS.md 742), never by a key's
+ * name, so a text field added later under a name such as "verdict" or "stat"
+ * still goes through the guard. The checked digest's STRUCTURAL_PATHS holds them too.
+ */
+export const READINESS_CODE_PATHS: ReadonlySet<string> = new Set([
+  "readiness.overall", "readiness.pillars[].key", "readiness.pillars[].verdict", "readiness.pillars[].findingIds", "readiness.pillars[].metricIds",
+  "readiness.pillars[].figures[].metricId", "readiness.pillars[].figures[].stat", "readiness.fixIds",
+]);
 /** Keyed by finding id, each holding finding ids: ids all the way down. */
 export const ID_MAPS: ReadonlySet<string> = new Set(["alsoFor"]);
 
 /** Every string in the digest outside STRUCTURAL_KEYS, through digestText: the one route text takes into a digest. */
-export function guardDigest<T>(value: T, pseudonyms: Pseudonymiser, key = ""): T {
-  if (STRUCTURAL_KEYS.has(key) || ID_MAPS.has(key)) return value;
+export function guardDigest<T>(value: T, pseudonyms: Pseudonymiser, key = "", path = ""): T {
+  if (STRUCTURAL_KEYS.has(key) || ID_MAPS.has(key) || READINESS_CODE_PATHS.has(path)) return value;
   if (typeof value === "string") return digestText(value, pseudonyms) as T;
-  if (Array.isArray(value)) return value.map((v) => guardDigest(v, pseudonyms, key)) as T;
-  if (value && typeof value === "object") return Object.fromEntries(Object.entries(value).map(([k, v]) => [k, guardDigest(v, pseudonyms, k)])) as T;
+  if (Array.isArray(value)) return value.map((v) => guardDigest(v, pseudonyms, key, `${path}[]`)) as T;
+  if (value && typeof value === "object") return Object.fromEntries(Object.entries(value).map(([k, v]) => [k, guardDigest(v, pseudonyms, k, path ? `${path}.${k}` : k)])) as T;
   return value;
 }

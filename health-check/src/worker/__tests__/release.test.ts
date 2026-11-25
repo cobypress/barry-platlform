@@ -107,7 +107,7 @@ describe("rule 10 on the digest: figures trace, an untraceable detail is withhel
 
   test("no digest at all is held: no_digest", () => {
     const c = checkedDigest({ input: loaded.input, pseudonyms: loaded.pseudonyms, inventory: null, madeAt: NOW, build: () => { throw new Error("no report"); } });
-    assert.deepEqual(c, { digest: null, masks: 0, unmatched: 0, unmarked: 0, held: "no_digest" });
+    assert.deepEqual(c, { digest: null, masks: 0, unmatched: 0, unmarked: 0, held: "no_digest", readinessWithheld: 0 });
     const d = decideRelease({ ...base, checked: c });
     assert.equal(d.kind === "hold" && d.reason, "no_digest");
   });

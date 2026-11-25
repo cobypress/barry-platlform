@@ -110,7 +110,11 @@ describe("the digest marks the org's words (decision 655)", () => {
     const before = digestOf(bare);
     // The areas', plan's and value groups' marks (DECISIONS.md 663) come from the engine's own tables, not the findings, so they are taken out of both.
     assert.deepEqual(unmarked(digest), unmarked(before));
-    assert.deepEqual({ ...digest, findings: digest.findings.map(strip) }, { ...before, findings: before.findings.map(strip), ...unmarkedParts(digest) });
+    // AI readiness (DECISIONS.md 742) reads the same; a reason quoting a title takes the title's marks, so without them it has none.
+    assert.deepEqual({ ...digest, findings: digest.findings.map(strip), readiness: unmarked(digest.readiness) }, { ...before, findings: before.findings.map(strip), ...unmarkedParts(digest), readiness: unmarked(before.readiness) });
+    const quoting = buildReport({ ...loaded.input }).readiness.pillars.flatMap((p, i) => (p.quoted ? [i] : []));
+    assert.ok(quoting.length > 0);
+    for (const i of quoting) assert.equal(before.readiness!.pillars[i]!.orgWords?.reason, undefined);
     // A sized value's unit and period are marked by the digest itself, from the engine's own texts (DECISIONS.md 693): nothing else is marked without the findings' marks.
     assert.ok(before.findings.every((f) => f.orgWords === undefined || Object.keys(f.orgWords).every((k) => k === "valueUnit" || k === "valuePeriod")));
     const marked = buildReport({ ...loaded.input });
