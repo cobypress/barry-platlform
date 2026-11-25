@@ -394,7 +394,7 @@ export function buildDigest({ report, pseudonyms, inventory, madeAt }: DigestFor
   const merged = { ...guarded, findings, ...fixedWords(guarded, findings), ...caveat, ...(guarded.editionNote !== undefined && isEditionNote(guarded.editionNote) ? { orgWords: { editionNote: ENGINE_WORDS } } : {}) };
   const done = { ...merged, ...moreWords(merged as unknown as RunDigest, report) } as unknown as RunDigest;
   // Typed by the parse below, as the raw digest is.
-  return RunDigest.parse(raw.readiness && done.readiness ? { ...done, readiness: readinessWords(done, raw.readiness, report.readiness) } : done);
+  return RunDigest.parse(raw.readiness && done.readiness ? { ...done, readiness: readinessWords(done, raw.readiness, report) } : done);
 }
 
 /** The readiness block before the guard: codes, ids and the texts as the report has them. */
@@ -427,22 +427,32 @@ function digestReadiness(r: Readiness): DigestReadiness {
  * replaced with the fixed sentence is ours; anything else is left unknown, for
  * the checked digest to withhold.
  */
-function readinessWords(d: RunDigest, before: DigestReadiness, r: Readiness): DigestReadiness {
+function readinessWords(d: RunDigest, before: DigestReadiness, report: BuiltReport): DigestReadiness {
+  const r = report.readiness;
   const after = d.readiness!;
   const guardedTo = (was: string, now: string): SentenceOrgWords | undefined | null => (was === now ? null : now === NAMED_PEOPLE_SENTENCE ? ENGINE_WORDS : undefined);
   const findings = new Map(d.findings.map((f) => [f.id, f]));
   const metrics = new Map(d.metrics.map((m) => [m.id, m]));
+  const asMade = new Map(report.teamFindings.map((f) => [f.id, f.title]));
   const ownLabels = r.pillars.every((p) => Object.hasOwn(PILLARS, p.key) && p.label === PILLARS[p.key].label);
   const opening = guardedTo(before.opening, after.opening) ?? (after.opening === readinessOpening(r) && ownLabels ? ENGINE_WORDS : undefined);
   const pillars = after.pillars.map((p, i) => {
     const made = r.pillars[i];
     const table = Object.hasOwn(PILLARS, p.key) ? PILLARS[p.key] : undefined;
-    const label = table && p.label === table.label ? ENGINE_WORDS : undefined;
-    const question = table && p.question === table.question ? ENGINE_WORDS : undefined;
+    const label = guardedTo(before.pillars[i]!.label, p.label) ?? (table && p.label === table.label ? ENGINE_WORDS : undefined);
+    const question = guardedTo(before.pillars[i]!.question, p.question) ?? (table && p.question === table.question ? ENGINE_WORDS : undefined);
+    const { figures: _figures, ...bare } = p;
+    // A quoted title the digest doesn't serve as made, because the guard replaced or changed it, is never served
+    // here either, in any product's digest: the reason has its first letter lower-cased, which can hide a name the
+    // guard finds only with its capital ("Mark approvals..." quoted as "mark approvals..."). The fixed sentence instead.
+    const quotedAway = made?.quoted !== undefined && findings.get(made.quoted.findingId)?.title !== asMade.get(made.quoted.findingId);
+    if (quotedAway) return { ...bare, reason: NAMED_PEOPLE_SENTENCE, orgWords: { ...(label ? { label } : {}), ...(question ? { question } : {}), reason: ENGINE_WORDS } };
     const guarded = guardedTo(before.pillars[i]!.reason, p.reason);
     const reason = guarded !== null ? guarded : made && made.key === p.key && made.reason === p.reason ? reasonWords(made, findings, metrics) : undefined;
     const words = { ...(label ? { label } : {}), ...(question ? { question } : {}), ...(reason ? { reason } : {}) };
-    return Object.keys(words).length ? { ...p, orgWords: words } : p;
+    // The fixed sentence holds no number, so no figures go with it.
+    const kept = p.reason === NAMED_PEOPLE_SENTENCE ? bare : p;
+    return Object.keys(words).length ? { ...kept, orgWords: words } : kept;
   });
   return { ...after, pillars, ...(opening ? { orgWords: { opening } } : {}) };
 }
@@ -561,17 +571,24 @@ export const STRUCTURAL_KEYS: ReadonlySet<string> = new Set([
   "severity", "confidence", "recommendationType", "kind", "effortSize", "notMeasurableKind", "timeBand", "fixComplexity", "difficulty", "from", "to", "currency", "group", "counted",
   "lineIds", "leftOut", "later", "quickWins", "quickFixes", "key", "grade", "withheldNames", "partialFindingIds", "withoutHoursFindingIds", "notTotalledFindingIds", "textSha256",
   "rulesRun", "rulesKnown",
-  // Readiness's codes and ids (DECISIONS.md 742).
-  "verdict", "metricIds", "metricId", "stat", "fixIds",
+]);
+/**
+ * Readiness's codes and ids by full path (DECISIONS.md 742), never by a key's
+ * name, so a text field added later under a name such as "verdict" or "stat"
+ * still goes through the guard. The checked digest's STRUCTURAL_PATHS holds them too.
+ */
+export const READINESS_CODE_PATHS: ReadonlySet<string> = new Set([
+  "readiness.overall", "readiness.pillars[].key", "readiness.pillars[].verdict", "readiness.pillars[].findingIds", "readiness.pillars[].metricIds",
+  "readiness.pillars[].figures[].metricId", "readiness.pillars[].figures[].stat", "readiness.fixIds",
 ]);
 /** Keyed by finding id, each holding finding ids: ids all the way down. */
 export const ID_MAPS: ReadonlySet<string> = new Set(["alsoFor"]);
 
 /** Every string in the digest outside STRUCTURAL_KEYS, through digestText: the one route text takes into a digest. */
-export function guardDigest<T>(value: T, pseudonyms: Pseudonymiser, key = ""): T {
-  if (STRUCTURAL_KEYS.has(key) || ID_MAPS.has(key)) return value;
+export function guardDigest<T>(value: T, pseudonyms: Pseudonymiser, key = "", path = ""): T {
+  if (STRUCTURAL_KEYS.has(key) || ID_MAPS.has(key) || READINESS_CODE_PATHS.has(path)) return value;
   if (typeof value === "string") return digestText(value, pseudonyms) as T;
-  if (Array.isArray(value)) return value.map((v) => guardDigest(v, pseudonyms, key)) as T;
-  if (value && typeof value === "object") return Object.fromEntries(Object.entries(value).map(([k, v]) => [k, guardDigest(v, pseudonyms, k)])) as T;
+  if (Array.isArray(value)) return value.map((v) => guardDigest(v, pseudonyms, key, `${path}[]`)) as T;
+  if (value && typeof value === "object") return Object.fromEntries(Object.entries(value).map(([k, v]) => [k, guardDigest(v, pseudonyms, k, path ? `${path}.${k}` : k)])) as T;
   return value;
 }

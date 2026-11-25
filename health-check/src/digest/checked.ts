@@ -7,7 +7,7 @@ import { replaceMarked, type Marked } from "../fix/marked.ts";
 import { HELD_FOR_US_MASKS } from "../render/render-released.ts";
 import { RunDigest, type SentenceOrgWords } from "../schemas/digest.ts";
 import type { Inventory } from "../schemas/inventory.ts";
-import { buildDigest } from "./build.ts";
+import { buildDigest, READINESS_CODE_PATHS } from "./build.ts";
 
 // An automatic run's digest, checked before the run is released (DECISIONS.md
 // 693). The portal shows the digest and nothing else of an automatic run, and
@@ -34,6 +34,13 @@ export type CheckedDigest = {
   unmarked: number;
   /** Null when the digest may be released. */
   held: DigestHold | null;
+  /**
+   * AI readiness's texts withheld, as "(detail withheld)" (DECISIONS.md 742). Never in
+   * masks, unmatched or unmarked, and never a reason to hold: the block restates
+   * findings and metrics already counted, so a run is released or held exactly as
+   * it would be without it.
+   */
+  readinessWithheld: number;
 };
 
 export type CheckedDigestFor = {
@@ -68,8 +75,7 @@ export const STRUCTURAL_PATHS: ReadonlySet<string> = new Set([
   // A rule's version and versions (DECISIONS.md 732): numbers, never text.
   "findings[].ruleVersion", "findings[].issueUnder", "findings[].carriedFrom",
   // AI readiness's codes and ids (DECISIONS.md 742): a figure's value is a number, never text.
-  "readiness.overall", "readiness.pillars[].key", "readiness.pillars[].verdict", "readiness.pillars[].findingIds", "readiness.pillars[].metricIds",
-  "readiness.pillars[].figures[].metricId", "readiness.pillars[].figures[].stat", "readiness.fixIds",
+  ...READINESS_CODE_PATHS,
 ]);
 
 /** Every string the digest serves as text: everything outside its structural paths and its marks. */
@@ -190,8 +196,8 @@ export function marksOf(d: RunDigest, t: DigestText): SentenceOrgWords | null {
   return slot?.get(d, t.at) ?? null;
 }
 
-/** A metric's texts, and readiness's (DECISIONS.md 742): withheld whole when they can't be marked, never held. */
-const METRIC_TEXT = /^(metrics\[\]|readiness)\./;
+const METRIC_TEXT = /^metrics\[\]\./;
+const READINESS_TEXT = /^readiness\./;
 
 /**
  * Every text that lost its marks to a mask (682: they no longer fit its hash)
@@ -219,9 +225,9 @@ function remarked(before: RunDigest, after: RunDigest, raws: string[]): RunDiges
 
 /**
  * Rule 10's marks, enforced (DECISIONS.md 693). A metric's text with no marks
- * is withheld whole, as "(detail withheld)", and counted with the masks, as is
- * one of AI readiness's (742); any other text with none is counted as unmarked,
- * and the digest is held.
+ * is withheld whole, as "(detail withheld)", and counted with the masks; any
+ * other text with none is counted as unmarked, and the digest is held. AI
+ * readiness's texts are settled apart (settleReadiness, DECISIONS.md 742).
  */
 export function enforceMarks(digest: RunDigest): { digest: RunDigest; withheld: number; dropped: number; unmarked: number } {
   const out = structuredClone(digest);
@@ -230,7 +236,7 @@ export function enforceMarks(digest: RunDigest): { digest: RunDigest; withheld: 
   // A metric whose label can't be marked goes whole: a value beside "(detail withheld)" would say nothing true.
   const dropped = new Set<number>();
   for (const t of digestTextsAt(digest)) {
-    if (marksOf(digest, t)) continue;
+    if (READINESS_TEXT.test(t.path) || marksOf(digest, t)) continue;
     const slot = TEXT_SLOTS[t.path];
     if (t.path === "metrics[].label") dropped.add(t.at[0]!);
     else if (METRIC_TEXT.test(t.path) && slot && slot !== "fixed") {
@@ -270,8 +276,38 @@ export function unmarkedSentences(digest: RunDigest): number {
 
 const masksIn = (digest: RunDigest): number => digestTexts(digest).reduce((n, text) => n + text.split(MASK).length - 1, 0);
 
+/** The digest as the counts read it: without AI readiness, which restates what they already count (DECISIONS.md 742). */
+const counted = (digest: RunDigest): RunDigest => {
+  const { readiness: _r, ...rest } = digest;
+  return rest as RunDigest;
+};
+
+/**
+ * AI readiness's texts (DECISIONS.md 742), settled on their own so they never move
+ * a count: each that has no marks, or holds a figure that doesn't trace, is
+ * withheld whole as "(detail withheld)", marked as ours, and a withheld reason's
+ * figures go with it. If the block then didn't parse, it goes whole.
+ */
+export function settleReadiness(digest: RunDigest, set: FigureSet): { digest: RunDigest; withheld: number } {
+  if (!digest.readiness) return { digest, withheld: 0 };
+  const out = structuredClone(digest);
+  let withheld = 0;
+  for (const t of digestTextsAt(digest)) {
+    if (!READINESS_TEXT.test(t.path) || t.text === MASK) continue;
+    if (marksOf(digest, t) && checkNumbers(t.text, set).unmatched.length === 0) continue;
+    const slot = TEXT_SLOTS[t.path];
+    if (!slot || slot === "fixed") continue;
+    setText(out, t, MASK);
+    slot.set(out, t.at, OURS);
+    if (t.path === "readiness.pillars[].reason") delete out.readiness!.pillars[t.at[0]!]!.figures;
+    withheld++;
+  }
+  const parsed = RunDigest.safeParse(out);
+  return parsed.success ? { digest: parsed.data, withheld } : { digest: counted(digest), withheld: withheld + 1 };
+}
+
 export function checkedDigest({ input, pseudonyms, inventory, madeAt, build = buildReport }: CheckedDigestFor): CheckedDigest {
-  const none: CheckedDigest = { digest: null, masks: 0, unmatched: 0, unmarked: 0, held: "no_digest" };
+  const none: CheckedDigest = { digest: null, masks: 0, unmatched: 0, unmarked: 0, held: "no_digest", readinessWithheld: 0 };
   let report: BuiltReport;
   let digest: RunDigest;
   try {
@@ -282,7 +318,8 @@ export function checkedDigest({ input, pseudonyms, inventory, madeAt, build = bu
   }
   // The set the data as stored gives, so a mask never makes another figure untraceable (682).
   const set = digestDataset(report, pseudonyms);
-  const raws = untraced(digest, set);
+  // Every count reads the digest without AI readiness, so the block can never change one, nor what is masked (742).
+  const raws = untraced(counted(digest), set);
   if (raws.length > 0) {
     try {
       const masked = build(maskInput(input, raws).input);
@@ -291,13 +328,15 @@ export function checkedDigest({ input, pseudonyms, inventory, madeAt, build = bu
       return none;
     }
   }
-  const unmatched = untraced(digest, set).length;
+  const unmatched = untraced(counted(digest), set).length;
   // A metric's text that can't be marked is withheld, and counted with the masks; any other is held.
   const enforced = enforceMarks(digest);
-  digest = enforced.digest;
+  // Readiness's texts after, apart: withheld where they can't be vouched for, and never counted (742).
+  const settled = settleReadiness(enforced.digest, set);
+  digest = settled.digest;
   // Each metric left out whole counts as one mask, as each "(detail withheld)" does.
-  const masks = masksIn(digest) + enforced.dropped;
+  const masks = masksIn(counted(digest)) + enforced.dropped;
   const unmarked = enforced.unmarked;
   const held = unmatched > 0 || masks > HELD_FOR_US_MASKS || unmarked > 0 ? "digest_held" : null;
-  return { digest, masks, unmatched, unmarked, held };
+  return { digest, masks, unmatched, unmarked, held, readinessWithheld: settled.withheld };
 }
