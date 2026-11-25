@@ -117,6 +117,12 @@ export type RuleContext = {
    * a finding's confidence at medium (DECISIONS.md 598). Absent outside a run.
    */
   assume?(note: string): void;
+  /**
+   * The same, for named metrics of the current builder only (DECISIONS.md 756): a
+   * builder that makes many metrics says an assumption only on those it touches.
+   * Inside a rule, as assume.
+   */
+  assumeOn?(metricIds: readonly string[], note: string): void;
   /** Says the current rule reads this metric, so it carries whatever the metric leaned on. */
   leanOn?(metricId: string): void;
 };

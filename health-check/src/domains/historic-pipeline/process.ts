@@ -151,7 +151,7 @@ function skipped(ctx: Ctx, data: Ready, p: Process): Metric {
 function backwards(ctx: Ctx, data: Ready, p: Process): Metric {
   const definition = base(ctx, data, { ...DEF.backwards, assumptions: ["Earlier means earlier in the calibration's order of open stages"] });
   // Split by outcome, lost apart from no decision (DECISIONS.md 600).
-  const unsplit = unsplitLostReason(data);
+  const unsplit = unsplitLostReason(data, ctx, [definition.id]);
   if (unsplit) return notMeasurable(definition, unsplit);
   const back = (d: Deal): number => backwardMoves(p.paths.get(d.Id)!, data.stages.orderOf);
   const rate = (group: Deal[]): number => pct(group.filter((d) => back(d) > 0).length, group.length);

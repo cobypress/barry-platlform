@@ -450,23 +450,39 @@ function analyseWithin(input: AnalysisInput): AnalysisOutput {
     assume: (note) => {
       assumed.add(note);
     },
+    assumeOn: (metricIds, note) => {
+      if (!inBuilder) return void assumed.add(note);
+      for (const id of metricIds) onMetric.set(id, [...(onMetric.get(id) ?? []), note]);
+    },
     leanOn: (metricId) => {
       for (const note of leanedOn.get(metricId) ?? []) assumed.add(note);
     },
   };
   const leanedOn = new Map<string, string[]>();
+  // Notes said on named metrics of the builder running now (DECISIONS.md 756).
+  let onMetric = new Map<string, string[]>();
+  let inBuilder = false;
 
   const metrics = modules
     .flatMap((m) => (m.metrics ?? []).flatMap((build) => {
       assumed = new Set();
+      onMetric = new Map();
+      inBuilder = true;
       currencyRead = false;
-      const made = build(base);
+      let made: Metric[];
+      try {
+        made = build(base);
+      } finally {
+        inBuilder = false;
+      }
       // No currency: nothing in money is measured, for the plain reason (DECISIONS.md 700).
       const built = mode === "none" ? made.map((metric) => (metric.unit === "currency" || currencyRead ? metricWithoutCurrency(metric, noCurrency()) : metric)) : made;
       const builderNotes = [...assumed];
-      for (const metric of built) if (metric.status === "measured" && builderNotes.length > 0) leanedOn.set(metric.id, builderNotes);
+      // And the notes said on one metric alone (DECISIONS.md 756), after the builder's, as each was said.
+      const ownNotes = (metric: Metric): string[] => [...builderNotes, ...(onMetric.get(metric.id) ?? []).filter((n) => !builderNotes.includes(n))];
+      for (const metric of built) if (metric.status === "measured" && ownNotes(metric).length > 0) leanedOn.set(metric.id, ownNotes(metric));
       // A measured figure in money, its currency not known by name, says so among its assumptions (DECISIONS.md 700). It isn't leaned on: nothing is guessed.
-      const notesOf = (metric: Metric): string[] => (mode === "plain" && metric.unit === "currency" ? [...builderNotes, notNamed()] : builderNotes);
+      const notesOf = (metric: Metric): string[] => (mode === "plain" && metric.unit === "currency" ? [...ownNotes(metric), notNamed()] : ownNotes(metric));
       // A measured figure that leaned on an assumption says so among its own.
       return built.map((metric) => {
         const notes = metric.status === "measured" ? notesOf(metric) : [];

@@ -43,7 +43,7 @@ function quotedDeals(ctx: RuleContext): { rows: Quoted[]; multiCurrency: boolean
   if (quotes.truncated) return { reason: cutOff("quotes", quotes.data.length), evidence: [ctx.ev(quotes.source, { count: quotes.data.length })] };
   if (data.status !== "ok") return { reason: data.reason, evidence: data.evidence };
   // Won against lost, with no decision left out (DECISIONS.md 600).
-  const unsplit = unsplitLostReason(data);
+  const unsplit = unsplitLostReason(data, ctx);
   if (unsplit) return { reason: unsplit, evidence: data.evidence };
   const byDeal = new Map(quotes.data.filter((q) => q.SBQQ__Opportunity2__c).map((q) => [q.SBQQ__Opportunity2__c!, q]));
   const rows = data.deals.flatMap((deal): Quoted[] => {

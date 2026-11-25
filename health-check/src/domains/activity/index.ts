@@ -169,7 +169,7 @@ const dealsWithoutActivity = shareRule({
   scopeLabel: said`won and lost deals created in the last year`,
   scope(ctx, pipeline) {
     // Won and lost, with no decision left out (DECISIONS.md 600).
-    const unsplit = unsplitLostReason(pipeline);
+    const unsplit = unsplitLostReason(pipeline, ctx);
     if (unsplit) return { reason: unsplit };
     const data = loadActivity(ctx);
     if (data.status !== "ok") return { reason: data.reason, evidence: data.evidence };
@@ -194,7 +194,7 @@ const wonAgainstLost: Rule = {
     if ("outcome" in data) return data;
     const pipeline = loadPipeline(ctx);
     if (pipeline.status !== "ok") return { outcome: "not_measurable", reason: pipeline.reason, evidence: pipeline.evidence };
-    const unsplit = unsplitLostReason(pipeline);
+    const unsplit = unsplitLostReason(pipeline, ctx);
     if (unsplit) return { outcome: "not_measurable", reason: unsplit, evidence: pipeline.evidence };
     const touches = touchesByDeal(data);
     const count = (d: Deal): number => touches.get(d.Id)?.length ?? 0;
@@ -339,7 +339,7 @@ function activityMetrics(ctx: Ctx): Metric[] {
   const count = (d: Deal): number => touches.get(d.Id)?.length ?? 0;
   const deals = closedThisYear(ctx, pipeline.deals, data.from);
   const dims: Record<string, (d: Deal) => string> = { team: (d) => d.team, rep: (d) => ctx.userLabel(d.OwnerId) };
-  const unsplit = unsplitLostReason(pipeline);
+  const unsplit = unsplitLostReason(pipeline, ctx, [definitions.lost.id]);
   for (const [category, definition] of [["won", definitions.won], ["lost", definitions.lost]] as const) {
     const rows = deals.filter((d) => d.category === category);
     // Lost leaves no decision out (DECISIONS.md 600).

@@ -197,8 +197,6 @@ export function loadPipeline(ctx: Omit<RuleContext, "metrics">): PipelineData {
   // Whatever reads the deals leans on what their stages mean, so the engine
   // puts the note on its findings and metrics, and caps its confidence.
   if (data.status === "ok" && data.inferred.length > 0) ctx.assume?.(inferredStagesNote(data.inferred, ctx.calibration.source === "org_settings"));
-  // A stage whose outcome we read from its name is an assumption the customer can correct, never a fact (DECISIONS.md 756).
-  if (data.status === "ok" && data.readByName) ctx.assume?.(namedStagesNote(data.readByName));
   // A calibration read from the org's settings (DECISIONS.md 692): nobody chose
   // the record types, so blended sales processes are said, and the open stages'
   // order is Salesforce's sort order, said by whatever reads it.
@@ -330,7 +328,17 @@ function buildPipeline(ctx: Omit<RuleContext, "metrics">): PipelineData {
   };
 }
 
-/** The reason a split of lost from no decision isn't measured, or null when it can be (DECISIONS.md 600). */
-export function unsplitLostReason(data: { unsplitLost: string[]; fromOrgSettings?: boolean }): Said | null {
-  return data.unsplitLost.length > 0 ? unsplitReason(data.unsplitLost, data.fromOrgSettings === true) : null;
+/**
+ * The reason a split of lost from no decision isn't measured, or null when it
+ * can be (DECISIONS.md 600). Every figure that splits the two asks here, so
+ * where it can be measured only because we read some stages from their names,
+ * this is where the figure says so, and only such figures do (DECISIONS.md 756).
+ */
+export function unsplitLostReason(data: { unsplitLost: string[]; fromOrgSettings?: boolean; readByName?: Array<{ stage: string; category: StageCategory }> }, ctx: Pick<RuleContext, "assume" | "assumeOn">, metrics?: readonly string[]): Said | null {
+  if (data.unsplitLost.length > 0) return unsplitReason(data.unsplitLost, data.fromOrgSettings === true);
+  if (!data.readByName) return null;
+  // A metric builder names the metrics that split the two, so its others don't carry it.
+  if (metrics && ctx.assumeOn) ctx.assumeOn(metrics, namedStagesNote(data.readByName));
+  else ctx.assume?.(namedStagesNote(data.readByName));
+  return null;
 }

@@ -92,7 +92,7 @@ const winBacks: Rule = {
     // An account already buying or being sold to isn't a win-back.
     const active = new Set(data.deals.filter((d) => d.AccountId && (d.category === "open" || (d.category === "won" && d.closedAt >= oldest))).map((d) => d.AccountId!));
     // It reports the no decision deals apart, and leads with them (DECISIONS.md 600).
-    const unsplit = unsplitLostReason(data);
+    const unsplit = unsplitLostReason(data, ctx);
     if (unsplit) return { outcome: "not_measurable", reason: unsplit, evidence: data.evidence };
     const closed = data.deals.filter((d) => d.category === "lost" || d.category === "no_decision");
     const noAccount = closed.filter((d) => !d.AccountId).length;
