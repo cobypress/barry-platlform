@@ -17,7 +17,7 @@ import { SURVEY_METRIC_IDS } from "../survey/summary.ts";
 import { Interview } from "../interviews/questions.ts";
 import { BenchmarkRow, HeadcountBand, Industry } from "../schemas/benchmark.ts";
 import { storedFromRow, waitingRow, type ConsoleSummariesRow, type StoredSummaries } from "../handbook/summary-row.ts";
-import { readLosses, type RunLosses } from "./release.ts";
+import { readLosses, SHOWABLE_PULSE_HOLDS, type RunLosses } from "./release.ts";
 import { Calibration, ConnectLink, ManualAnswer, NumberOverride, ReportSection, Run, SectionVersion, type Finding, type ManualStep, type Metric, type Score } from "../schemas/index.ts";
 import {
   DISCONNECT_STEP,
@@ -43,6 +43,7 @@ import {
   type WorkerStore,
   type CurrencyWas,
   type RunLineage,
+  type PulseState,
   type PortalDocumentRow,
   type RunDelivery,
   DOCUMENTS_HELD_FLAG,
@@ -242,6 +243,39 @@ export function calibrationRow(runId: string, c: Calibration): Record<string, un
 export const NAME_CALIBRATION_CURRENCY_SQL =
   `UPDATE "HealthCheckCalibration" SET "currency" = $2, "fields" = ("fields" - 'currencySuggested') || jsonb_build_object('currencyFrom', 'connect_api') ` +
   `WHERE "runId" = $1 AND "source" = 'org_settings' AND "confirmedBy" = $3 AND "currency" = $4 AND jsonb_typeof("fields") = 'object' AND "fields" ->> 'currencyFrom' = $5`;
+/** A held pulse's would-be result, kept for a person's Show beside the run's losses in "budget", which no portal view reads (DECISIONS.md 746). */
+export const KEEP_PULSE_SQL = `UPDATE "HealthCheckRun" SET "budget" = jsonb_set("budget"::jsonb, '{heldPulse}', $2::jsonb, true) WHERE "id" = $1`;
+/** Where a pulse stands: its result, its kept result, its open flags. */
+export const PULSE_STATE_SQL =
+  `SELECT EXISTS (SELECT 1 FROM "HealthCheckPulseResult" p WHERE p."runId" = r."id") AS "hasResult", (r."budget"::jsonb -> 'heldPulse') IS NOT NULL AS "kept", ` +
+  `COALESCE((SELECT array_agg(f."kind" ORDER BY f."kind") FROM "HealthCheckRunFlag" f WHERE f."runId" = r."id" AND f."clearedAt" IS NULL), '{}'::text[]) AS "openFlags" FROM "HealthCheckRun" r WHERE r."id" = $1`;
+/** A run's stored overall score, through the row as JSON so a console without the column reads none. */
+export const RUN_OVERALL_SCORE_SQL = `SELECT to_jsonb("HealthCheckRun") ->> 'overallScore' AS "score" FROM "HealthCheckRun" WHERE "id" = $1`;
+/** A person's Show of a held pulse (746), in order, in one transaction: the run locked, its facts, the result, the kept copy gone, the flags cleared, the audit row. */
+export const SHOW_PULSE_LOCK_SQL = `SELECT "id" FROM "HealthCheckRun" WHERE "id" = $1 FOR UPDATE`;
+export const SHOW_PULSE_FACTS_SQL =
+  `SELECT r."product", r."budget"::jsonb -> 'heldPulse' AS "kept", EXISTS (SELECT 1 FROM "HealthCheckPulseResult" p WHERE p."runId" = r."id") AS "hasResult", ` +
+  `(SELECT to_jsonb(c) ->> 'source' FROM "HealthCheckCalibration" c WHERE c."runId" = r."id") AS "source", ` +
+  `COALESCE((SELECT array_agg(f."kind" ORDER BY f."kind") FROM "HealthCheckRunFlag" f WHERE f."runId" = r."id" AND f."clearedAt" IS NULL), '{}'::text[]) AS "openFlags" FROM "HealthCheckRun" r WHERE r."id" = $1`;
+/** No ON CONFLICT: a result already there rolls the Show back. */
+export const SHOW_PULSE_RESULT_SQL = `INSERT INTO "HealthCheckPulseResult" ("runId", "madeAt", "result") VALUES ($1, $2::timestamp(3), $3::jsonb)`;
+export const SHOW_PULSE_UNKEEP_SQL = `UPDATE "HealthCheckRun" SET "budget" = "budget"::jsonb - 'heldPulse' WHERE "id" = $1`;
+/** As the console's CLEAR_FLAGS_SQL and AUDIT_SQL (person-postgres.ts), word for word. */
+export const SHOW_PULSE_CLEAR_FLAGS_SQL = `UPDATE "HealthCheckRunFlag" SET "clearedBy" = $2, "clearedAt" = $3::timestamp(3) WHERE "runId" = $1 AND "kind" = ANY($4::text[]) AND "clearedAt" IS NULL RETURNING "kind"`;
+export const SHOW_PULSE_AUDIT_SQL = `INSERT INTO "audit_log" ("source", "action", "status", "correlation_id", "payload", "created_at") VALUES ($1, $2, 'ok', $3, $4::jsonb, $5::timestamp(3))`;
+/** The console's audit source for a person's actions on an automatic run (its person-store.ts AUDIT_SOURCE). */
+export const PERSON_AUDIT_SOURCE = "health-check";
+
+/** Why a held pulse can't be shown, or null when it can (746). One rule for both stores. */
+export function pulseShowRefusal(f: { product: string; source: string | null; kept: boolean; hasResult: boolean; openFlags: readonly string[] } | null): string | null {
+  if (!f) return "There's no such run.";
+  if (f.product !== "pulse" || f.source !== "org_settings") return "Only an automatic customer's monthly scan is shown this way.";
+  if (f.hasResult) return "This monthly scan is already shown.";
+  if (f.openFlags.length === 0) return "This monthly scan isn't held.";
+  if (!f.openFlags.every((k) => (SHOWABLE_PULSE_HOLDS as readonly string[]).includes(k)) || !f.kept) return "This monthly scan's details didn't pass our checks, so it can't be shown: run it again.";
+  return null;
+}
+
 /** A held pulse's earlier result taken away (DECISIONS.md 746): the portal lists a pulse once it has one. */
 export const PULSE_RESULT_DELETE_SQL = `DELETE FROM "HealthCheckPulseResult" WHERE "runId" = $1`;
 /** An automatic run's hold (DECISIONS.md 693), read through the row as JSON like its mode. Asked only for an automatic run, so a consultant-led run's reads are unchanged. */
@@ -822,6 +856,8 @@ export class PostgresWorkerStore implements WorkerStore {
       if (output.pulseHold) {
         await client.query(PULSE_RESULT_DELETE_SQL, [runId]);
         const h = output.pulseHold;
+        // A showable hold's would-be result, for a person's Show; after the progress above, which writes "budget" whole.
+        if (h.kept) await client.query(KEEP_PULSE_SQL, [runId, JSON.stringify(h.kept)]);
         for (const f of [{ kind: h.reason, counts: h.counts }, ...h.also]) await client.query(RAISE_FLAG_SQL, [runId, f.kind, h.at, JSON.stringify(f.counts)]);
       }
     });
@@ -866,6 +902,34 @@ export class PostgresWorkerStore implements WorkerStore {
     const row = one(await this.#pool.query(PREVIOUS_RUN_LOSSES_SQL, [runId, orgId15]));
     if (!row) return null;
     return { runId: String(row.id), losses: readLosses(row.losses) };
+  }
+
+  async pulseState(runId: string): Promise<PulseState | null> {
+    const row = one(await this.#pool.query(PULSE_STATE_SQL, [runId]));
+    if (!row) return null;
+    return { hasResult: row.hasResult === true, kept: row.kept === true, openFlags: Array.isArray(row.openFlags) ? row.openFlags.map(String) : [] };
+  }
+
+  async runOverallScore(runId: string): Promise<number | null> {
+    const value = one(await this.#pool.query(RUN_OVERALL_SCORE_SQL, [runId]))?.score;
+    const n = typeof value === "string" ? Number(value) : typeof value === "number" ? value : NaN;
+    return Number.isFinite(n) ? n : null;
+  }
+
+  async showHeldPulse(runId: string, by: string, at: string): Promise<{ ok: true; flagsCleared: string[] } | { ok: false; why: string }> {
+    return this.#transaction(async (client) => {
+      if ((await client.query(SHOW_PULSE_LOCK_SQL, [runId])).rows.length === 0) return { ok: false as const, why: "There's no such run." };
+      const row = one(await client.query(SHOW_PULSE_FACTS_SQL, [runId]));
+      const facts = row ? { product: String(row.product), source: typeof row.source === "string" ? row.source : null, kept: row.kept !== null && row.kept !== undefined, hasResult: row.hasResult === true, openFlags: Array.isArray(row.openFlags) ? row.openFlags.map(String) : [] } : null;
+      const why = pulseShowRefusal(facts);
+      if (why) return { ok: false as const, why };
+      const kept = typeof row!.kept === "string" ? JSON.parse(row!.kept) : row!.kept;
+      await client.query(SHOW_PULSE_RESULT_SQL, [runId, at, JSON.stringify(kept)]);
+      await client.query(SHOW_PULSE_UNKEEP_SQL, [runId]);
+      const cleared = (await client.query(SHOW_PULSE_CLEAR_FLAGS_SQL, [runId, by, at, facts!.openFlags])).rows.map((r: Record<string, unknown>) => String(r.kind)).sort();
+      await client.query(SHOW_PULSE_AUDIT_SQL, [PERSON_AUDIT_SOURCE, "show_to_customer", runId, JSON.stringify({ action: "show_to_customer", runId, by, at, state: facts!.openFlags[0], product: "pulse", flags: facts!.openFlags }), at]);
+      return { ok: true as const, flagsCleared: cleared };
+    });
   }
 
   async runLineage(runId: string): Promise<RunLineage | null> {

@@ -90,6 +90,9 @@ export type RunJobInput = {
  * reference, who made it, benchmark consent, modules, org) is the console's,
  * and the worker never writes it.
  */
+/** A pulse as the customer and a person's Show see it (DECISIONS.md 746). */
+export type PulseState = { hasResult: boolean; kept: boolean; openFlags: string[] };
+
 /** A run as a pulse's baseline chain sees it (DECISIONS.md 746). */
 export type RunLineage = { orgId: string; product: string; reviewMode: "automatic" | "consultant"; baselineRunId: string | null };
 
@@ -181,7 +184,7 @@ export type RunOutputRecord = {
    * has a result) never shows it. No "heldReason": the console allows one only on an automatic run, which a pulse
    * isn't in its records. Left out for every other run.
    */
-  pulseHold?: { reason: string; counts: Record<string, number>; also: Array<{ kind: string; counts: Record<string, number> }>; at: string };
+  pulseHold?: { reason: string; counts: Record<string, number>; also: Array<{ kind: string; counts: Record<string, number> }>; at: string; kept?: PulseResult };
 };
 
 /**
@@ -508,6 +511,31 @@ export interface WorkerStore {
    * such run. One read-only statement; throws on a store fault.
    */
   runLineage(runId: string): Promise<RunLineage | null>;
+  /**
+   * Where a pulse stands for the customer (DECISIONS.md 746): whether it has a
+   * result (so the portal lists it), whether a held one's result is kept for a
+   * person's Show, and its open flags. Null for no such run. Read-only; throws
+   * on a store fault.
+   */
+  pulseState(runId: string): Promise<PulseState | null>;
+  /**
+   * A run's stored overall score (DECISIONS.md 626), or null with none, no run or
+   * a console without the column. For a pulse's "before" when its baseline's
+   * folder isn't on this worker (746). Read-only; throws on any other fault.
+   */
+  runOverallScore(runId: string): Promise<number | null>;
+  /**
+   * A person's Show of an automatic customer's held pulse (DECISIONS.md 746), as
+   * the console's Show of a held automatic check, in one transaction: refused
+   * unless the run is a pulse whose calibration was read from the org's
+   * settings, it has a kept result and no result, and its open flags are all
+   * showable (never no_digest or digest_held, whose result was never kept). Then
+   * the kept result becomes its result, the kept copy goes, the open flags are
+   * cleared by that person, and an audit row says so. The caller has checked
+   * the pulse's chain ends at an automatic check of its org (showHeldPulse in
+   * pulse-show.ts).
+   */
+  showHeldPulse(runId: string, by: string, at: string): Promise<{ ok: true; flagsCleared: string[] } | { ok: false; why: string }>;
 
   /** With `handbookSummaries` unset or false, nothing reads the summaries' table. */
   loadDocumentsJob(runId: string, reads?: DocumentsJobReads): Promise<DocumentsJobInput | null>;

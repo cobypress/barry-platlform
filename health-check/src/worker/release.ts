@@ -261,3 +261,12 @@ export function decidePulse(input: { checked: CheckedDigest; findings: Finding[]
   }
   return { kind: "release", digest: checked.digest! };
 }
+
+/**
+ * The holds a person may Show a pulse past (DECISIONS.md 746): those whose result passed the digest's own check, so
+ * what is shown is vouched for and only the person's judgement of the whole was missing. score_moved (is the move
+ * real?), reads_lost (is the month's reading good enough despite the outage?, as a held check's Show allows, 715),
+ * mostly_unmeasured (does this org simply share little?). Never no_digest or digest_held: their content failed the
+ * check, so no result is kept for them and only Run again can follow.
+ */
+export const SHOWABLE_PULSE_HOLDS: readonly PulseHoldReason[] = ["reads_lost", "mostly_unmeasured", "score_moved"];

@@ -93,15 +93,18 @@ describe("an automatic customer's monthly pulse (746)", () => {
     assert.notEqual(out.detail, ORG_SETTINGS_ON_CONSULTANT_RUN);
   });
 
-  test("a store that can't say: tried again while the queue will, then refused as before", async () => {
-    const deps = baseDeps({ dataTransport: new Simulator(), automatic: ON });
+  test("a store that can't say: tried again while the queue will, then left as it is with nothing read", async () => {
+    const sim = new Simulator();
+    const deps = baseDeps({ dataTransport: sim, automatic: ON });
     await deps.tokens.save(syntheticConnection());
     deps.store.addRun(runInput({ run: consoleRun({ id: BASELINE, reviewMode: "automatic", status: "released" }), calibration: await automaticOne(), intake: null, answers: [] }));
     deps.store.addRun(runInput({ run: consoleRun({ id: PULSE, product: "pulse", baselineRunId: BASELINE }), calibration: await automaticOne() }));
     deps.store.failLineage = true;
     await assert.rejects(createJobHandler(deps)({ kind: "run", runId: PULSE }, { final: false }));
     const out = await createJobHandler(deps)({ kind: "run", runId: PULSE }, last);
-    assert.equal(out.detail, ORG_SETTINGS_ON_CONSULTANT_RUN);
+    // Round 4: it can't be told whether the customer already sees it, so the last delivery changes nothing (746).
+    assert.equal(out.outcome, "skipped");
+    assert.equal(sim.requests.length, 0);
   });
 });
 

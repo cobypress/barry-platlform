@@ -13,7 +13,7 @@ import { BASELINE_ROWS_UNREAD, baselineRefusedSummary } from "../render/render-r
 import { INTERVIEW_VERSION } from "../interviews/questions.ts";
 import { OAuthConnectionProvider, ReconnectionNeeded } from "../salesforce/oauth-provider.ts";
 import { buildScanResult } from "../scan/result.ts";
-import { buildPulseResult } from "../pulse/result.ts";
+import { buildPulseResult, type PulseResult } from "../pulse/result.ts";
 import { servedPulseTitle } from "../pulse/served.ts";
 import { buildDigest } from "../digest/build.ts";
 import type { RunDigest } from "../schemas/digest.ts";
@@ -27,7 +27,7 @@ import { automaticRefusal } from "./automatic.ts";
 import { recalibrateForRunAgain, type Recalibrated } from "./connect-job.ts";
 import { CalibrationUnsettled, nameCurrencyBeforeRun } from "./name-currency.ts";
 import { checkedDigest } from "../digest/checked.ts";
-import { checkSections, decidePulse, decideRelease, lossesOf, type PulseDecision, sameAsLast, SERVER_FAULT_CODES, type ReleaseDecision, type RunLosses, type SameAsLast } from "./release.ts";
+import { checkSections, decidePulse, decideRelease, lossesOf, SHOWABLE_PULSE_HOLDS, type PulseDecision, sameAsLast, SERVER_FAULT_CODES, type ReleaseDecision, type RunLosses, type SameAsLast } from "./release.ts";
 import { letGoAfterRun, type SeenRun } from "./scan-release.ts";
 import { progressOf, RunClosedError, runOverall, DELIVERY_OUTCOMES, type RunJobInput } from "./types.ts";
 import { withoutComments } from "../survey/questions.ts";
@@ -135,7 +135,7 @@ const MAX_PULSE_CHAIN = 40;
  * check, another org, a run that's gone, a loop or a chain too long) is false.
  * Throws on a store fault.
  */
-async function pulseOfAutomaticCheck(run: Pick<Run, "id" | "orgId" | "baselineRunId">, deps: WorkerDeps): Promise<boolean> {
+export async function pulseOfAutomaticCheck(run: Pick<Run, "id" | "orgId" | "baselineRunId">, deps: Pick<WorkerDeps, "store">): Promise<boolean> {
   const org = run.orgId.slice(0, 15);
   const seen = new Set<string>([run.id]);
   let next = run.baselineRunId;
@@ -315,8 +315,23 @@ async function runLocked(runId: string, deps: WorkerDeps, attempt: Attempt, seen
   // nothing is resumed, so a run held for what it read is read again. Only a run the console has set back to
   // extracting, with its hold cleared (both checked above and again below), and only once per "Run again": a retry
   // of the same job finds its own mark and resumes. Any other run, and a consultant-led run's, resumes as before.
-  // An automatic customer's pulse too (DECISIONS.md 746): one held for a person is read afresh the same way.
-  const againable = first.run.reviewMode === "automatic" || (options.again !== undefined && first.run.product === "pulse" && first.calibration?.source === "org_settings" && (await pulseOfAutomaticCheck(first.run, deps).catch(() => false)));
+  // An automatic customer's pulse (DECISIONS.md 746): one the customer can already see is never read or decided again,
+  // so nothing a delivery or a press does can take a shown month away; one held for a person is read afresh on Run again.
+  let gatedFirst = false;
+  if (first.run.product === "pulse" && first.calibration?.source === "org_settings") {
+    let shown: boolean;
+    try {
+      gatedFirst = first.run.reviewMode === "automatic" || (await pulseOfAutomaticCheck(first.run, deps));
+      const state = gatedFirst ? await deps.store.pulseState(runId) : null;
+      shown = state !== null && state.hasResult && state.openFlags.length === 0;
+    } catch (err) {
+      // Can't tell whether the customer sees it: tried again while the queue will, then left as it is.
+      if (!attempt.final) throw new Error(safeReason(err));
+      return { outcome: "skipped", detail: `Pulse ${runId}: whether the customer already sees it couldn't be read, so this delivery changed nothing` };
+    }
+    if (shown) return { outcome: "skipped", detail: `Pulse ${runId} is already shown to the customer, so this delivery read and changed nothing` };
+  }
+  const againable = first.run.reviewMode === "automatic" || (options.again !== undefined && gatedFirst);
   const again = options.again !== undefined && againable ? options.again : undefined;
   if (options.again !== undefined && again === undefined) log(`Run ${runId} isn't automatic, so "Run again" resumes it as any delivery does.`);
   // Presses are ordered by their time: the folder's mark is the latest press that started it afresh. The same press
@@ -664,7 +679,14 @@ async function runLocked(runId: string, deps: WorkerDeps, attempt: Attempt, seen
       : null;
     if (checkedPulse) {
       const overallNow = runOverall(report.overall);
-      pulseDecision = decidePulse({ checked: checkedPulse, findings: result.output!.findings, score: { now: overallNow?.score ?? null, before: report.progress?.score.before ?? null }, readsLost: pulseReadsLost });
+      // The "before" from the baseline's folder, or, where that isn't on this worker, from the score the store keeps for it (746).
+      let before = report.progress?.score.before ?? null;
+      if (!report.progress && input.run.baselineRunId) {
+        before = await deps.store.runOverallScore(input.run.baselineRunId).catch(() => null);
+        if (before === null) log(`Pulse ${runId}'s baseline has no score we can read, here or in the store, so whether its score moved isn't checked.`);
+        else log(`Pulse ${runId}'s baseline folder isn't on this worker, so its score's move is checked against the baseline's stored score.`);
+      }
+      pulseDecision = decidePulse({ checked: checkedPulse, findings: result.output!.findings, score: { now: overallNow?.score ?? null, before }, readsLost: pulseReadsLost });
       log(pulseDecision.kind === "release" ? `Pulse ${runId} of an automatic check passed every check, so its result is shown.` : `Pulse ${runId} of an automatic check is held for a person, and nothing of it is shown: ${pulseDecision.reason} ${JSON.stringify(pulseDecision.counts)}.`);
     }
     if (decision) log(decision.kind === "release" ? `Automatic run ${runId} passed every check and is released.` : `Automatic run ${runId} is held for a person: ${decision.reason} ${JSON.stringify(decision.counts)}.`);
@@ -697,7 +719,7 @@ async function runLocked(runId: string, deps: WorkerDeps, attempt: Attempt, seen
       ...(input.run.product === "pulse" || decision ? { digest } : {}),
       ...(decision && losses ? { readsLost: losses } : {}),
       // Held: its flags in the same transaction, and no result, so the portal never lists it (746).
-      ...(pulseDecision?.kind === "hold" ? { pulseHold: { reason: pulseDecision.reason, counts: pulseDecision.counts, also: pulseDecision.also, at: heldAt } } : {}),
+      ...(pulseDecision?.kind === "hold" ? { pulseHold: { reason: pulseDecision.reason, counts: pulseDecision.counts, also: pulseDecision.also, at: heldAt, ...keptFor(pulseDecision, dir, runId, log) } } : {}),
       ...(decision ? { automatic: decision.kind === "release" ? { decision: "release" as const, releases: decision.releases } : { decision: "hold" as const, reason: decision.reason, counts: decision.counts, also: decision.also, at: heldAt } } : {}),
     });
   } catch (err) {
@@ -936,18 +958,39 @@ async function finishPulse(runId: string, dir: string, deps: WorkerDeps, at: str
   try {
     // loadRun reads the baseline from the folder beside this one, if it's there and readable.
     // The earlier folder's corrections as they stand: a pulse is built once, here, and never printed (DECISIONS.md 528).
-    const { input, baselineRowsUnread, pseudonyms } = loadRun(dir, { baselineRows: "live" });
-    if (baselineRowsUnread) log(`Pulse ${runId}: ${BASELINE_ROWS_UNREAD}`);
-    const report = buildReport(input);
-    // The baseline is read as its documents showed it, where that can still be carried (DECISIONS.md 522).
-    if (report.baselineRefused) log(`Pulse ${runId}: ${baselineRefusedSummary(report.baselineRefused)}`);
-    keepRuleChanges(dir, report.progress?.carried);
-    // An automatic customer's lists only the titles its checked digest serves, as it serves them (746).
-    const result = served ? buildPulseResult(report, servedPulseTitle(served, pseudonyms)) : buildPulseResult(report);
+    const result = pulseResultOf(runId, dir, log, served);
     await deps.store.savePulseResult(runId, result, at);
     log(`Pulse ${runId}'s result is ready${result.baselineRunId ? `, against ${result.baselineRunId}` : ", with no baseline we could read"}.`);
   } catch (err) {
     log(`Pulse ${runId}'s result couldn't be saved: ${safeReason(err)}`);
+  }
+}
+
+/** A pulse's result from its folder; an automatic customer's lists only the titles its checked digest serves, as it serves them (746). Throws. */
+function pulseResultOf(runId: string, dir: string, log: (line: string) => void, served?: RunDigest): PulseResult {
+  // loadRun reads the baseline from the folder beside this one, if it's there and readable.
+  // The earlier folder's corrections as they stand: a pulse is built once, here, and never printed (DECISIONS.md 528).
+  const { input, baselineRowsUnread, pseudonyms } = loadRun(dir, { baselineRows: "live" });
+  if (baselineRowsUnread) log(`Pulse ${runId}: ${BASELINE_ROWS_UNREAD}`);
+  const report = buildReport(input);
+  // The baseline is read as its documents showed it, where that can still be carried (DECISIONS.md 522).
+  if (report.baselineRefused) log(`Pulse ${runId}: ${baselineRefusedSummary(report.baselineRefused)}`);
+  keepRuleChanges(dir, report.progress?.carried);
+  return served ? buildPulseResult(report, servedPulseTitle(served, pseudonyms)) : buildPulseResult(report);
+}
+
+/**
+ * A held pulse's would-be result, kept for a person's Show (746), only when every hold is one a person may Show past:
+ * its digest passed the check, so what would be shown is vouched for. Never for no_digest or digest_held.
+ */
+export function keptFor(d: Extract<PulseDecision, { kind: "hold" }>, dir: string, runId: string, log: (line: string) => void): { kept?: PulseResult } {
+  const kinds = [d.reason, ...d.also.map((a) => a.kind)];
+  if (!d.digest || !kinds.every((k) => SHOWABLE_PULSE_HOLDS.includes(k))) return {};
+  try {
+    return { kept: pulseResultOf(runId, dir, log, d.digest) };
+  } catch (err) {
+    log(`Pulse ${runId}'s result couldn't be kept for a person to show, so only Run again can follow its hold: ${safeReason(err)}`);
+    return {};
   }
 }
 

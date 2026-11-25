@@ -9,8 +9,9 @@ import { unstorableAt } from "./inventory.ts";
 import { Run, type BenchmarkRow, type Calibration, type ConnectLink, type Metric, type Release, type ReportSection } from "../schemas/index.ts";
 import { assertChecks, CONSOLE_CHECKS } from "./console-checks.ts";
 import { readLosses, type RunLosses } from "./release.ts";
+import { pulseShowRefusal } from "./postgres-store.ts";
 import { storedFromRow, waitingRow, type ConsoleSummariesRow, type SummariesToSave } from "../handbook/summary-row.ts";
-import { DISCONNECT_STEP, ORG_AWAITING_CONNECT, RunClosedError, SCAN_REVOKE_NOT_CONFIRMED, type ConnectJobInput, type DocumentsJobInput, type DocumentsJobReads, type DriveShare, type ShareJobInput, type DocumentsMade, type LinkConnected, type LinkState, type PulseRun, type ReleasedRun, type RunJobInput, type RunOutputRecord, type RunProgress, type WorkerStore, type CurrencyWas, type RunLineage, type RunDelivery, type AutomaticOutcome, type AutomaticRunState, RUN_FAILED_FLAG, STOPPED_BUDGET_FLAG, DOCUMENTS_HELD_FLAG, type PortalDocumentRow } from "./types.ts";
+import { DISCONNECT_STEP, ORG_AWAITING_CONNECT, RunClosedError, SCAN_REVOKE_NOT_CONFIRMED, type ConnectJobInput, type DocumentsJobInput, type DocumentsJobReads, type DriveShare, type ShareJobInput, type DocumentsMade, type LinkConnected, type LinkState, type PulseRun, type ReleasedRun, type RunJobInput, type RunOutputRecord, type RunProgress, type WorkerStore, type CurrencyWas, type RunLineage, type PulseState, type RunDelivery, type AutomaticOutcome, type AutomaticRunState, RUN_FAILED_FLAG, STOPPED_BUDGET_FLAG, DOCUMENTS_HELD_FLAG, type PortalDocumentRow } from "./types.ts";
 
 // The WorkerStore for tests: the console's tables as plain maps, with the same
 // rules a database store must keep. Writes replace; a run in review or
@@ -83,8 +84,9 @@ export class MemoryWorkerStore implements WorkerStore {
     const run = this.#open(runId);
     run.run = Run.parse({ ...run.run, ...structuredClone(progress) });
     run.runDir = runDir;
-    // As the Postgres store rewrites the budget whole: what an earlier attempt lost is no longer known (DECISIONS.md 723).
+    // As the Postgres store rewrites the budget whole: what an earlier attempt lost is no longer known (DECISIONS.md 723), nor a held pulse's kept result (746).
     delete run.readsLost;
+    this.keptPulses.delete(runId);
     this.writes.push({ method: "saveRunProgress", id: runId, detail: progress.status });
   }
 
@@ -101,6 +103,7 @@ export class MemoryWorkerStore implements WorkerStore {
     // Beside the budget, as the Postgres store writes it after the progress: only this save's, or none.
     if (rest.readsLost) run.readsLost = structuredClone(rest.readsLost);
     else delete run.readsLost;
+    this.keptPulses.delete(runId);
     // As the Postgres store's own statements: null where there's no score, untouched where none was given.
     if (overall !== undefined && !this.#withoutNewerColumns) Object.assign(run, { overallScore: overall?.score ?? null, overallGrade: overall?.grade ?? null });
     if (rest.handbookSummaries) this.#saveSummaries(runId, rest.handbookSummaries);
@@ -110,6 +113,7 @@ export class MemoryWorkerStore implements WorkerStore {
     // As the Postgres store: a held pulse's earlier result goes, and its flags are raised (746).
     if (output.pulseHold) {
       if (this.pulseResults.delete(runId)) this.writes.push({ method: "deletePulseResult", id: runId });
+      if (output.pulseHold.kept) this.keptPulses.set(runId, structuredClone(output.pulseHold.kept));
       for (const f of [{ kind: output.pulseHold.reason, counts: output.pulseHold.counts }, ...output.pulseHold.also]) this.#raiseFlag(runId, f.kind, output.pulseHold.at, f.counts);
     }
   }
@@ -205,6 +209,35 @@ export class MemoryWorkerStore implements WorkerStore {
       if (!best || r.startedAt > best.run.startedAt || (r.startedAt === best.run.startedAt && r.id > best.run.id)) best = run;
     }
     return best ? { runId: best.run.id, losses: readLosses(best.readsLost) } : null;
+  }
+
+  /** A held pulse's kept result, by run id: in "budget" in Postgres, which a progress save writes whole (746). */
+  readonly keptPulses = new Map<string, PulseResult>();
+  /** The audit rows a person's Show writes. */
+  readonly audit: Array<Record<string, unknown>> = [];
+
+  async pulseState(runId: string): Promise<PulseState | null> {
+    if (!this.runs.has(runId)) return null;
+    const openFlags = [...this.flags.values()].filter((f) => f.runId === runId && f.clearedAt === null).map((f) => f.kind).sort();
+    return { hasResult: this.pulseResults.has(runId), kept: this.keptPulses.has(runId), openFlags };
+  }
+
+  async runOverallScore(runId: string): Promise<number | null> {
+    const score = this.runs.get(runId)?.overallScore;
+    return typeof score === "number" ? score : null;
+  }
+
+  async showHeldPulse(runId: string, by: string, at: string): Promise<{ ok: true; flagsCleared: string[] } | { ok: false; why: string }> {
+    const run = this.runs.get(runId);
+    const state = run ? await this.pulseState(runId) : null;
+    const why = pulseShowRefusal(run && state ? { product: run.run.product, source: run.calibration?.source ?? null, ...state } : null);
+    if (why) return { ok: false, why };
+    this.pulseResults.set(runId, { result: this.keptPulses.get(runId)!, madeAt: at });
+    this.keptPulses.delete(runId);
+    for (const kind of state!.openFlags) this.postAndClearFlag(runId, kind, by, at);
+    this.audit.push({ action: "show_to_customer", runId, by, at, state: state!.openFlags[0], product: "pulse", flags: state!.openFlags });
+    this.writes.push({ method: "showHeldPulse", id: runId });
+    return { ok: true, flagsCleared: state!.openFlags };
   }
 
   /** Set: runLineage throws, as a store fault would. */

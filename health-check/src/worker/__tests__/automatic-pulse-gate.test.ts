@@ -34,7 +34,7 @@ const PULSE = "hc-2026-10-31-00000002";
 const last = { final: true };
 const AGAIN = { final: false, jobId: `run-${PULSE}-again-1764000000000` };
 
-type Options = { mode?: "automatic" | "consultant"; pulseSim?: () => Simulator; baselineSim?: () => Simulator; age?: (baselineDir: string) => void };
+type Options = { mode?: "automatic" | "consultant"; pulseSim?: () => Simulator; baselineSim?: () => Simulator; age?: (baselineDir: string) => void; prepare?: (deps: ReturnType<typeof baseDeps>) => void };
 
 /** A customer's first check, run, then a pulse against it as the console's makePulse makes one. */
 async function customer(o: Options = {}) {
@@ -46,6 +46,7 @@ async function customer(o: Options = {}) {
   deps.store.addRun(runInput({ run: consoleRun({ id: BASELINE, reviewMode: mode }), calibration, ...(mode === "automatic" ? { intake: null, answers: [] } : {}) }));
   const base = await handle({ kind: "run", runId: BASELINE }, last);
   o.age?.(join(deps.runsDir, BASELINE));
+  o.prepare?.(deps);
   deps.dataTransport = (o.pulseSim ?? (() => new Simulator()))();
   deps.store.addRun(runInput({ run: consoleRun({ id: PULSE, product: "pulse", baselineRunId: BASELINE }), calibration }));
   const outcome = await handle({ kind: "run", runId: PULSE }, last);
@@ -141,18 +142,24 @@ describe("an automatic customer's pulse, held: nothing customer-visible, its fla
     assert.ok(counts.notMeasurable! * 2 > counts.rules!);
   });
 
-  test("a hold takes away an earlier delivery's result in the same save", async () => {
+  test("Run again, or any delivery, of a pulse the customer already sees reads and changes nothing, so a shown month never vanishes", async () => {
     const c = await customer();
-    assert.ok(c.deps.store.pulseResults.get(PULSE));
-    // The same pulse read again by a person, its baseline now far higher.
+    const shown = structuredClone(c.deps.store.pulseResults.get(PULSE));
+    assert.ok(shown);
+    // The baseline now far higher: read again, the pulse would be held and its result taken away.
     higherThen(c.baselineDir);
     const run = c.deps.store.runs.get(PULSE)!;
     run.run = { ...run.run, status: "extracting" };
-    c.deps.dataTransport = new Simulator();
-    const out = await c.handle({ kind: "run", runId: PULSE }, AGAIN);
-    assert.equal(out.detail, `Pulse ${PULSE} is held: score_moved`);
-    assert.equal(c.deps.store.pulseResults.get(PULSE), undefined);
-    assert.ok(c.deps.store.writes.some((w) => w.method === "deletePulseResult" && w.id === PULSE));
+    const sim = new Simulator();
+    c.deps.dataTransport = sim;
+    for (const attempt of [AGAIN, last]) {
+      const out = await c.handle({ kind: "run", runId: PULSE }, attempt);
+      assert.equal(out.outcome, "skipped");
+      assert.equal(out.detail, `Pulse ${PULSE} is already shown to the customer, so this delivery read and changed nothing`);
+    }
+    assert.equal(sim.requests.length, 0);
+    assert.deepEqual(c.deps.store.pulseResults.get(PULSE), shown);
+    assert.equal(c.deps.store.flagsOf(PULSE).length, 0);
   });
 
   test("Postgres: a held pulse's save deletes its result and raises each flag, in the save's one transaction", async () => {
@@ -260,5 +267,124 @@ describe("a consultant-led customer's pulse is as before (746)", () => {
     assert.equal(c.deps.store.flagsOf(PULSE).length, 0);
     assert.ok(!c.deps.lines.some((l) => /of an automatic check/.test(l)));
     assert.ok(existsSync(join(c.dir, "run.json")));
+  });
+});
+
+describe("a person's Show of a held pulse, and the next month (746, round 4)", () => {
+  const P2 = "hc-2026-11-30-00000004";
+
+  test("the reviewer's loop: baseline +40, month 1 held and kept; Show publishes it; month 2, against month 1, is released", async () => {
+    const { showHeldPulse } = await import("../pulse-show.ts");
+    const c = await customer({ age: higherThen });
+    heldNothingShown(c, "score_moved");
+    const kept = c.deps.store.keptPulses.get(PULSE);
+    assert.ok(kept, "the would-be result, kept for a person, nowhere the portal reads");
+    assert.equal(c.deps.store.pulseResults.get(PULSE), undefined);
+    const shown = await showHeldPulse(c.deps.store, PULSE, "staff@example.com", "2026-11-02T09:00:00.000Z");
+    assert.deepEqual(shown, { ok: true, flagsCleared: ["score_moved"] });
+    assert.deepEqual(c.deps.store.pulseResults.get(PULSE)!.result, kept, "exactly what was kept, its titles already as served");
+    assert.equal(c.deps.store.keptPulses.get(PULSE), undefined);
+    assert.equal(c.deps.store.flags.get(`${PULSE}|score_moved`)!.clearedBy, "staff@example.com");
+    assert.deepEqual(c.deps.store.audit.at(-1), { action: "show_to_customer", runId: PULSE, by: "staff@example.com", at: "2026-11-02T09:00:00.000Z", state: "score_moved", product: "pulse", flags: ["score_moved"] });
+    // A second Show changes nothing.
+    assert.equal((await showHeldPulse(c.deps.store, PULSE, "staff@example.com", "2026-11-02T09:01:00.000Z")).ok, false);
+    // Next month, makePulse bases it on the latest pulse with a result: month 1.
+    c.deps.dataTransport = new Simulator();
+    c.deps.store.addRun(runInput({ run: consoleRun({ id: P2, product: "pulse", baselineRunId: PULSE }), calibration: await automaticSyntheticCalibration() }));
+    const month2 = await c.handle({ kind: "run", runId: P2 }, last);
+    assert.equal(month2.outcome, "done", month2.detail);
+    assert.ok(c.deps.store.pulseResults.get(P2), "released against month 1: the loop ends");
+    assert.equal(c.deps.store.pulseResults.get(P2)!.result.baselineRunId, PULSE);
+  });
+
+  test("a hold whose digest failed its check keeps nothing and can't be shown: only Run again", async () => {
+    const { showHeldPulse } = await import("../pulse-show.ts");
+    const { keptFor } = await import("../run-job.ts");
+    // Nothing is kept for a hold whose content failed the check, alone or beside a showable one, nor with no digest.
+    const hold = (reason: string, also: string[], d: RunDigest | null) => ({ kind: "hold" as const, reason, counts: {}, also: also.map((kind) => ({ kind, counts: {} })), digest: d }) as never;
+    // A held pulse, its folder real, so a result could be made from it.
+    const c = await customer({ age: higherThen });
+    const servedDigest = c.deps.store.digests.get(PULSE)!.digest;
+    assert.ok(keptFor(hold("score_moved", ["mostly_unmeasured"], servedDigest), c.dir, PULSE, () => {}).kept, "a showable hold keeps its result");
+    for (const d of [hold("digest_held", [], servedDigest), hold("no_digest", [], null), hold("digest_held", ["score_moved"], servedDigest), hold("score_moved", ["no_digest"], servedDigest), hold("score_moved", [], null)]) assert.deepEqual(keptFor(d, c.dir, PULSE, () => {}), {});
+    // Its digest failed now: its flag open, nothing kept. Show is refused and changes nothing.
+    c.deps.store.keptPulses.delete(PULSE);
+    c.deps.store.flags.set(`${PULSE}|digest_held`, { runId: PULSE, kind: "digest_held", raisedAt: "2026-11-01T00:00:00.000Z", counts: { unmarked: 1 }, postedAt: null, clearedBy: null, clearedAt: null });
+    const shown = await showHeldPulse(c.deps.store, PULSE, "staff@example.com", "2026-11-02T09:00:00.000Z");
+    assert.equal(shown.ok, false);
+    assert.match(!shown.ok ? shown.why : "", /didn't pass our checks/);
+    assert.equal(c.deps.store.pulseResults.get(PULSE), undefined);
+    assert.ok(c.deps.store.flagsOf(PULSE).every((k) => c.deps.store.flags.get(`${PULSE}|${k}`)!.clearedAt === null), "nothing cleared");
+    // Even with a result kept, an open digest_held flag refuses it.
+    c.deps.store.keptPulses.set(PULSE, { version: 1 } as never);
+    assert.equal((await showHeldPulse(c.deps.store, PULSE, "staff@example.com", "2026-11-02T09:00:00.000Z")).ok, false);
+  });
+
+  test("Show refuses a pulse that isn't an automatic customer's, isn't held, or is already shown", async () => {
+    const { showHeldPulse } = await import("../pulse-show.ts");
+    const consultant = await customer({ mode: "consultant" });
+    assert.equal((await showHeldPulse(consultant.deps.store, PULSE, "staff@example.com", "2026-11-02T09:00:00.000Z")).ok, false);
+    const released = await customer();
+    assert.equal((await showHeldPulse(released.deps.store, PULSE, "staff@example.com", "2026-11-02T09:00:00.000Z")).ok, false);
+    const held = await customer({ age: higherThen });
+    assert.equal((await showHeldPulse(held.deps.store, PULSE, "not a person", "2026-11-02T09:00:00.000Z")).ok, false);
+  });
+
+  test("the baseline's folder not on this worker: the move is checked against the baseline's stored score", async () => {
+    const { rmSync } = await import("node:fs");
+    const c = await customer({
+      age: (dir) => {
+        rmSync(dir, { recursive: true, force: true });
+      },
+      prepare: (deps) => {
+        const b = deps.store.runs.get(BASELINE)!;
+        b.overallScore = Math.min(100, (b.overallScore ?? 50) + 40);
+      },
+    });
+    heldNothingShown(c, "score_moved");
+    assert.ok(c.deps.lines.some((l) => l === `Pulse ${PULSE}'s baseline folder isn't on this worker, so its score's move is checked against the baseline's stored score.`));
+  });
+
+  test("no baseline score anywhere: released with no comparison, as before, and one line", async () => {
+    const { rmSync } = await import("node:fs");
+    const c = await customer({
+      age: (dir) => {
+        rmSync(dir, { recursive: true, force: true });
+      },
+      prepare: (deps) => {
+        deps.store.runs.get(BASELINE)!.overallScore = null;
+      },
+    });
+    assert.ok(c.deps.store.pulseResults.get(PULSE), c.outcome.detail);
+    assert.equal(c.deps.lines.filter((l) => l === `Pulse ${PULSE}'s baseline has no score we can read, here or in the store, so whether its score moved isn't checked.`).length, 1);
+  });
+
+  test("Postgres: Show is one transaction, locked, refused by the same rule, and writes the result, the kept copy's removal, the flags and the audit row in order", async () => {
+    const pg = await import("../postgres-store.ts");
+    const kept = { version: 1, runId: PULSE };
+    const sent: Array<{ text: string; values: unknown[] }> = [];
+    const facts = { product: "pulse", kept, hasResult: false, source: "org_settings", openFlags: ["score_moved"] };
+    const answer = (text: string) => {
+      if (text === pg.SHOW_PULSE_LOCK_SQL) return [{ id: PULSE }];
+      if (text === pg.SHOW_PULSE_FACTS_SQL) return [facts];
+      if (text === pg.SHOW_PULSE_CLEAR_FLAGS_SQL) return [{ kind: "score_moved" }];
+      return [];
+    };
+    const client = { query: async (text: string, values: unknown[] = []) => (sent.push({ text, values }), { rows: answer(text), rowCount: answer(text).length || 1 }), release: () => {} };
+    const store = new pg.PostgresWorkerStore({ query: client.query, connect: async () => client } as never);
+    assert.deepEqual(await store.showHeldPulse(PULSE, "staff@example.com", "2026-11-02T09:00:00.000Z"), { ok: true, flagsCleared: ["score_moved"] });
+    assert.deepEqual(sent.map((s) => s.text), ["BEGIN", pg.SHOW_PULSE_LOCK_SQL, pg.SHOW_PULSE_FACTS_SQL, pg.SHOW_PULSE_RESULT_SQL, pg.SHOW_PULSE_UNKEEP_SQL, pg.SHOW_PULSE_CLEAR_FLAGS_SQL, pg.SHOW_PULSE_AUDIT_SQL, "COMMIT"]);
+    assert.equal(sent[3]!.values[2], JSON.stringify(kept));
+    assert.equal(sent[6]!.values[0], pg.PERSON_AUDIT_SOURCE);
+    // The same rule refuses: an unsafe hold open, or nothing kept.
+    for (const bad of [{ openFlags: ["digest_held", "score_moved"] }, { kept: null }, { hasResult: true }, { source: "confirmed" }]) {
+      Object.assign(facts, { product: "pulse", kept, hasResult: false, source: "org_settings", openFlags: ["score_moved"] }, bad);
+      sent.length = 0;
+      const r = await store.showHeldPulse(PULSE, "staff@example.com", "2026-11-02T09:00:00.000Z");
+      assert.equal(r.ok, false, JSON.stringify(bad));
+      assert.ok(!sent.some((s) => s.text === pg.SHOW_PULSE_RESULT_SQL));
+    }
+    assert.match(pg.KEEP_PULSE_SQL, /"budget"/);
+    assert.match(pg.PULSE_STATE_SQL, /HealthCheckPulseResult/);
   });
 });
