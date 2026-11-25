@@ -377,3 +377,20 @@ export function extractFigures(text: string, options: ExtractOptions = {}): { no
   linkPairs(figures, s.source);
   return { normalised: s.source, figures };
 }
+
+/**
+ * Which figures lie in the org's words (DECISIONS.md 764): every digit, or for a
+ * figure in words its first letter, inside one of the spans. Such a figure is
+ * part of a name the org chose ("Stage 9 of 12", "Tier Three"), never a figure
+ * of ours. A unit the org's words give one of ours, such as its currency's
+ * code, leaves it ours. Spans index the text as given; figures, as normalised.
+ */
+export function inOrgWords(text: string, figures: readonly Figure[], spans: ReadonlyArray<{ start: number; end: number }>): boolean[] {
+  if (spans.length === 0) return figures.map(() => false);
+  const at = spans.map((s) => ({ start: normalise(text.slice(0, s.start)).length, end: normalise(text.slice(0, s.end)).length }));
+  const inside = (i: number): boolean => at.some((s) => i >= s.start && i < s.end);
+  return figures.map((f) => {
+    const digits = [...f.raw].flatMap((c, k) => (/\d/.test(c) ? [f.start + k] : []));
+    return digits.length > 0 ? digits.every(inside) : inside(f.start);
+  });
+}

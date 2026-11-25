@@ -1,5 +1,6 @@
 import { buildReport, type BuiltReport, type ReportInput } from "../narrative/sections.ts";
-import { buildDataset, checkNumbers, type FigureSet } from "../numbercheck/index.ts";
+import { buildDataset, checkNumbers, type CheckOutcome, type FigureSet } from "../numbercheck/index.ts";
+import { orgFree } from "../numbercheck/dataset.ts";
 import type { Pseudonymiser } from "../privacy/pseudonymiser.ts";
 import { pageDataset } from "../render/page-dataset.ts";
 import { heldPattern, MASK, maskInput } from "../render/repair.ts";
@@ -9,6 +10,7 @@ import { RunDigest, type SentenceOrgWords } from "../schemas/digest.ts";
 import type { Inventory } from "../schemas/inventory.ts";
 import { buildDigest, READINESS_CODE_PATHS } from "./build.ts";
 import { PATHS_CODE_PATHS } from "./paths.ts";
+import { spansIfCurrent, type MarkedSentence } from "../engine/org-words.ts";
 
 // An automatic run's digest, checked before the run is released (DECISIONS.md
 // 693). The portal shows the digest and nothing else of an automatic run, and
@@ -94,9 +96,23 @@ export function digestTexts(value: unknown): string[] {
   return digestTextsAt(value).map((t) => t.text);
 }
 
+/**
+ * A digest text's figures checked (DECISIONS.md 764). In a marked text, a figure
+ * inside the org's words is the org's name, never checked, and every other is
+ * checked against the set with nothing read from the org's words and no label,
+ * so the org's digits never make a number of ours trace. A text
+ * with no marks is checked whole against the set, as before: it is never served
+ * as traced (withheld whole, or the digest held).
+ */
+export function checkText(digest: RunDigest, t: DigestText, set: FigureSet, free: FigureSet = orgFree(set)): CheckOutcome {
+  const marks = marksOf(digest, t);
+  return marks ? checkNumbers(t.text, free, { orgWords: marks.orgWords }) : checkNumbers(t.text, set);
+}
+
 /** The raw of every figure in the digest's texts that doesn't trace to the set, each once. */
 export function untraced(digest: RunDigest, set: FigureSet): string[] {
-  return [...new Set(digestTexts(digest).flatMap((text) => checkNumbers(text, set).unmatched.map((u) => u.raw)))];
+  const free = orgFree(set);
+  return [...new Set(digestTextsAt(digest).flatMap((t) => checkText(digest, t, set, free).unmatched.map((u) => u.raw)))];
 }
 
 /**
@@ -108,9 +124,14 @@ export function untraced(digest: RunDigest, set: FigureSet): string[] {
  */
 export function digestDataset(report: BuiltReport, pseudonyms: Pseudonymiser): FigureSet {
   const set = pageDataset(report.dataset, pseudonyms);
-  const extraText = report.teamFindings.flatMap((f) => [...(f.effortHours ? [{ source: f.id, text: f.effortHours.basis }] : []), ...(f.fixPrompt ? [{ source: f.id, text: f.fixPrompt }] : [])]);
+  // Each with its marks where they still fit it, so the org's words in it (a prompt names its subjects) are the org's (764).
+  const marks = (text: string, marked: MarkedSentence | undefined) => ({ orgWords: spansIfCurrent(text, marked) });
+  const extraText = report.teamFindings.flatMap((f) => [
+    ...(f.effortHours ? [{ source: f.id, text: f.effortHours.basis, ...marks(f.effortHours.basis, f.orgWords?.hoursBasis) }] : []),
+    ...(f.fixPrompt ? [{ source: f.id, text: f.fixPrompt, ...marks(f.fixPrompt, f.orgWords?.fixPrompt) }] : []),
+  ]);
   const sources = new Set(extraText.map((t) => t.source));
-  const extra = buildDataset({ findings: [], metrics: [], extraText });
+  const extra = buildDataset({ findings: [], metrics: [], extraText, orgNames: report.teamFindings.flatMap((f) => f.subjects.map((s) => s.label)) });
   const mine = <T extends { source: string }>(rows: T[]): T[] => rows.filter((r) => sources.has(r.source));
   return {
     figures: [...set.figures, ...mine(extra.figures)],
@@ -316,10 +337,11 @@ const counted = (digest: RunDigest): RunDigest => {
 export function settleReadiness(digest: RunDigest, set: FigureSet): { digest: RunDigest; withheld: number } {
   if (!digest.readiness) return { digest, withheld: 0 };
   const out = structuredClone(digest);
+  const free = orgFree(set);
   let withheld = 0;
   for (const t of digestTextsAt(digest)) {
     if (!READINESS_TEXT.test(t.path) || t.text === MASK) continue;
-    if (marksOf(digest, t) && checkNumbers(t.text, set).unmatched.length === 0) continue;
+    if (marksOf(digest, t) && checkText(digest, t, set, free).unmatched.length === 0) continue;
     const slot = TEXT_SLOTS[t.path];
     if (!slot || slot === "fixed") continue;
     setText(out, t, MASK);
@@ -352,10 +374,11 @@ export function pathsDataset(report: BuiltReport, set: FigureSet): FigureSet {
 export function settlePaths(digest: RunDigest, set: FigureSet): { digest: RunDigest; withheld: number } {
   if (!digest.paths) return { digest, withheld: 0 };
   const out = structuredClone(digest);
+  const free = orgFree(set);
   let withheld = 0;
   for (const t of digestTextsAt(digest)) {
     if (!PATHS_TEXT.test(t.path) || t.text === MASK) continue;
-    if (marksOf(digest, t) && checkNumbers(t.text, set).unmatched.length === 0) continue;
+    if (marksOf(digest, t) && checkText(digest, t, set, free).unmatched.length === 0) continue;
     const slot = TEXT_SLOTS[t.path];
     if (!slot || slot === "fixed") continue;
     setText(out, t, MASK);

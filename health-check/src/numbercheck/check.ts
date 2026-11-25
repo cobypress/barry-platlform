@@ -1,4 +1,4 @@
-import { extractFigures, type Figure, type PartialDate } from "./extract.ts";
+import { extractFigures, inOrgWords, type Figure, type PartialDate } from "./extract.ts";
 import type { DatasetFigure, FigureSet } from "./dataset.ts";
 import { ENGINE_WORDS } from "./engine-words.ts";
 
@@ -139,13 +139,25 @@ function describe(figure: Figure): string {
   return figure.kind === "number" ? "plain count" : figure.kind;
 }
 
+export type CheckOptions = {
+  /**
+   * Where the org's words lie in the text, as a digest text's marks say (DECISIONS.md 764): a figure
+   * inside them is the org's name, not checked, and one of ours is never read as "of" it.
+   */
+  orgWords?: ReadonlyArray<{ start: number; end: number }>;
+};
+
 /** Checks text against a dataset. Anything that goes wrong in the check itself blocks. */
-export function checkNumbers(text: string, set: FigureSet): CheckOutcome {
+export function checkNumbers(text: string, set: FigureSet, options: CheckOptions = {}): CheckOutcome {
   try {
-    const { figures, normalised: read } = extractFigures(text, { labels: set.labels.map((l) => l.value) });
+    const read0 = extractFigures(text, { labels: set.labels.map((l) => l.value) });
+    const read = read0.normalised;
+    const org = inOrgWords(text, read0.figures, options.orgWords ?? []);
+    const figures = read0.figures.map((f) => (f.linkedTo !== undefined && org[f.linkedTo] ? { ...f, linkedTo: undefined } : f));
     const unmatched: UnmatchedFigure[] = [];
     const said: SaidFigure[] = [];
-    for (const figure of figures) {
+    for (const [i, figure] of figures.entries()) {
+      if (org[i]) continue;
       const reason = checkOne(figure, figures, set);
       if (reason) {
         unmatched.push({ raw: figure.raw, reason });
@@ -156,7 +168,7 @@ export function checkNumbers(text: string, set: FigureSet): CheckOutcome {
       if (ATTRIBUTION.test(sentenceAround(read, figure.start, figure.end))) said.push({ raw: figure.raw, source: where });
       else unmatched.push({ raw: figure.raw, reason: `this is only what was ${where}, so write it as what they told us, not as a figure we measured` });
     }
-    return { passed: unmatched.length === 0, checked: figures.length, unmatched, said };
+    return { passed: unmatched.length === 0, checked: figures.length - org.filter(Boolean).length, unmatched, said };
   } catch (err) {
     return { passed: false, checked: 0, unmatched: [{ raw: "(whole text)", reason: `The number check failed to run: ${err instanceof Error ? err.message : String(err)}` }], said: [] };
   }
