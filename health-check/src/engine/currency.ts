@@ -21,15 +21,17 @@ export const UNREAD_MARK = "XTS";
 
 /**
  * confirmed: a person's calibration. read: the org's own default currency
- * (several currencies on). org: one currency, not known by name. none: can't
- * tell. `unread` (a failed read at connect) is `org` when the run saw that the
+ * (several currencies on). customer: the org's one currency, as its customer
+ * named it in the portal (KAN-41), printed as a read one is. org: one
+ * currency, not known by name. none: can't tell. `unread` (a failed read at connect) is `org` when the run saw that the
  * org has one currency, else `none`: only an analysis can say, from the
  * opportunities' describe.
  */
-export type CurrencyStanding = "confirmed" | "read" | "org" | "unread";
+export type CurrencyStanding = "confirmed" | "read" | "customer" | "org" | "unread";
 
 export function currencyStanding(c: Pick<Calibration, "source" | "currency" | "currencyFrom">): CurrencyStanding {
   if (c.source !== "org_settings") return "confirmed";
+  if (c.currencyFrom === "customer") return "customer";
   if (c.currencyFrom === "org") return "org";
   if (c.currencyFrom === "unread" || c.currency === NO_CURRENCY) return "unread";
   return "read";

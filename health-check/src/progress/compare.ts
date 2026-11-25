@@ -22,8 +22,12 @@ export type Progress = {
   baselineRunId: string;
   baselineAsOf: string;
   score: { before: number | null; after: number | null };
-  /** What fixing the issues is worth, expected, then and now. */
-  worth: { before: number; after: number };
+  /**
+   * What fixing the issues is worth, expected, then and now. Absent when the two runs' amounts aren't in the same
+   * currency (KAN-41: plain numbers then, a currency the customer named now, with hours priced only now), so no change
+   * in money is said that is only a change of unit.
+   */
+  worth?: { before: number; after: number };
   fixed: RuleChange[];
   remaining: RuleChange[];
   added: RuleChange[];
@@ -139,7 +143,7 @@ export function compareWithBaseline(baseline: ProgressSide, current: ProgressSid
     baselineRunId: baseline.runId,
     baselineAsOf: baseline.asOf,
     score: { before: baseline.overall.status === "measured" ? baseline.overall.score : null, after: current.overall.status === "measured" ? current.overall.score : null },
-    worth: { before: baseline.value.total.expected, after: current.value.total.expected },
+    ...(baseline.value.currency === current.value.currency ? { worth: { before: baseline.value.total.expected, after: current.value.total.expected } } : {}),
     fixed,
     remaining,
     added,
@@ -285,4 +289,4 @@ export function progressDays(p: Progress): number[] {
  */
 export const progressTitles = (p: Progress): string[] => [p.fixed, p.remaining, p.added, p.unknown, p.newlyMeasured ?? []].flatMap((list) => list.map((c) => c.title));
 
-export const worthFigures = (p: Progress): number[] => [p.worth.before, p.worth.after, Math.abs(p.worth.before - p.worth.after)];
+export const worthFigures = (p: Progress): number[] => (p.worth ? [p.worth.before, p.worth.after, Math.abs(p.worth.before - p.worth.after)] : []);

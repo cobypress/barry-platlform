@@ -682,3 +682,79 @@ describe("an automatic run's currency at connect never holds it (DECISIONS.md 70
     assert.equal(calibrationFromRow({ ...back, fields: {}, currency: "EUR" }).currencyFrom, undefined);
   });
 });
+
+describe("the currency a customer named in the portal, at connect (KAN-41)", () => {
+  const answer = (f: Flow, code: string) => f.deps.store.customerCurrencies.set(ORG15, code);
+
+  test("a single-currency org with an answer: calibrated in it, marked as the customer's, no suggestion, queued, and logged by its code", async () => {
+    const f = await flow();
+    f.org.currency = "single";
+    answer(f, "EUR");
+    await f.handle(f.job, once);
+    const c = f.deps.store.runs.get(RUN_ID)!.calibration!;
+    assert.equal(c.currency, "EUR");
+    assert.equal(c.currencyFrom, "customer");
+    assert.equal(c.currencySuggested, undefined);
+    assert.deepEqual(f.queued, [RUN_ID]);
+    assert.ok(f.deps.lines.includes(`Automatic run ${RUN_ID}'s org has one currency, which its customer named in the portal: EUR.`));
+  });
+
+  test("a multi-currency org: Salesforce's own code, whatever the customer said", async () => {
+    const f = await flow();
+    f.org.currency = "USD";
+    answer(f, "EUR");
+    await f.handle(f.job, once);
+    const c = f.deps.store.runs.get(RUN_ID)!.calibration!;
+    assert.equal(c.currency, "USD");
+    assert.equal(c.currencyFrom, undefined);
+  });
+
+  test("a failed currency read: no currency named, whatever the customer said", async () => {
+    const f = await flow();
+    f.org.currency = "refused";
+    answer(f, "EUR");
+    await f.handle(f.job, once);
+    const c = f.deps.store.runs.get(RUN_ID)!.calibration!;
+    assert.equal(c.currency, "XXX");
+    assert.equal(c.currencyFrom, "unread");
+  });
+
+  test("the locale's suggestion is never the answer: with none given, as before", async () => {
+    const f = await flow();
+    f.org.currency = "single";
+    await f.handle(f.job, once);
+    const c = f.deps.store.runs.get(RUN_ID)!.calibration!;
+    assert.equal(c.currency, "XXX");
+    assert.equal(c.currencyFrom, "org");
+    assert.equal(c.currencySuggested, "GBP");
+  });
+
+  test("a console without the answers table, or a store that fails, costs the answer and never the calibration", async () => {
+    const missing = await flow();
+    missing.org.currency = "single";
+    answer(missing, "EUR");
+    missing.deps.store.customerAnswerTable = false;
+    await missing.handle(missing.job, once);
+    assert.equal(missing.deps.store.runs.get(RUN_ID)!.calibration!.currencyFrom, "org");
+    const failing = await flow();
+    failing.org.currency = "single";
+    failing.deps.store.customerCurrency = async () => {
+      throw new StoreError("the console's database refused the customer's answer (SQLSTATE 57014)");
+    };
+    await failing.handle(failing.job, once);
+    assert.equal(failing.deps.store.runs.get(RUN_ID)!.calibration!.currencyFrom, "org");
+    assert.deepEqual(failing.queued, [RUN_ID]);
+    assert.ok(failing.deps.lines.some((l) => /The currency the org's customer named couldn't be read, so its amounts are shown with none: .*57014/.test(l)));
+  });
+
+  test("the answer is asked only of a single-currency org", async () => {
+    let asked = 0;
+    for (const currency of ["EUR", "refused"]) {
+      const f = await flow();
+      f.org.currency = currency;
+      f.deps.store.customerCurrency = async () => (asked++, "EUR");
+      await f.handle(f.job, once);
+    }
+    assert.equal(asked, 0);
+  });
+});

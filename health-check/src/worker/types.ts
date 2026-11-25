@@ -442,6 +442,15 @@ export interface WorkerStore {
    */
   saveCalibration(runId: string, calibration: Calibration): Promise<"saved" | "exists" | "no_source_column">;
   /**
+   * The currency the org's customer named in the portal (KAN-41; the
+   * console's HealthCheckCustomerAnswer, migration 20261219): the newest
+   * answer of the active customer whose org this is, by its 15-character id.
+   * Null with none, with a code that isn't a currency's, or where the console
+   * has no table for it yet. One read-only statement; throws StoreError on
+   * any other fault, naming no value.
+   */
+  customerCurrency(orgId15: string): Promise<string | null>;
+  /**
    * Why an automatic run waits for a person, in the console's "heldReason"
    * (migration 20261211). Only an automatic run's, and only where none is set,
    * with its HealthCheckRunFlag row raised in the same statement (DECISIONS.md

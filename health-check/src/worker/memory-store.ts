@@ -3,6 +3,7 @@ import { StoreError, type OrgStage } from "../connect/org-stages.ts";
 import type { ScanResult } from "../scan/result.ts";
 import type { PulseResult } from "../pulse/result.ts";
 import { DIGEST_KEYS, type RunDigest } from "../schemas/digest.ts";
+import { isCurrencyCode } from "../schemas/calibration.ts";
 import { unstorableAt } from "./inventory.ts";
 import { Run, type BenchmarkRow, type Calibration, type ConnectLink, type Metric, type Release, type ReportSection } from "../schemas/index.ts";
 import { assertChecks, CONSOLE_CHECKS } from "./console-checks.ts";
@@ -342,6 +343,17 @@ export class MemoryWorkerStore implements WorkerStore {
     // No detail: the stage names are the org's own.
     this.writes.push({ method: "saveCalibration", id: runId });
     return "saved";
+  }
+
+  /** The currencies customers named in the portal (KAN-41), by the org's 15-character id. */
+  readonly customerCurrencies = new Map<string, string>();
+  /** False stands in for a console without HealthCheckCustomerAnswer: no answer. */
+  customerAnswerTable = true;
+
+  async customerCurrency(orgId15: string): Promise<string | null> {
+    if (!this.customerAnswerTable) return null;
+    const code = this.customerCurrencies.get(orgId15.slice(0, 15));
+    return isCurrencyCode(code) ? code : null;
   }
 
   /** The console's "heldReason", by run id. False as a console without the column. */

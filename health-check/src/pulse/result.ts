@@ -67,7 +67,7 @@ export function buildPulseResult(report: BuiltReport): PulseResult {
     asOf: run.asOf,
     baselineAsOf: p?.baselineAsOf ?? null,
     score: { now: report.overall.status === "measured" ? report.overall.score : null, before: p?.score.before ?? null },
-    worth: { currency: report.value.currency, now: report.value.total.expected, before: p ? p.worth.before : null },
+    worth: { currency: report.value.currency, now: report.value.total.expected, before: p?.worth ? p.worth.before : null },
     counts: { openNow, fixed: p ? p.fixed.length : null, stillOpen: p ? p.remaining.length : null, new: p ? p.added.length : null, cantTell: p ? p.unknown.length : null, ...cantTellByKind(p?.unknown ?? []) },
     areas: rows.map((r) => ({ domain: r.domain, label: r.label, now: r.score, before: before.get(r.domain) ?? null, ...(r.notMeasurableKind ? { notMeasurableKind: r.notMeasurableKind } : {}) })),
     newIssues,
