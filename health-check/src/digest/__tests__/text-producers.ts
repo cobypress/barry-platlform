@@ -27,10 +27,11 @@ const CALLS = /^(notSized|nm|notMeasurable|off|thinReason|apexGap|cantRead|markU
 /** A helper's parameters that hold text: its reason, a note, or the words put into its sentence. */
 const TEXT_PARAMS = /^(reason|note|what|noun|text|words)$/;
 /**
- * Folders outside the listed ones that only carry a text already made, with its marks, from one place to
- * another (the engine's marking and rewording, the store, the schemas, the tests' fixtures): never a producer.
+ * Files outside the listed ones that only carry a text already made, with its marks, from one place to
+ * another: the engine's marking and rewording, the store reading rows back, the schemas, the tests' fixtures.
+ * Every other file in src, the worker's included, is read for a rule's result or metric it builds.
  */
-const CARRIERS = ["src/engine/evaluate.ts", "src/engine/automatic-words.ts", "src/worker/", "src/schemas/", "src/testing/"];
+const CARRIERS = ["src/engine/evaluate.ts", "src/engine/automatic-words.ts", "src/worker/postgres-store.ts", "src/schemas/", "src/testing/"];
 /** Arrays that become a metric's exclusions or assumptions, or a reason's parts. */
 const LISTS = /(exclusions|assumptions|reasons)$/i;
 /**
@@ -178,10 +179,30 @@ export function textProducers(options: { fixtures?: string[]; unlisted?: string[
       return (t.isUnion() ? t.types : [t]).every((p) => p.flags & (ts.TypeFlags.StringLike | ts.TypeFlags.Null | ts.TypeFlags.Undefined));
     };
     const add = (slot: string, e: ts.Expression) => {
-      const line = source.getLineAndCharacterOfPosition(e.getStart()).line + 1;
+      // Where the text is written, which for a field spread in from a helper is the helper's file.
+      const where = e.getSourceFile();
+      const line = where.getLineAndCharacterOfPosition(e.getStart()).line + 1;
       const all = kinds(e);
       const kind = all.includes("NOT RECOGNISED") ? "NOT RECOGNISED" : all.includes("ref") ? "ref" : all.includes("passed-on") ? "passed-on" : all.includes("said") ? "said" : "whole";
-      out.push({ at: `${file}:${line}`, slot, kind, expression: e.getText().replace(/\s+/g, " ") });
+      out.push({ at: `${relative(HEALTH_CHECK, where.fileName)}:${line}`, slot, kind, expression: e.getText().replace(/\s+/g, " ") });
+    };
+    /** The fields an object spread into a result brings: those of the object literal a helper returns, wherever it is. */
+    const spreadFields = (e: ts.Expression, depth = 0): void => {
+      while (ts.isParenthesizedExpression(e) || ts.isAsExpression(e) || ts.isSatisfiesExpression(e)) e = e.expression;
+      if (depth > 3) return;
+      if (ts.isObjectLiteralExpression(e)) {
+        for (const p of e.properties) {
+          if (ts.isSpreadAssignment(p)) spreadFields(p.expression, depth + 1);
+          else if ((ts.isPropertyAssignment(p) || ts.isShorthandPropertyAssignment(p)) && watched(nameOf(p.name))) add(`spread:${nameOf(p.name)}`, ts.isPropertyAssignment(p) ? p.initializer : p.name);
+        }
+      } else if (ts.isConditionalExpression(e)) {
+        spreadFields(e.whenTrue, depth + 1);
+        spreadFields(e.whenFalse, depth + 1);
+      } else if (ts.isCallExpression(e)) {
+        const d = declarationOf(e.expression);
+        const fn = d && (ts.isFunctionDeclaration(d) ? d : ts.isVariableDeclaration(d) && d.initializer && (ts.isArrowFunction(d.initializer) || ts.isFunctionExpression(d.initializer)) ? d.initializer : undefined);
+        if (fn && !relative(HEALTH_CHECK, fn.getSourceFile().fileName).includes("node_modules")) for (const r of returnsOf(fn)) spreadFields(r, depth + 1);
+      }
     };
     const servedType = (t: ts.Type): boolean => {
       const names = propertiesOf(t);
@@ -201,6 +222,15 @@ export function textProducers(options: { fixtures?: string[]; unlisted?: string[
         const left = node.left;
         const name = ts.isPropertyAccessExpression(left) ? left.name.text : ts.isStringLiteralLike(left.argumentExpression) ? left.argumentExpression.text : null;
         if (watched(name) && stringLike(node.right) && (reasonOnly || servedType(checker.getTypeAtLocation(left.expression)))) add(`set:${name}`, node.right);
+      } else if (ts.isSpreadAssignment(node) && ts.isObjectLiteralExpression(node.parent) && !reasonOnly && served(node.parent) && (ts.isCallExpression(node.expression) || ts.isConditionalExpression(node.expression))) {
+        // A result with a helper's object spread into it: the helper's fields are this result's.
+        spreadFields(node.expression);
+      } else if (ts.isCallExpression(node) && node.expression.getText() === "Object.assign" && node.arguments.length > 1 && (reasonOnly || servedType(checker.getTypeAtLocation(node.arguments[0]!)))) {
+        // Fields assigned onto a result: each object literal's watched fields.
+        for (const a of node.arguments.slice(1)) {
+          if (!ts.isObjectLiteralExpression(a)) continue;
+          for (const p of a.properties) if ((ts.isPropertyAssignment(p) || ts.isShorthandPropertyAssignment(p)) && watched(nameOf(p.name))) add(`assign:${nameOf(p.name)}`, ts.isPropertyAssignment(p) ? p.initializer : p.name);
+        }
       } else if (listed && ts.isCallExpression(node)) {
         const callee = node.expression;
         if (!reasonOnly && ts.isPropertyAccessExpression(callee) && callee.name.text === "push" && LISTS.test(callee.expression.getText())) for (const a of node.arguments) add(`push:${callee.expression.getText()}`, a);

@@ -139,7 +139,9 @@ describe("every producer of a digest text is one an automatic run knows (DECISIO
     "src/domains/security/index.ts: options.title",
     "src/domains/technical-health/lint.ts: group.title",
     "src/domains/utilisation/index.ts: title",
-    // A metric's label and definition from the file's own table of literals, which the engine-text scan reads.
+    // A metric's label and definition from the file's own table of literals, which the engine-text scan reads
+    // (activity's `shared` takes each label as a literal where it is called).
+    "src/domains/activity/index.ts: label",
     "src/domains/configuration/documented.ts: definition",
     "src/domains/configuration/documented.ts: label",
     "src/domains/historic-pipeline/deep-dive.ts: label",
@@ -206,11 +208,13 @@ describe("every producer of a digest text is one an automatic run knows (DECISIO
     assert.deepEqual([...NOT_SERVED, ...READINESS].filter((k) => !unrecognised.has(k)), []);
   });
 
-  test("the ways a producer once slipped past are caught: a field set later, a computed key, a quoted key, a helper in an unlisted folder", () => {
+  test("the ways a producer once slipped past are caught: a field set later, a computed key, a quoted key, a helper in an unlisted folder, a helper's object spread in, Object.assign", () => {
     const at = "src/digest/__tests__/fixtures/";
     const found = textProducers({ fixtures: [`${at}unmarked-producers.ts`, `${at}unmarked-helper.ts`], unlisted: [`${at}unmarked-helper.ts`] }).filter((p) => p.at.startsWith(at) && p.kind === "NOT RECOGNISED");
     assert.deepEqual(found.map((p) => `${p.at.slice(at.length).replace(/:\d+$/, "")} ${p.slot} ${p.expression}`).sort(), [
+      "unmarked-helper.ts assign:reason `H: ${n} parts couldn't be read.`",
       "unmarked-helper.ts field:reason `${n} things is too few.`",
+      "unmarked-helper.ts spread:reason `G: ${n} parts couldn't be read.`",
       "unmarked-producers.ts field:reason `${name} couldn't be counted.`",
       "unmarked-producers.ts field:reason `${name} couldn't be listed.`",
       "unmarked-producers.ts set:reason `${name} couldn't be read.`",

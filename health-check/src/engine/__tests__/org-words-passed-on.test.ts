@@ -39,6 +39,11 @@ describe("a reason passed on inside a sentence of ours", () => {
       assert.equal(passedPartsHold(whole, new Set([OURS])), false);
       const headed = said`Outer: ${passedOn(`Users couldn't be read: ${OURS}`)}`;
       assert.equal(metricMarks(headed, new Set([OURS])), null, "the tail after a head is the org's value");
+      // And a reason passed on twice: the inner sentence passed on again keeps where its reason sits.
+      const inner = said`Inner: ${passedOn(OURS)}`;
+      const twice = said`Outer3: ${passedOn(inner)}`;
+      assert.ok(metricMarks(twice, new Set()));
+      assert.equal(metricMarks(twice, new Set([OURS])), null, "a reason passed on twice is held to the org's values");
       // And through a sentence quoted inside another.
       const quoted = said`Again: ${whole}`;
       assert.equal(metricMarks(quoted, new Set([OURS])), null);

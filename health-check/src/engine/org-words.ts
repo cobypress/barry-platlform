@@ -50,7 +50,7 @@ type Literal<T> = T extends string ? ({} extends Record<T, 1> ? never : T) : nev
 export type LiteralText<T> = 0 extends 1 & T ? never : Literal<T>;
 const PASSED = Symbol("passed on");
 /** A reason read elsewhere, handed on into a sentence by `passedOn`, with the passed-on route's spans or unknown. */
-export type PassedOn = { readonly [PASSED]: { text: string; spans: OrgSpan[] | null } };
+export type PassedOn = { readonly [PASSED]: { text: string; spans: OrgSpan[] | null; passed: OrgSpan[] } };
 
 /** What `said` takes: a number, org words, a reason passed on, a sentence already made, or a literal. Never `any`. */
 type Piece<T> = 0 extends 1 & T ? never : T extends number | OrgWords | PassedOn | Said ? T : Literal<T>;
@@ -100,9 +100,10 @@ class Ledger {
  * what it was. Bounded: past TAINTED_LIMIT nothing more is added and every string
  * the open ledger doesn't hold reads as unknown for the rest of the process,
  * the safe side (marks degrade to unknown, as before decision 655). One run of
- * the small synthetic org adds about 160 (a repeat of the same org none), so the
- * bound is some 600 different orgs' runs, fewer for big orgs. The worker can
- * recycle itself well before it (HC_WORKER_RECYCLE_AT, DECISIONS.md 666).
+ * the small synthetic org adds about 160, so only a single run of a very big org
+ * could fill one; each health check now has a store of its own (below), freed
+ * when it ends, so a run that fills its own falls back to unknown marks and is
+ * held for a person, and nothing carries to the next (DECISIONS.md 743, 749).
  */
 const TAINTED_LIMIT = 100_000;
 type Store = { texts: Set<string>; full: boolean };
@@ -124,8 +125,22 @@ export function withRunOrgWords<T>(fn: () => T): T {
   return runStores.run({ texts: new Set(), full: false }, fn);
 }
 
+/**
+ * Set by the worker (DECISIONS.md 749): every sentence with org words it makes should be made inside
+ * a health check's own store. One made outside means the check's context was lost on the way, so the
+ * worker would be back to sharing one store between customers: said once, with no org text and no id.
+ */
+let outsideRun: { log: (line: string) => void; said: boolean } | null = null;
+export function expectRunStores(log: (line: string) => void): void {
+  outsideRun = { log, said: false };
+}
+
 function taint(text: string, spans: OrgSpan[] | null): void {
   if (spans && spans.length === 0) return;
+  if (outsideRun && !outsideRun.said && !runStores.getStore()) {
+    outsideRun.said = true;
+    outsideRun.log("A sentence with the org's words was made outside any health check's own org-word store, so checks in this worker may share one. Shown once; see DECISIONS.md 749.");
+  }
   const held = store();
   if (held.texts.has(text)) return;
   if (held.texts.size < TAINTED_LIMIT) held.texts.add(text);
@@ -188,11 +203,13 @@ function piecesOf(strings: readonly string[], pieces: readonly unknown[], senten
     const at = text.length;
     if (piece !== null && typeof piece === "object" && PASSED in piece) {
       // A reason passed on: its own spans, or unknown; and where it sits, for the org-value guard.
-      const { text: reason, spans: own } = (piece as PassedOn)[PASSED];
+      const { text: reason, spans: own, passed: inner } = (piece as PassedOn)[PASSED];
       text += reason;
       if (own) for (const s of own) push(spans, at + s.start, at + s.end);
       else known = false;
       passed.push({ start: at, end: text.length });
+      // A reason passed on twice keeps where the first one sits, so it too is held to the org's values.
+      for (const r of inner) passed.push({ start: at + r.start, end: at + r.end });
     } else if (piece !== null && typeof piece === "object" && ORG in piece) {
       const words = (piece as OrgWords)[ORG];
       text += words;
@@ -243,7 +260,7 @@ export function passedOn(reason: string): PassedOn {
   // Recorded nowhere alone: the reason is vouched for only inside the sentence, where its place is kept, so a
   // reason equal to a value the org chose is found and left unknown when the run's values are known.
   const spans = ledger?.has(reason) ? ledger.get(reason) : passedOnSpans(reason);
-  return { [PASSED]: { text: reason, spans: spans ? spans.map((s) => ({ ...s })) : null } };
+  return { [PASSED]: { text: reason, spans: spans ? spans.map((s) => ({ ...s })) : null, passed: (ledger?.passed(reason) ?? []).map((r) => ({ ...r })) } };
 }
 
 /** Where a sentence said made holds a reason passed on, in this analysis (DECISIONS.md 743). */
