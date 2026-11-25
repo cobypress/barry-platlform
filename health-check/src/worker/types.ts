@@ -8,7 +8,7 @@ import type { PulseResult } from "../pulse/result.ts";
 import type { FactsFile, FactsReport } from "../facts/summary.ts";
 import { z } from "zod";
 import type { Intake } from "../narrative/intake.ts";
-import type { BenchmarkRow, Calibration, ConnectLink, Finding, ManualAnswer, ManualStep, Metric, NumberOverride, Release, ReportSection, Run, Score, SectionVersion } from "../schemas/index.ts";
+import type { BenchmarkRow, CalibratedStage, Calibration, ConnectLink, Finding, ManualAnswer, ManualStep, Metric, NumberOverride, Release, ReportSection, Run, Score, SectionVersion } from "../schemas/index.ts";
 import type { Survey } from "../survey/questions.ts";
 import type { Interview } from "../interviews/questions.ts";
 import type { StoredSummaries, SummariesToSave } from "../handbook/summary-row.ts";
@@ -477,6 +477,31 @@ export interface WorkerStore {
    * any other fault, naming no value.
    */
   customerCurrency(orgId15: string): Promise<string | null>;
+  /**
+   * The customer's newest answer to which of the org's closed stages are lost
+   * and which no decision (DECISIONS.md 756; question "closed_stages" in the
+   * console's HealthCheckCustomerAnswer), as stored, for the engine to read
+   * and check; or null with none, or where the console has no table for it
+   * yet. One read-only statement; throws StoreError on any other fault,
+   * naming no value.
+   */
+  customerStageAnswer(orgId15: string): Promise<unknown>;
+  /**
+   * The org's stages as connect or Run again last read them for this run (the
+   * console's HealthCheckOrgStages, DECISIONS.md 611), or null with none, a
+   * row in a shape we don't know, or no table. Throws StoreError on any other
+   * fault, naming no stage.
+   */
+  savedOrgStages(runId: string): Promise<OrgStage[] | null>;
+  /**
+   * Puts the customer's answer into a saved automatic calibration's stages
+   * (DECISIONS.md 756): the "stages" column and nothing else, in one
+   * statement, only while the row is from the org's settings, confirmed by no
+   * person, with exactly the stages the caller read. "updated" when this wrote
+   * it; "unchanged" when the row no longer matched (another delivery wrote it,
+   * or a person confirmed one). Throws StoreError by SQLSTATE alone.
+   */
+  answerCalibrationStages(runId: string, was: CalibratedStage[], stages: CalibratedStage[]): Promise<"updated" | "unchanged">;
   /**
    * Why an automatic run waits for a person, in the console's "heldReason"
    * (migration 20261211). Only an automatic run's, and only where none is set,

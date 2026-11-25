@@ -3,7 +3,8 @@ import { StoreError, type OrgStage } from "../connect/org-stages.ts";
 import type { ScanResult } from "../scan/result.ts";
 import type { PulseResult } from "../pulse/result.ts";
 import { DIGEST_KEYS, type RunDigest } from "../schemas/digest.ts";
-import { isCurrencyCode } from "../schemas/calibration.ts";
+import { isDeepStrictEqual } from "node:util";
+import { isCurrencyCode, type CalibratedStage } from "../schemas/calibration.ts";
 import { ORG_SETTINGS_CALIBRATOR } from "../connect/auto-calibration.ts";
 import { unstorableAt } from "./inventory.ts";
 import { Run, type BenchmarkRow, type Calibration, type ConnectLink, type Metric, type Release, type ReportSection } from "../schemas/index.ts";
@@ -420,6 +421,39 @@ export class MemoryWorkerStore implements WorkerStore {
     if (!this.customerAnswerTable) return null;
     const code = this.customerCurrencies.get(orgId15.slice(0, 15));
     return isCurrencyCode(code) ? code : null;
+  }
+
+  /** The customers' answers to which closed stages are lost and which no decision (DECISIONS.md 756), as stored, by the org's 15-character id. */
+  readonly customerStageAnswers = new Map<string, unknown>();
+  /** Set: customerStageAnswer throws, as a database that refuses the read would. */
+  failStageAnswer = false;
+
+  async customerStageAnswer(orgId15: string): Promise<unknown> {
+    if (this.failStageAnswer) throw new StoreError("the console's database refused the customer's answer (SQLSTATE 57014)");
+    if (!this.customerAnswerTable) return null;
+    return structuredClone(this.customerStageAnswers.get(orgId15.slice(0, 15)) ?? null);
+  }
+
+  async savedOrgStages(runId: string): Promise<OrgStage[] | null> {
+    if (!this.orgStagesTable) return null;
+    return structuredClone(this.orgStages.get(runId)?.stages ?? null);
+  }
+
+  /** Set: answerCalibrationStages throws, as a database that refuses the write would. */
+  failStageWrite = false;
+  /** Called just before the guarded write is judged, to stand in for another delivery or a person writing first. */
+  beforeStageWrite?: () => void;
+
+  /** As the Postgres store's one guarded statement (DECISIONS.md 756): the stages only. */
+  async answerCalibrationStages(runId: string, was: CalibratedStage[], stages: CalibratedStage[]): Promise<"updated" | "unchanged"> {
+    this.beforeStageWrite?.();
+    if (this.failStageWrite) throw new StoreError("the console's database refused the calibration's stages (SQLSTATE 57014)");
+    const c = this.runs.get(runId)?.calibration;
+    if (!c || c.source !== "org_settings" || c.confirmedBy !== ORG_SETTINGS_CALIBRATOR || !isDeepStrictEqual(c.stages, was)) return "unchanged";
+    this.runs.get(runId)!.calibration = { ...c, stages: structuredClone(stages) };
+    // No detail: the stage names are the org's own.
+    this.writes.push({ method: "answerCalibrationStages", id: runId });
+    return "updated";
   }
 
   /** The console's "heldReason", by run id. False as a console without the column. */

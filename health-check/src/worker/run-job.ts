@@ -26,6 +26,7 @@ import { withJobLock } from "./lock.ts";
 import { automaticRefusal } from "./automatic.ts";
 import { recalibrateForRunAgain, type Recalibrated } from "./connect-job.ts";
 import { CalibrationUnsettled, nameCurrencyBeforeRun } from "./name-currency.ts";
+import { setStagesBeforeRun } from "./stage-answer.ts";
 import { checkedDigest } from "../digest/checked.ts";
 import { checkSections, decidePulse, decideRelease, lossesOf, SHOWABLE_PULSE_HOLDS, type PulseDecision, sameAsLast, SERVER_FAULT_CODES, type ReleaseDecision, type RunLosses, type SameAsLast } from "./release.ts";
 import { letGoAfterRun, type SeenRun } from "./scan-release.ts";
@@ -479,6 +480,17 @@ async function runLocked(runId: string, deps: WorkerDeps, attempt: Attempt, seen
       input = { ...input, calibration: await nameCurrencyBeforeRun({ runId, input, stored, provider: own, dir, deps, log, readThisStart: recalibrated, final: attempt.final === true }) };
     } catch (err) {
       // Only a delivery the queue makes again, before anything records a calibration (745, fix round).
+      if (!(err instanceof CalibrationUnsettled)) throw err;
+      log(err.message);
+      throw new Error(err.message);
+    }
+  }
+  // Its closed stages likewise (DECISIONS.md 756): the customer's newest answer, and with HC_STAGE_NAMES on the name
+  // rule, put into a calibration the machine built, on a start that reads the org afresh. Reads no Salesforce.
+  if (!resume && input.run.reviewMode === "automatic") {
+    try {
+      input = { ...input, calibration: await setStagesBeforeRun({ runId, input, deps, log, final: attempt.final === true }) };
+    } catch (err) {
       if (!(err instanceof CalibrationUnsettled)) throw err;
       log(err.message);
       throw new Error(err.message);

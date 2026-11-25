@@ -37,8 +37,9 @@ export type Progress = {
   /**
    * Rules with an issue now that the earlier run never checked (no issue or pass
    * there), listed apart so they don't read as the org getting worse
-   * (DECISIONS.md 673). Only PMD's groups take this path; every other rule
-   * compares as before. Optional, so a comparison stored before it reads as before.
+   * (DECISIONS.md 673). Only PMD's groups take this path, and a rule the earlier
+   * run couldn't measure for want of which closed stages are lost (756); every
+   * other rule compares as before. Optional, so a comparison stored before it reads as before.
    */
   newlyMeasured?: RuleChange[];
   /**
@@ -106,6 +107,16 @@ function kindNow(findings: Finding[]): { notMeasurableKind?: NotMeasurableKind }
 
 /** The rules a re-check reads as newly measured when the earlier run didn't check them: PMD's groups (DECISIONS.md 673). */
 const MEASURED_LATER = UNSCORED_RULES;
+
+/**
+ * A rule the earlier run couldn't measure only because nobody had said which
+ * closed stages are lost and which no decision (DECISIONS.md 756): once the
+ * customer says, or we read it from the stages' names, what it finds is found
+ * with nothing earlier to compare, as the portal says, never new.
+ */
+const UNSPLIT_THEN = /^Salesforce's setting can't tell lost from no decision for:/;
+const unsplitThen = (then: Finding[]): boolean =>
+  then.length > 0 && then.every((f) => f.status === "not_measurable") && then.some((f) => UNSPLIT_THEN.test(f.notMeasurableReason ?? ""));
 
 /**
  * Whether a pass for one of PMD's groups can be called fixed (DECISIONS.md 673,
@@ -205,7 +216,7 @@ export function compareWithBaseline(baseline: ProgressSide, current: ProgressSid
     const then = before.get(ruleId) ?? [];
     if (then.some((f) => f.status === "issue") || Object.hasOwn(carriedThen, ruleId)) continue;
     // New only if the earlier run checked the rule, as the portal's alerts decide (DECISIONS.md 661, 673).
-    if (MEASURED_LATER.has(ruleId) && !then.some((f) => f.status === "passed")) newlyMeasured.push(change(ruleId, nowIssues));
+    if ((MEASURED_LATER.has(ruleId) && !then.some((f) => f.status === "passed")) || unsplitThen(then)) newlyMeasured.push(change(ruleId, nowIssues));
     // Passed then, raised now only because we tightened the rule since: open, never new (DECISIONS.md 754).
     else if (foundByStricterCheck(then, nowIssues, ruleId, current.ownCalls)) stricter.push(change(ruleId, nowIssues));
     else added.push(change(ruleId, nowIssues));
