@@ -7,6 +7,7 @@ import type { ScanResult } from "../scan/result.ts";
 import type { PulseResult } from "../pulse/result.ts";
 import { DIGEST_KEYS, type RunDigest } from "../schemas/digest.ts";
 import { isCurrencyCode } from "../schemas/calibration.ts";
+import { ORG_SETTINGS_CALIBRATOR } from "../connect/auto-calibration.ts";
 import { unstorableAt } from "./inventory.ts";
 import { randomUUID } from "node:crypto";
 import { z } from "zod";
@@ -40,6 +41,7 @@ import {
   type ReleasedRun,
   type AutomaticRunState,
   type WorkerStore,
+  type CurrencyWas,
   type PortalDocumentRow,
   type RunDelivery,
   DOCUMENTS_HELD_FLAG,
@@ -230,6 +232,15 @@ export function calibrationRow(runId: string, c: Calibration): Record<string, un
   const fields = c.currencyFrom ? { ...c.fields, currencyFrom: c.currencyFrom, ...(c.currencySuggested ? { currencySuggested: c.currencySuggested } : {}) } : c.fields;
   return Object.fromEntries(Object.keys(CALIBRATION_WRITE).map((k) => [k, k === "runId" ? runId : k === "fields" ? fields : (c as Record<string, unknown>)[k]]));
 }
+/**
+ * A saved automatic calibration's currency named from the org's settings (DECISIONS.md 745): the code and its
+ * standing only, every other column and every other key of "fields" left as they are, and only while the row
+ * is still the one the run read: the org's settings' with no person's confirmation, the same currency, and the
+ * same standing, so two deliveries can't both write and a person's save is never written over.
+ */
+export const NAME_CALIBRATION_CURRENCY_SQL =
+  `UPDATE "HealthCheckCalibration" SET "currency" = $2, "fields" = ("fields" - 'currencySuggested') || jsonb_build_object('currencyFrom', 'connect_api') ` +
+  `WHERE "runId" = $1 AND "source" = 'org_settings' AND "confirmedBy" = $3 AND "currency" = $4 AND jsonb_typeof("fields") = 'object' AND "fields" ->> 'currencyFrom' = $5`;
 /** An automatic run's hold (DECISIONS.md 693), read through the row as JSON like its mode. Asked only for an automatic run, so a consultant-led run's reads are unchanged. */
 export const HELD_REASON_SQL = `SELECT to_jsonb("HealthCheckRun") ->> 'heldReason' AS "heldReason" FROM "HealthCheckRun" WHERE "id" = $1`;
 /** A full check's review mode at connect, through the row as JSON (DECISIONS.md 688, 692). */
@@ -1201,6 +1212,17 @@ export class PostgresWorkerStore implements WorkerStore {
       const code = (err as { code?: unknown }).code;
       if (code === "42703") return "no_source_column";
       throw new StoreError(`the console's database refused the calibration (SQLSTATE ${sqlState(code)})`);
+    }
+  }
+
+  /** DECISIONS.md 745: one guarded statement; a code off the list is never sent. */
+  async nameCalibrationCurrency(runId: string, was: CurrencyWas, code: string): Promise<"updated" | "unchanged"> {
+    if (!isCurrencyCode(code)) throw new StoreError("the currency to save isn't a code on the engine's list");
+    try {
+      const result = await this.#pool.query(NAME_CALIBRATION_CURRENCY_SQL, [runId, code, ORG_SETTINGS_CALIBRATOR, was.currency, was.currencyFrom]);
+      return result.rowCount === 1 ? "updated" : "unchanged";
+    } catch (err) {
+      throw new StoreError(`the console's database refused the calibration's currency (SQLSTATE ${sqlState((err as { code?: unknown }).code)})`);
     }
   }
 

@@ -24,6 +24,7 @@ import { appFor, appNotSetUp, needsReconnection } from "./apps.ts";
 import { withJobLock } from "./lock.ts";
 import { automaticRefusal } from "./automatic.ts";
 import { recalibrateForRunAgain, type Recalibrated } from "./connect-job.ts";
+import { nameCurrencyBeforeRun } from "./name-currency.ts";
 import { checkedDigest } from "../digest/checked.ts";
 import { checkSections, decideRelease, lossesOf, sameAsLast, SERVER_FAULT_CODES, type ReleaseDecision, type RunLosses, type SameAsLast } from "./release.ts";
 import { letGoAfterRun, type SeenRun } from "./scan-release.ts";
@@ -352,6 +353,7 @@ async function runLocked(runId: string, deps: WorkerDeps, attempt: Attempt, seen
   // calibration built and saved as at connect, before the folder is cleared; none built, it is held again
   // with the true cause. Only for a new press, with the switch on and a connection to read through:
   // anything else goes on to the checks below, which refuse a run with no calibration as before.
+  let recalibrated = false;
   if (fresh && input.run.reviewMode === "automatic" && !input.calibration && !automaticRefusal(input.run, deps.automatic) && input.connectionName && input.run.connectionKind === "oauth") {
     let rebuilt: Recalibrated;
     try {
@@ -366,6 +368,7 @@ async function runLocked(runId: string, deps: WorkerDeps, attempt: Attempt, seen
     // As the store now has it: a delivery that saved one meanwhile is the one kept.
     const saved = await deps.store.loadRunJob(runId).catch(() => null);
     input = saved?.calibration ? saved : { ...input, calibration: rebuilt.calibration };
+    recalibrated = true;
   }
 
   const problem = problemWith(input, deps);
@@ -397,6 +400,14 @@ async function runLocked(runId: string, deps: WorkerDeps, attempt: Attempt, seen
   // longer has fails now, before anything is sent: no retry could bring it back.
   const app = stored.grant === "web-server" ? appFor(stored.clientId, deps) : deps.oauthClient;
   if (!app) return fail(appNotSetUp(name));
+  // A saved automatic calibration with no currency from Salesforce (DECISIONS.md 745): on a start that reads the
+  // org afresh (a resumed folder keeps the calibration it started with), the org's settings are read once and only
+  // an answer they give that 740 accepts names it, before anything uses it. One built by this delivery's Run again
+  // has just had that read, so its folder is only marked. Never throws, and anything else leaves the calibration as it was.
+  if (!resume && input.run.reviewMode === "automatic") {
+    const own = new OAuthConnectionProvider(name, { store: deps.tokens, client: app, transport: deps.oauthTransport, env: approvedFromConsole(name), log });
+    input = { ...input, calibration: await nameCurrencyBeforeRun({ runId, input, stored, provider: own, dir, deps, log, readThisStart: recalibrated }) };
+  }
   const provider = new OAuthConnectionProvider(name, { store: deps.tokens, client: app, transport: deps.oauthTransport, env: approvedFromConsole(name), log });
   const secrets = [stored.accessToken, stored.refreshToken];
   // A health check or essentials run only, with Claude to ask: a scan and a

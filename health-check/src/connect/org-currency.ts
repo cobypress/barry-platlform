@@ -69,8 +69,11 @@ async function inTime(work: Promise<unknown>, timeoutMs: number): Promise<Read<u
  * What the org says of its currency. Never throws, and logs only the kind of
  * each answer: never a value the org chose beyond a code.
  */
-export async function readOrgCurrency(client: SalesforceClient, options: { log: (line: string) => void; timeoutMs?: number }): Promise<OrgCurrency> {
+export async function readOrgCurrency(client: SalesforceClient, options: { log: (line: string) => void; timeoutMs?: number; suggest?: boolean }): Promise<OrgCurrency> {
   const timeoutMs = options.timeoutMs ?? CURRENCY_TIMEOUT_MS;
+  // False for a calibration already saved (745): its currency is only ever named, never suggested again, so
+  // the locale isn't read and a settings answer we can't use leaves the calibration exactly as it was.
+  const suggest = options.suggest !== false;
   const own = await readField(client, ORG_CURRENCY_SOQL, "DefaultCurrencyIsoCode", timeoutMs);
   if (own.ok) {
     if (typeof own.value === "string" && ISO_CODE.test(own.value)) return { kind: "code", code: own.value };
@@ -82,7 +85,11 @@ export async function readOrgCurrency(client: SalesforceClient, options: { log: 
     return UNREAD;
   }
   // The normal answer of an org with one currency, not a failure (DECISIONS.md 700).
-  options.log("The org has one currency: Salesforce has no DefaultCurrencyIsoCode on its Organization, as on every org without multiple currencies. Its settings are read for its name; if they can't say, its amounts are shown with no currency named and its default locale is read for a suggestion only.");
+  options.log(
+    suggest
+      ? "The org has one currency: Salesforce has no DefaultCurrencyIsoCode on its Organization, as on every org without multiple currencies. Its settings are read for its name; if they can't say, its amounts are shown with no currency named and its default locale is read for a suggestion only."
+      : "The org has one currency: Salesforce has no DefaultCurrencyIsoCode on its Organization, as on every org without multiple currencies. Its settings are read for its name; if they can't say, the calibration's currency is left as it was.",
+  );
   // Only here, after the query's INVALID_FIELD: never on an org with several currencies or a failed read (740).
   const settings = await inTime(client.connectOrganization(), timeoutMs);
   const named: SettingsCurrency = settings.ok ? currencyFromSettings(settings.value) : { ok: false, why: failedWhy(settings), keys: null };
@@ -90,7 +97,8 @@ export async function readOrgCurrency(client: SalesforceClient, options: { log: 
     options.log(`The org's settings name its one currency: ${named.code} (Connect REST API, ${named.where === "top" ? "at the top level" : "inside features"}).`);
     return { kind: "settings", code: named.code };
   }
-  options.log(settingsUnusable(named.why, named.keys));
+  options.log(settingsUnusable(named.why, named.keys, suggest));
+  if (!suggest) return { kind: "single", suggested: null };
   const locale = await readField(client, ORG_LOCALE_SOQL, "DefaultLocaleSidKey", timeoutMs);
   const suggested = locale.ok && typeof locale.value === "string" ? currencyForLocale(locale.value) : null;
   if (!locale.ok) options.log(`The org's default locale wasn't read (${locale.kind === "timeout" ? "the read didn't finish in time" : locale.kind}), so there's no currency to suggest.`);
@@ -163,7 +171,7 @@ function failedWhy(read: { kind: string; status?: number }): string {
 }
 
 /** The one line an unusable settings read gives: our words, and an answer's key names only. */
-function settingsUnusable(why: string, keys: SettingsKeys | null): string {
+function settingsUnusable(why: string, keys: SettingsKeys | null, suggest: boolean): string {
   const shape = keys ? ` Its answer's fields: ${keys.top.join(", ") || "none"}${keys.features ? `; inside features: ${keys.features.join(", ") || "none"}` : "; no features object"}.` : "";
-  return `The org's settings didn't name its currency (${why}), so its amounts are shown with no currency named, as before.${shape}`;
+  return `The org's settings didn't name its currency (${why}), so ${suggest ? "its amounts are shown with no currency named, as before" : "the calibration's currency is left as it was"}.${shape}`;
 }
