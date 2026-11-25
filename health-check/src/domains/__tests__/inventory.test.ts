@@ -83,7 +83,9 @@ describe("the object inventory", () => {
     changed.set("custom-objects", unavailable);
     const m = measured(inventory(changed));
     assert.deepEqual([row(m, "Invoice__c")?.counts.layouts, row(m, "Invoice__c")?.counts.triggers, row(m, "Project__c")?.counts.layouts], [0, 0, 0]);
-    assert.ok(m.exclusions.some((e) => e.startsWith("Page layouts (3) and Apex triggers (2) on custom objects we couldn't name") && e.includes("no access")), m.exclusions.join(" | "));
+    assert.ok(m.exclusions.includes("Page layouts (3) and Apex triggers (2) on custom objects we couldn't name"), m.exclusions.join(" | "));
+    // The list's reason in a text of its own, which the passed-on route knows by its head (DECISIONS.md 739).
+    assert.ok(m.exclusions.includes("The names of custom objects, because the list of custom objects couldn't be read: no access"), m.exclusions.join(" | "));
   });
 
   test("two objects that would share a name are both left unnamed, not guessed", () => {

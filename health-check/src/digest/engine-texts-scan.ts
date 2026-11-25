@@ -14,8 +14,15 @@ import { engineTextKey } from "./engine-texts-key.ts";
 // in engine-texts.ts is regenerated on purpose and reviewed in the diff, never
 // grown while a run is going. Run `node src/digest/engine-texts-scan.ts --write`.
 
-/** The folders scanned: those whose strings can reach a page, and the engine's and the guards' own. */
-export const ENGINE_TEXT_DIRS = [...CUSTOMER_TEXT_DIRS, "engine", "guards"];
+/**
+ * The folders scanned: those whose strings can reach a page, the engine's and
+ * the guards' own, and the digest's, whose builder writes sentences of its own
+ * into what the portal serves (the plan's hours note, DECISIONS.md 673, and the
+ * overall score's fallback reason) and marks them as ours only through this list
+ * (DECISIONS.md 739): left out, an automatic run with a code checker finding in
+ * its plan was held for one sentence of our own.
+ */
+export const ENGINE_TEXT_DIRS = [...CUSTOMER_TEXT_DIRS, "engine", "guards", "digest"];
 
 function* sourceFiles(dir: string): Generator<string> {
   for (const entry of readdirSync(dir, { withFileTypes: true })) {

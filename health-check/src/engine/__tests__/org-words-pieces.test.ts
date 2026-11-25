@@ -208,6 +208,11 @@ const SIGNED_OFF: string[] = [
   "src/domains/configuration/index.ts: unused.length",
   "src/domains/configuration/index.ts: unused.length",
   "src/domains/configuration/index.ts: x.n",
+  // Counts the inventory and the documentation work out (DECISIONS.md 739), and partialHistory's said sentence (typed Said).
+  "src/domains/configuration/documented.ts: partial",
+  "src/domains/configuration/documented.ts: unnamed",
+  "src/domains/configuration/inventory.ts: unnamedLayouts",
+  "src/domains/configuration/inventory.ts: unnamedTriggers",
   // Sentences said made: a said or joinSaid result held in a variable, a helper or option returning one, plural over literal nouns, or a said form (each typed Said).
   "src/domains/configuration/index.ts: idle",
   "src/domains/configuration/index.ts: p.words",
