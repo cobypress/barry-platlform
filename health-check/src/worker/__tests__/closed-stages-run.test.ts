@@ -82,16 +82,31 @@ describe("an automatic run of the synthetic org with its closed stages set", asy
 
   test("the assumption only on figures that split lost from no decision, or are sized by the win rate that does", () => {
     const has = (x: unknown) => JSON.stringify(x).includes(ASSUMED);
+    // Not the rate including no decision: it counts both as not won, so it doesn't lean on which is which.
     assert.deepEqual(named.input.metrics.filter(has).map((m) => m.id).sort(), [
       "activity.per_lost_deal", "historic.lost_by_stage", "historic.lost_value_by_stage", "historic.no_decision_rate", "historic.quarterly_win_rate",
-      "historic.sales_cycle_lost", "historic.win_rate", "historic.win_rate_by_value", "historic.win_rate_including_no_decision",
+      "historic.sales_cycle_lost", "historic.win_rate", "historic.win_rate_by_value",
     ]);
     assert.deepEqual([...new Set(named.input.findings.filter(has).map((f) => f.ruleId))].sort(), [
       // Readers of the split.
       "act.deals-without-activity", "act.won-vs-lost-activity", "pipe.segment-divergence", "rev.win-backs",
-      // Sized at the win rate (value.ts atOwnWinRate, historic-pipeline/potential.ts), so their figures move with it.
-      "cur.stale-deals", "dq.open-opps-no-activity", "dq.open-opps-past-close", "dq.opps-inactive-owner", "rev.dormant-accounts", "rev.stalled-deals",
+      // Sized at the overall win rate every time (value.ts atOwnWinRate), so its figure moves with it.
+      "rev.dormant-accounts",
     ].sort());
+    assert.equal(named.input.findings.filter(has).length, 7);
+  });
+
+  test("a finding sized from comparable deals carries the assumption only where a thin group falls back to the overall win rate", async () => {
+    const at = async (minSample: number) => run({ ...calibrate({ stageNames: true }), minSample }, true);
+    const FALLBACK = "weighted at your overall win rate";
+    const has = (x: unknown) => JSON.stringify(x).includes(ASSUMED);
+    for (const r of [named, await at(40)]) {
+      for (const f of r.input.findings.filter((x) => ["dq.open-opps-past-close", "dq.opps-inactive-owner", "dq.open-opps-no-activity", "cur.stale-deals", "rev.stalled-deals"].includes(x.ruleId))) {
+        assert.equal(has(f), JSON.stringify(f.value).includes(FALLBACK), f.ruleId);
+      }
+    }
+    const thin = await at(40);
+    assert.ok(thin.input.findings.some((f) => f.ruleId === "dq.open-opps-no-activity" && JSON.stringify(f.value).includes(FALLBACK) && has(f)), "the fallback is used, and said");
   });
 
   test("released as an automatic run must be: nothing held, unmarked or unmatched, the stage names marked as the org's and nothing else in the sentence", () => {
@@ -111,7 +126,10 @@ describe("an automatic run of the synthetic org with its closed stages set", asy
 
   test("since last time: a check unmeasured then for want of the answer is found with nothing earlier to compare, never new", () => {
     const side = (r: typeof none, runId: string) => ({ runId, asOf: "2026-11-01T00:00:00.000Z", findings: r.input.findings, scores: [], overall: { status: "not_measurable", reason: "x" }, value: { currency: "GBP", total: { low: 0, expected: 0, high: 0 } }, limitsReadAt: null }) as never;
-    const p = compareWithBaseline(side(none, "a"), side(answered, "b"));
+    const p = compareWithBaseline(side(none, "a"), { ...(side(answered, "b") as object), checkedByCode: true } as never);
+    // A run whose digest no code checks (consultant-led) compares as before 756: the owner's open decision.
+    const asBefore = compareWithBaseline(side(none, "a"), side(answered, "b"));
+    assert.equal(asBefore.newlyMeasured, undefined);
     const raised = FOUR.filter((id) => byId(answered, id).some((f) => f.status === "issue") && byId(none, id).every((f) => f.status === "not_measurable"));
     assert.ok(raised.length >= 2, raised.join());
     for (const id of raised) {
@@ -120,6 +138,32 @@ describe("an automatic run of the synthetic org with its closed stages set", asy
     }
     // Without the answer on either side: as before.
     assert.equal(compareWithBaseline(side(none, "a"), side(none, "b")).newlyMeasured, undefined);
+  });
+
+  test("a consultant-led re-check compares as it did before 756: a check the calibration couldn't split before is new (the owner's open decision)", async () => {
+    const { buildReport } = await import("../../narrative/sections.ts");
+    const { buildPulseResult } = await import("../../pulse/result.ts");
+    const { loadAnswers, loadCalibration } = await import("../../testing/replay.ts");
+    const { cpSync, readFileSync, writeFileSync } = await import("node:fs");
+    const { join } = await import("node:path");
+    const { tempDir } = await import("../../testing/harness.ts");
+    const cal = loadCalibration();
+    const dropped = { ...cal, stages: cal.stages.filter((s) => s.name !== "Closed No Decision" && s.name !== "Closed Lost - No Budget") };
+    const before = (await runFromRecording({ answers: loadAnswers(), calibration: dropped })).dir;
+    const now = (await runFromRecording({ answers: loadAnswers() })).dir;
+    const parent = tempDir();
+    const earlier = join(parent, "hc-2026-10-09-earlier");
+    const dir = join(parent, "hc-2026-11-09-now");
+    cpSync(before, earlier, { recursive: true });
+    cpSync(now, dir, { recursive: true });
+    const json = (d: string) => JSON.parse(readFileSync(join(d, "run.json"), "utf8"));
+    writeFileSync(join(earlier, "run.json"), JSON.stringify({ ...json(before), id: "hc-2026-10-09-earlier", asOf: "2026-10-09T12:00:00.000Z" }));
+    writeFileSync(join(dir, "run.json"), JSON.stringify({ ...json(now), id: "hc-2026-11-09-now", baselineRunId: "hc-2026-10-09-earlier" }));
+    const report = buildReport(loadRun(dir).input);
+    const p = report.progress!;
+    assert.deepEqual(p.added.map((c) => [c.ruleId, c.findingIds.length]), [["dq.loss-reason-missing", 1], ["pipe.segment-divergence", 3], ["act.deals-without-activity", 1], ["rev.win-backs", 1]]);
+    assert.equal(p.newlyMeasured, undefined);
+    assert.equal((buildPulseResult(report) as { counts: { new: number } }).counts.new, 4);
   });
 
   test("the first month as the reports and the scan's result show it: segments now measured are first checked, never new, answered or read by names", async () => {

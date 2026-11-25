@@ -32,7 +32,7 @@ import { renderRawNotes } from "../notes/raw-notes.ts";
 import { ACTION_LISTS_FILE, buildActionLists } from "../actions/lists.ts";
 import { Pseudonymiser, UNKNOWN_USER, type PseudonymEntry } from "../privacy/pseudonymiser.ts";
 import { registerSharedNames } from "../privacy/names.ts";
-import { Run, type Calibration, type ManualAnswer, type OrgProfile, type RefusedRead, type RunScope, type RunStep, type SkippedRead } from "../schemas/index.ts";
+import { checkedByCode, Run, type Calibration, type ManualAnswer, type OrgProfile, type RefusedRead, type RunScope, type RunStep, type SkippedRead } from "../schemas/index.ts";
 import { ApiBudget, BudgetStopError } from "../salesforce/budget.ts";
 import { classifyError, lastDelivery, readGate, runStoppedWords, SalesforceClient, SalesforceError } from "../salesforce/client.ts";
 import type { ConnectionProvider } from "../salesforce/connection.ts";
@@ -263,6 +263,7 @@ async function runHealthCheckWithin(options: RunOptions): Promise<RunResult> {
       id: runId,
       product: options.product ?? "barometer",
       reviewMode: options.reviewMode ?? "consultant",
+      ...(options.gated === true ? { gated: true } : {}),
       customerRef: options.customerRef ?? null,
       orgId: client.orgId,
       isSandbox: false,
@@ -551,7 +552,7 @@ function analyseRun(dir: string, run: Run, calibration: Calibration, modules: Do
     // An automatic run never waits for a person: what nobody answered is skipped, and the rules that needed it say not measurable (DECISIONS.md 693).
     unanswered: run.reviewMode === "automatic" ? "skip" : "ask",
     // Only where code checks the digest: every other run's findings are as before (DECISIONS.md 756).
-    markPeriods: run.reviewMode === "automatic" || gated,
+    markPeriods: checkedByCode(run) || gated,
     stageNames,
   });
   writeJson(join(dir, "pseudonym-map.json"), pseudonyms.entries());

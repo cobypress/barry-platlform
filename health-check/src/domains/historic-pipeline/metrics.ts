@@ -134,7 +134,8 @@ function winRate(ctx: Ctx, data: Ready): Metric[] {
   const decided = closed.filter((d) => d.category !== "no_decision");
   // Each of these but the rate including no decision leaves no decision out, or
   // reports it, and Salesforce's flags can't tell it from lost (DECISIONS.md 600).
-  const unsplit = unsplitLostReason(data, ctx, Object.values(definitions).map((d) => d.id));
+  // The rate including no decision counts both as not won, so it doesn't lean on which is which.
+  const unsplit = unsplitLostReason(data, ctx, [definitions.count.id, definitions.value.id, definitions.noDecision.id]);
   const won = decided.filter((d) => d.category === "won");
   const rate = (group: Deal[]): number => pct(group.filter((d) => d.category === "won").length, group.length);
   const thin = (n: number): Said => said`${n} closed deals is below the calibrated minimum of ${minSample}.`;

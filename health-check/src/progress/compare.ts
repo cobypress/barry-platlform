@@ -94,6 +94,12 @@ export type ProgressSide = {
   metrics?: Metric[];
   /** The findings as the rules read them, before a rep's token is taken off for the team (narrative/select.ts): only to find an issue's own segment by its id (756). */
   asRead?: Finding[];
+  /**
+   * The current run's only: whether code checks its digest (an automatic run, or a gated pulse). Only then is a check
+   * unmeasured earlier for want of the closed stages' meaning set apart as checked for the first time (756); a
+   * consultant-led re-check compares as before 756, which is the owner's open decision.
+   */
+  checkedByCode?: boolean;
 };
 
 const byRule = (findings: Finding[]): Map<string, Finding[]> => {
@@ -226,7 +232,7 @@ export function compareWithBaseline(baseline: ProgressSide, current: ProgressSid
     else if (nowFindings.some((f) => f.status === "passed") && (!MEASURED_LATER.has(ruleId) || fixedAsRead(thenIssues, nowFindings))) fixed.push(change(ruleId, thenIssues));
     else unknown.push({ ...change(ruleId, thenIssues), ...kindNow(nowFindings) });
   }
-  const unmeasuredThen = unsplitMetrics(baseline.metrics);
+  const unmeasuredThen = current.checkedByCode === true ? unsplitMetrics(baseline.metrics) : [];
   const asRead = new Map((current.asRead ?? []).map((f) => [f.id, f]));
   for (const [ruleId, nowFindings] of now) {
     const raised = nowFindings.filter((f) => f.status === "issue");
@@ -239,7 +245,7 @@ export function compareWithBaseline(baseline: ProgressSide, current: ProgressSid
     const nowIssues = raised.filter((f) => !unlocked.includes(f));
     if (!nowIssues.length) continue;
     // New only if the earlier run checked the rule, as the portal's alerts decide (DECISIONS.md 661, 673).
-    if ((MEASURED_LATER.has(ruleId) && !then.some((f) => f.status === "passed")) || unsplitThen(then)) newlyMeasured.push(change(ruleId, nowIssues));
+    if ((MEASURED_LATER.has(ruleId) && !then.some((f) => f.status === "passed")) || (current.checkedByCode === true && unsplitThen(then))) newlyMeasured.push(change(ruleId, nowIssues));
     // Passed then, raised now only because we tightened the rule since: open, never new (DECISIONS.md 754).
     else if (foundByStricterCheck(then, nowIssues, ruleId, current.ownCalls)) stricter.push(change(ruleId, nowIssues));
     else added.push(change(ruleId, nowIssues));

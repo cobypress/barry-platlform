@@ -119,7 +119,14 @@ export const Run = z.object({
   readsRefused: z.array(RefusedRead).optional(),
   // Every run stored before decision 688 was consultant-led, so absent reads as that.
   reviewMode: ReviewMode.default("consultant"),
+  // A pulse shown through an automatic check's gate (DECISIONS.md 746): its digest is checked by code, as an automatic
+  // run's is (756). Set only then, so every other run.json is as before.
+  gated: z.literal(true).optional(),
   // Absent on a run stored before decision 710.
   orgProfile: OrgProfile.optional(),
 });
 export type Run = z.infer<typeof Run>;
+
+/** Whether code checks this run's digest (DECISIONS.md 693, 746, 756): an automatic run, or a pulse shown through an automatic check's gate. */
+export const checkedByCode = (run: Pick<Run, "reviewMode" | "gated">): boolean => run.reviewMode === "automatic" || run.gated === true;
+

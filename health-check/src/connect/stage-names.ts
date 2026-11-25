@@ -50,7 +50,7 @@ const STOP = [
   "recovery", "found", "review", "risk", "mitigated", "prevention", "billing", "revenue", "cart", "harmless", "maker", "momentum", "upsell", "off",
 ] as const;
 /** Words that may stand beside an outcome without changing it. */
-const FILLER = ["closed", "close", "to", "a", "an", "by", "the", "deal", "deals", "opportunity", "opp", "customer", "prospect", "client", "buyer", "stage"] as const;
+const FILLER = ["closed", "to", "a", "an", "by", "the", "deal", "deals", "opportunity", "opp", "customer", "prospect", "client", "buyer", "stage"] as const;
 
 /** The lists, for the tests and the decision row. */
 export const STAGE_NAME_WORDS = { lost: LOST, no_decision: NO_DECISION, stop: STOP, filler: FILLER } as const;

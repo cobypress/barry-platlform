@@ -16,7 +16,7 @@ import { DOCUMENTED_METRIC_IDS } from "../domains/configuration/documented.ts";
 import { buildDataset, checkNumbers, scopeDataset, SOURCE, toNumberCheckResult, type FigureSet, type StructuralFigure } from "../numbercheck/index.ts";
 import { AMOUNT_MARK, closedAgainstFirst, compactMoney, longDate, money, monthYear, probingAmounts } from "../render/format.ts";
 import { BENCHMARK_MIN_GROUP, calibrationConfirmation, type Calibration, type Finding, type ManualStep, type Metric, type NumberOverride, type ReportSection, type Run, type Score, type SectionVersion } from "../schemas/index.ts";
-import { ReportSection as ReportSectionSchema, SectionVersion as SectionVersionSchema } from "../schemas/index.ts";
+import { checkedByCode, ReportSection as ReportSectionSchema, SectionVersion as SectionVersionSchema } from "../schemas/index.ts";
 import type { SectionBrief } from "./draft.ts";
 import type { Intake } from "./intake.ts";
 import { applyOverrides, type OverrideRefusal } from "./overrides.ts";
@@ -942,7 +942,7 @@ export function buildReport(all: ReportInput): BuiltReport {
     baselineRefused = first.refused.length;
     progress = compareWithBaseline(
       { runId: first.input.run.id, asOf: first.input.run.asOf, findings: first.teamFindings, scores: first.input.scores ?? [], overall: first.overall, value: first.value, limitsReadAt: limitsReadAt(first.input.run, first.input.limitsReadAt), ...(input.baseline.carried ? { carried: input.baseline.carried } : {}), metrics: first.input.metrics },
-      { runId: run.id, asOf: run.asOf, findings: team, scores, overall, value, limitsReadAt: limitsReadAt(run, input.limitsReadAt), ownCalls: run.budget.callsMade, asRead: effective.findings },
+      { runId: run.id, asOf: run.asOf, findings: team, scores, overall, value, limitsReadAt: limitsReadAt(run, input.limitsReadAt), ownCalls: run.budget.callsMade, asRead: effective.findings, checkedByCode: checkedByCode(run) },
     );
   }
   // Every compared figure comes from deals, which a set-up review never reads.

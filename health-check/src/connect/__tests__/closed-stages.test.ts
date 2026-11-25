@@ -69,7 +69,7 @@ describe("the name rule's word list", () => {
     ["No Decisions", undefined, U], ["Lost2Competitor", undefined, U], ["The customer decided not to go ahead with us this year", undefined, U],
     // Label and API name disagreeing, or a name saying nothing.
     ["Closed Lost", "Closed_No_Decision", U], ["Closed Lost", "Closed Won", U], ["Closed Lost", "Open", U], ["Closed", undefined, U], ["", "", U],
-    ["LOSTDEAL", undefined, U], ["Holding", undefined, U], ["Reject", undefined, U], ["Winback", undefined, U], ["Closed - Other", undefined, U],
+    ["LOSTDEAL", undefined, U], ["Holding", undefined, U], ["Reject", undefined, U], ["Winback", undefined, U], ["Closed - Other", undefined, U], ["Hold to Close", undefined, U], ["Lost to Close", undefined, U],
     // Whole words only.
     ["Closeness", undefined, U], ["Glossary", undefined, U], ["Stakeholder", undefined, U], ["Lostwithiel", undefined, U],
     // Not English, or letters outside basic Latin: never half read.

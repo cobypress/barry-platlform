@@ -81,11 +81,15 @@ export function potentialRevenue(ctx: Pick<RuleContext, "calibration" | "window"
     lines.push(said`${plural(deals.length, "deal")} with ${moneySaid(sum(deals), currency)} weighted at ${cohort.rate}%: of ${cohort.n} deals closed ${period} that were ${situation.phrase} at some point, ${cohort.won} went on to win`);
   }
 
-  const overall = measuredRate(ctx, "historic.win_rate");
+  // Read, and leaned on, only where a group falls back to it (DECISIONS.md 756): a figure that never uses the overall
+  // win rate doesn't carry what that rate leaned on, such as closed stages read from their names.
+  let read: ReturnType<typeof measuredRate> | undefined;
+  const overallRate = () => (read ??= measuredRate(ctx, "historic.win_rate"));
   const unsizedNotes: Said[] = [];
   for (const { situation, deals, n } of fallback) {
     const thin = said`only ${n} deals closed ${period} that were ${situation.phrase}, under the calibrated minimum of ${minSample}`;
-    if (situation.ceiling && !("reason" in overall)) {
+    const overall = situation.ceiling ? overallRate() : null;
+    if (overall && !("reason" in overall)) {
       amount += (sum(deals) * overall.value) / 100;
       sized += deals.length;
       lines.push(said`${plural(deals.length, "deal")} with ${moneySaid(sum(deals), currency)} weighted at your overall win rate of ${overall.value}% on ${overall.n} closed deals, because ${thin}. Deals in this situation usually win less often, so treat this part as a ceiling`);
