@@ -208,6 +208,11 @@ function orgWordsOf(f: Finding): Pick<DigestFinding, "orgWords"> {
     const each = v.assumptions.map((a, i) => spansIfCurrent(a, held[i])).filter((s): s is OrgSpan[] => s !== null);
     if (held.length === v.assumptions.length && each.length === v.assumptions.length) out.valueAssumptions = each.map((s) => ({ orgWordsMarked: true, orgWords: s }));
   }
+  // A period said made, kept on the finding only where code checks the digest (DECISIONS.md 756).
+  if (v.kind !== "not_sized" && marks?.valuePeriod) {
+    const spans = spansIfCurrent(v.period, marks.valuePeriod);
+    if (spans) out.valuePeriod = { orgWordsMarked: true, orgWords: spans };
+  }
   if (f.effortHours) {
     const spans = spansIfCurrent(f.effortHours.basis, marks?.hoursBasis);
     if (spans) out.hoursBasis = { orgWordsMarked: true, orgWords: spans };
@@ -394,7 +399,7 @@ export function buildDigest({ report, pseudonyms, inventory, madeAt }: DigestFor
   };
   orgValues = orgValuesOf({ metrics: report.metrics, findings: report.input.findings, stages: report.input.calibration.stages.map((s) => s.name) });
   const guarded = guardDigest(raw, pseudonyms);
-  const findings = guarded.findings.map((f, i) => withValueWords(afterGuard(raw.findings[i]!, f), run.reviewMode === "automatic"));
+  const findings = guarded.findings.map((f, i) => withValueWords(afterGuard(raw.findings[i]!, f)));
   // The score's caveat and the edition's note, ours while each reads exactly as we write it (DECISIONS.md 710).
   const said = (guarded.overall as { caveat?: string }).caveat;
   const caveat = said !== undefined && isScoreCaveat(said) ? { overall: { ...guarded.overall, orgWords: { caveat: ENGINE_WORDS } } } : {};
@@ -488,23 +493,12 @@ const ENGINE_WORDS: SentenceOrgWords = { orgWordsMarked: true, orgWords: [] };
 let orgValues: ReadonlySet<string> = new Set();
 const engineWords = (text: string): SentenceOrgWords | undefined => (engineOwn(text, orgValues) ? ENGINE_WORDS : undefined);
 
-/**
- * The engine's periods that put in the analysis window's two days (DECISIONS.md 756): written whole in its source but
- * for the dates, which are the run's own, never a value the org chose, so the scan of engine texts can't vouch for them.
- * An automatic run first reached the first when its closed stages were set, and was held for it. Marked on an
- * automatic run's digest only, the one held for an unmarked text, so every other digest is as it was.
- */
-const WINDOW_PERIODS = [
-  /^in wins the gap may have cost, \d{4}-\d\d-\d\d to \d{4}-\d\d-\d\d$/,
-  /^in discount beyond what peers gave, \d{4}-\d\d-\d\d to \d{4}-\d\d-\d\d, a potential figure$/,
-];
-
 /** A sized value's unit and period marked (DECISIONS.md 693): the unit a currency code the org set, whole, or ours; the period the engine's. */
-function withValueWords(f: DigestFinding, automatic: boolean): DigestFinding {
+function withValueWords(f: DigestFinding): DigestFinding {
   const v = f.value;
   if (v.kind === "not_sized") return f;
   const unit = /^[A-Z]{3}$/.test(v.unit) ? { orgWordsMarked: true as const, orgWords: [{ start: 0, end: 3 }] } : v.unit === "hours" ? ENGINE_WORDS : undefined;
-  const period = engineWords(v.period) ?? (automatic && WINDOW_PERIODS.some((p) => p.test(v.period)) ? ENGINE_WORDS : undefined);
+  const period = engineWords(v.period);
   if (!unit && !period) return f;
   return { ...f, orgWords: { ...f.orgWords, ...(unit ? { valueUnit: unit } : {}), ...(period ? { valuePeriod: period } : {}) } };
 }

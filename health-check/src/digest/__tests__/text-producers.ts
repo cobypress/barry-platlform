@@ -21,7 +21,7 @@ export const PRODUCER_DIRS = ["src/domains", "src/engine/currency.ts", "src/extr
 const REASON_ONLY = "src/extract";
 
 /** Fields of a rule's result, a value, a metric or a loader's answer that hold text the digest serves. */
-const FIELDS = new Set(["title", "summary", "recommendation", "blockedRecommendation", "reason", "definition", "label", "exclusions", "assumptions", "caveat"]);
+const FIELDS = new Set(["title", "summary", "recommendation", "blockedRecommendation", "reason", "definition", "label", "exclusions", "assumptions", "caveat", "period"]);
 /** Helpers whose string arguments become a reason. */
 const CALLS = /^(notSized|nm|notMeasurable|off|thinReason|apexGap|cantRead|markUnread|notRead)$/;
 /** A helper's parameters that hold text: its reason, a note, or the words put into its sentence. */

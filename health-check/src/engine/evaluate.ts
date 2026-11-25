@@ -34,6 +34,12 @@ export type AnalysisInput = {
    * never waits and the rules that needed it say not measurable (DECISIONS.md 693).
    */
   unanswered?: "ask" | "skip";
+  /**
+   * Whether this run's digest is checked by code (an automatic run, or a pulse
+   * shown through an automatic check's gate): a value's period said made is then
+   * marked on its finding, for the digest (DECISIONS.md 756). Off, findings are as before.
+   */
+  markPeriods?: boolean;
 };
 
 /** An issue's records, by finding. Worker-only: never part of a finding or anything sent on. */
@@ -213,7 +219,7 @@ function orgWordsFor(rule: Rule, before: Finding, after: Finding): { orgWords?: 
  * a reader never takes one unmarked assumption among marked ones for the
  * engine's. The two fixed reasons the engine gives itself are its own words.
  */
-function valueOrgWords(was: Finding["value"], now: Finding["value"]): Pick<NonNullable<Finding["orgWords"]>, "valueReason" | "valueAssumptions"> {
+function valueOrgWords(was: Finding["value"], now: Finding["value"]): Pick<NonNullable<Finding["orgWords"]>, "valueReason" | "valueAssumptions" | "valuePeriod"> {
   if (was.kind === "not_sized") {
     if (now.kind !== "not_sized" || now.reason !== was.reason) return {};
     const own = was.reason === NOT_SIZED.reason || was.reason === GUARD_UNSIZED;
@@ -221,9 +227,14 @@ function valueOrgWords(was: Finding["value"], now: Finding["value"]): Pick<NonNu
     const marked = markSentence(was.reason, own ? [] : saidMade(was.reason) ? orgWordsOf(was.reason) : passedOnSpans(was.reason));
     return marked ? { valueReason: marked } : {};
   }
-  if (now.kind === "not_sized" || now.assumptions.length !== was.assumptions.length || now.assumptions.some((a, i) => a !== was.assumptions[i])) return {};
+  if (now.kind === "not_sized") return {};
+  // A period said made, on a run whose digest is checked (DECISIONS.md 756): marked by itself, since it isn't one of the assumptions.
+  const spans = markingPeriods && now.period === was.period && saidMade(was.period) ? orgWordsOf(was.period) : null;
+  const period = spans ? markSentence(was.period, spans) : null;
+  const withPeriod = period ? { valuePeriod: period } : {};
+  if (now.assumptions.length !== was.assumptions.length || now.assumptions.some((a, i) => a !== was.assumptions[i])) return withPeriod;
   const marks = was.assumptions.map((a) => markSentence(a)).filter((m): m is MarkedSentence => m !== null);
-  return marks.length > 0 && marks.length === was.assumptions.length ? { valueAssumptions: marks } : {};
+  return marks.length > 0 && marks.length === was.assumptions.length ? { valueAssumptions: marks, ...withPeriod } : withPeriod;
 }
 
 function engineEvidence(ruleId: string, note: string, now: Date): Evidence {
@@ -343,8 +354,17 @@ function metricWithoutCurrency(metric: Metric, reason: Said): Metric {
 
 export function analyse(input: AnalysisInput): AnalysisOutput {
   // Each analysis has its own ledger of the sentences said made (DECISIONS.md 655).
-  return withOrgWords(() => analyseWithin(input));
+  const outer = markingPeriods;
+  markingPeriods = input.markPeriods === true;
+  try {
+    return withOrgWords(() => analyseWithin(input));
+  } finally {
+    markingPeriods = outer;
+  }
 }
+
+/** Set for one analysis whose digest is checked (DECISIONS.md 756): its findings keep a period's marks. Analyses run one at a time, synchronously. */
+let markingPeriods = false;
 
 function analyseWithin(input: AnalysisInput): AnalysisOutput {
   const { modules, extracts, calibration, now, window, answers, pseudonyms, userDirectory, scope = "complete", unanswered = "ask" } = input;

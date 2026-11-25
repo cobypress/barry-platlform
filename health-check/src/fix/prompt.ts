@@ -207,15 +207,24 @@ function sentence(f: PromptFinding, key: "title" | "summary" | "recommendation")
 }
 
 /**
+ * Where a summary's sentences end: whitespace after a full stop, never inside
+ * a span of the org's words (DECISIONS.md 756). A stage or record named "No
+ * Decision - Cust. Unresponsive" holds ". " that is the org's, not ours, so a
+ * cut there would split the org's words and leave the prompt unknown.
+ */
+const sentenceGaps = (summary: Marked): RegExpExecArray[] =>
+  [...summary.text.matchAll(/(?<=\.)\s+/g)].filter((gap) => !summary.spans?.some((s) => s.start < gap.index + gap[0].length && s.end > gap.index - 1));
+
+/**
  * A summary cut to its first `keep` sentences, joined by one space as before.
  * A joining space that replaces whitespace inside an org value can't be said to
- * be either's, so the summary is then unknown.
+ * be either's, so the summary is then unknown; a cut is never made inside one.
  */
 function firstSentences(summary: Marked, keep: number): Marked {
   const parts: Marked[] = [];
   let known = summary.spans !== null;
   let at = 0;
-  for (const gap of summary.text.matchAll(/(?<=\.)\s+/g)) {
+  for (const gap of sentenceGaps(summary)) {
     if (parts.length === keep) break;
     parts.push(sliceMarked(summary, at, gap.index));
     if (parts.length < keep && summary.spans?.some((s) => s.start < gap.index + gap[0].length && s.end > gap.index)) known = false;
@@ -295,8 +304,8 @@ export function assembleMarked(f: PromptFinding, rule: PromptRule, pseudonyms?: 
   ], "\n\n");
   // A summary too long for the limit loses whole sentences from its end, and says so.
   let prompt = build(fullSummary);
-  const sentences = fullSummary.text.split(/(?<=\.)\s+/);
-  for (let keep = sentences.length - 1; prompt.text.length > FIX_PROMPT_MAX && keep >= 1; keep--) prompt = build(cat(firstSentences(fullSummary, keep), ours(" (The finding says more.)")));
+  const sentences = sentenceGaps(fullSummary).length + 1;
+  for (let keep = sentences - 1; prompt.text.length > FIX_PROMPT_MAX && keep >= 1; keep--) prompt = build(cat(firstSentences(fullSummary, keep), ours(" (The finding says more.)")));
   return prompt;
 }
 

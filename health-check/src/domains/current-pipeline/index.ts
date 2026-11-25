@@ -428,7 +428,7 @@ const coverage: Rule = {
       severity: result.coverage < COVERAGE_TARGET / 2 ? "high" : "medium",
       confidence: "medium",
       evidence,
-      value: { kind: "revenue", amount: shortfall, unit: ctx.calibration.currency, period: `more pipeline needed for the quarter starting ${result.quarter.from}`, assumptions: [said`A target of ${COVERAGE_TARGET} times the remaining quota, which is our working figure`, said`Quota comes from Collaborative Forecasts, for people who own deals`, said`Open pipeline in the quarter is taken at full Amount, with no stage weighting`] },
+      value: { kind: "revenue", amount: shortfall, unit: ctx.calibration.currency, period: said`more pipeline needed for the quarter starting ${eng(result.quarter.from)}`, assumptions: [said`A target of ${COVERAGE_TARGET} times the remaining quota, which is our working figure`, said`Quota comes from Collaborative Forecasts, for people who own deals`, said`Open pipeline in the quarter is taken at full Amount, with no stage weighting`] },
       // The decision is the small part, and it's the urgent part. Building pipeline afterwards is the dependency.
       effort: { size: "S" },
       owner: "Head of sales",
