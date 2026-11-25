@@ -2,7 +2,7 @@ import { allFindings, allMetrics } from "../engine/evaluate.ts";
 import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { ALL_MODULES, knownModuleIds, modulesForRun } from "../domains/index.ts";
-import { runHealthCheck, type StepTiming } from "../engine/run.ts";
+import { MAX_REFUSED, runHealthCheck, type StepTiming } from "../engine/run.ts";
 import { applyNarrative, type Rejection } from "../narrative/apply.ts";
 import type { NarrativeClient } from "../narrative/client.ts";
 import { classifyError, NoApiAccessError, runStoppedWords, SalesforceError } from "../salesforce/client.ts";
@@ -25,7 +25,7 @@ import { withJobLock } from "./lock.ts";
 import { automaticRefusal } from "./automatic.ts";
 import { recalibrateForRunAgain, type Recalibrated } from "./connect-job.ts";
 import { checkedDigest } from "../digest/checked.ts";
-import { checkSections, decideRelease, type ReleaseDecision } from "./release.ts";
+import { checkSections, decideRelease, lossesOf, sameAsLast, SERVER_FAULT_CODES, type ReleaseDecision, type RunLosses, type SameAsLast } from "./release.ts";
 import { letGoAfterRun, type SeenRun } from "./scan-release.ts";
 import { progressOf, RunClosedError, runOverall, DELIVERY_OUTCOMES, type RunJobInput } from "./types.ts";
 import { withoutComments } from "../survey/questions.ts";
@@ -148,7 +148,24 @@ export async function processRunJob(runId: string, deps: WorkerDeps, attempt: At
  * and is released, as a refusal is.
  */
 export function lossLooksLikeOutage(lost: ReadonlyArray<{ step: string; code: string }>): boolean {
-  return lost.some((r) => r.code === "Server" || r.code === "BAD_SOAP_RESPONSE") || new Set(lost.map((r) => r.step)).size > 1;
+  return lost.some((r) => SERVER_FAULT_CODES.includes(r.code)) || new Set(lost.map((r) => r.step)).size > 1;
+}
+
+/**
+ * Whether a reads_lost hold repeats the org's previous run's losses (DECISIONS.md 723): `{ sameAsLast }` when known,
+ * `{}` otherwise. The previous run is the org's, never an earlier attempt of this run. It only informs the person the
+ * hold goes to, so a database fault here is logged and leaves it out, never costing the hold.
+ */
+async function sameAsLastOf(deps: Pick<WorkerDeps, "store">, runId: string, orgId15: string, losses: RunLosses | null, log: (line: string) => void): Promise<{ sameAsLast?: SameAsLast }> {
+  try {
+    const previous = await deps.store.previousRunLosses(runId, orgId15);
+    const same = sameAsLast(losses, previous?.losses);
+    if (previous) log(`Run ${runId}'s previous run of the org is ${previous.runId}: ${same === 1 ? "it lost reads in the same steps" : same === 0 ? "it lost different reads" : "whether it lost the same reads isn't known"}.`);
+    return same === undefined ? {} : { sameAsLast: same };
+  } catch (err) {
+    log(`Run ${runId}'s previous run of the org couldn't be read, so the hold doesn't say whether it lost the same reads (${err instanceof Error ? err.name : "unknown"}).`);
+    return {};
+  }
 }
 
 /** The press time of the "Run again" that last started this folder afresh, or null: none, or a mark that isn't one, which any press is newer than. */
@@ -485,7 +502,10 @@ async function runLocked(runId: string, deps: WorkerDeps, attempt: Attempt, seen
   const lost = (result.run.readsRefused ?? []).filter((r) => r.lost === true);
   // Not gated on this delivery being the last: a read is marked lost only on a last delivery, and a later job that
   // resumes the folder (one whose last delivery couldn't save or record its failure) holds it as that one would have.
-  const readsLost = input.run.reviewMode === "automatic" && input.run.product === "barometer" && lossLooksLikeOutage(lost) ? { lost: lost.length } : null;
+  const automaticBarometer = input.run.reviewMode === "automatic" && input.run.product === "barometer";
+  // What this run lost, stored with its results for the org's next run; null where run.json's cap hides some (DECISIONS.md 723).
+  const losses: RunLosses | null = automaticBarometer ? lossesOf(result.run.readsRefused, MAX_REFUSED) : null;
+  const readsLost = automaticBarometer && lossLooksLikeOutage(lost) ? { lost: lost.length, ...(await sameAsLastOf(deps, runId, input.run.orgId.slice(0, 15), losses, log)) } : null;
   if (readsLost) log(`Automatic run ${runId} lost ${lost.length} read${lost.length === 1 ? "" : "s"} to Salesforce not answering (${[...new Set(lost.map((r) => r.step))].join(", ")}), so it isn't released and waits for a person.`);
 
   // An automatic run's release or hold, once decided (DECISIONS.md 693).
@@ -596,6 +616,7 @@ async function runLocked(runId: string, deps: WorkerDeps, attempt: Attempt, seen
       overall,
       // A pulse's whatever it is: null takes away an earlier delivery's, so a stale digest is never served. An automatic run's likewise.
       ...(input.run.product === "pulse" || decision ? { digest } : {}),
+      ...(decision && losses ? { readsLost: losses } : {}),
       ...(decision ? { automatic: decision.kind === "release" ? { decision: "release" as const, releases: decision.releases } : { decision: "hold" as const, reason: decision.reason, counts: decision.counts, also: decision.also, at: heldAt } } : {}),
     });
   } catch (err) {

@@ -123,9 +123,62 @@ export type ReleaseInput = {
    * like an outage (run-job.ts lossLooksLikeOutage), or null with none: the
    * run is held `reads_lost` rather than released with those checks missing.
    */
-  readsLost?: { lost: number } | null;
+  readsLost?: { lost: number; sameAsLast?: SameAsLast } | null;
   now: string;
 };
+
+/**
+ * What one automatic run lost to Salesforce not answering, as the worker
+ * stores it beside the run (DECISIONS.md 723): the sorted step ids that lost a
+ * read, and whether any of those losses was a server fault or an unreadable
+ * answer (SERVER_FAULT_CODES). Our own step ids and a boolean, never the org's
+ * words. `{ steps: [], server: false }` is a run that lost nothing.
+ */
+export type RunLosses = { steps: string[]; server: boolean };
+
+/** The codes that say Salesforce's own server failed, as lossLooksLikeOutage reads them (run-job.ts, DECISIONS.md 702). */
+export const SERVER_FAULT_CODES: readonly string[] = ["Server", "BAD_SOAP_RESPONSE"];
+
+/** A step id as the engine names its steps; anything else read back isn't one of ours. */
+const STEP_ID = /^[A-Za-z0-9][A-Za-z0-9:._-]{0,99}$/;
+
+/**
+ * The run's losses from its refused reads, or null when they can't be told:
+ * past `cap` kept reads, run.json keeps only one lost read more, so a step
+ * that lost reads may be missing from the list (engine/run.ts keepRefused).
+ */
+export function lossesOf(readsRefused: ReadonlyArray<{ step: string; code: string; lost?: true }> | undefined, cap: number): RunLosses | null {
+  const kept = readsRefused ?? [];
+  if (kept.length >= cap) return null;
+  const lost = kept.filter((r) => r.lost === true);
+  return { steps: [...new Set(lost.map((r) => r.step))].sort(), server: lost.some((r) => SERVER_FAULT_CODES.includes(r.code)) };
+}
+
+/** Losses as stored, read back strictly: anything that isn't exactly what the worker writes is not known. */
+export function readLosses(stored: unknown): RunLosses | null {
+  const value = typeof stored === "string" ? (() => { try { return JSON.parse(stored) as unknown; } catch { return null; } })() : stored;
+  if (!value || typeof value !== "object" || Array.isArray(value)) return null;
+  const { steps, server } = value as { steps?: unknown; server?: unknown };
+  if (!Array.isArray(steps) || typeof server !== "boolean" || !steps.every((s) => typeof s === "string" && STEP_ID.test(s))) return null;
+  const sorted = [...new Set(steps as string[])].sort();
+  return { steps: sorted, server };
+}
+
+/** 1: the org's previous run lost reads in the same steps, with no server fault in either; 0: they differ. */
+export type SameAsLast = 0 | 1;
+
+/**
+ * Whether this run's losses repeat the org's previous run's (DECISIONS.md 723), for the person a reads_lost hold
+ * goes to; it never releases anything. Undefined, so the flag carries no key, when there is no previous run, either
+ * run's losses aren't known, or the steps are the same but a server fault in either says Salesforce may be why.
+ */
+export function sameAsLast(current: RunLosses | null, previous: RunLosses | null | undefined): SameAsLast | undefined {
+  if (!current || !previous) return undefined;
+  const same = current.steps.length === previous.steps.length && current.steps.every((s, i) => s === previous.steps[i]);
+  if (!same) return 0;
+  if (current.server || previous.server || current.steps.length === 0) return undefined;
+  return 1;
+}
 
 /**
  * Release or hold. Every check is made and each that fails is a flag, so a
@@ -143,7 +196,9 @@ export function decideRelease(input: ReleaseInput): ReleaseDecision {
   // The digest's own two counts ride with it, since the console shows a reads_lost run only when both are 0 (its
   // decision 713); with no digest there is nothing they could describe, so they are left out and Show stays refused.
   if (input.readsLost) {
-    fail("reads_lost", { lost: input.readsLost.lost, notMeasurable: unansweredRules(input.findings), ...(checked.digest ? { unmatched: checked.unmatched, unmarked: checked.unmarked } : {}) });
+    // sameAsLast only informs the person (DECISIONS.md 723): absent unless it is known.
+    const { sameAsLast: same } = input.readsLost;
+    fail("reads_lost", { lost: input.readsLost.lost, notMeasurable: unansweredRules(input.findings), ...(checked.digest ? { unmatched: checked.unmatched, unmarked: checked.unmarked } : {}), ...(same !== undefined ? { sameAsLast: same } : {}) });
   }
   const unmeasured = unmeasuredRules(input.findings);
   if (unmeasured.notMeasurable * 2 > unmeasured.rules) fail("mostly_unmeasured", unmeasured);

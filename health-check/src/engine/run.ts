@@ -455,7 +455,7 @@ export async function runHealthCheck(options: RunOptions): Promise<RunResult> {
 }
 
 /** The most refused reads run.json keeps: enough to see a pattern, never a file that grows without end. */
-const MAX_REFUSED = 200;
+export const MAX_REFUSED = 200;
 
 /**
  * Each read a step had refused, once, into run.json and the log (DECISIONS.md
