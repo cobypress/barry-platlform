@@ -6,7 +6,7 @@ import { PILLARS, type PillarKey, type ReadinessVerdict } from "../../narrative/
 import { extractFigures } from "../../numbercheck/extract.ts";
 import { MASK } from "../../render/repair.ts";
 import { DIGEST_KEYS, NAMED_PEOPLE_SENTENCE, type RunDigest } from "../../schemas/digest.ts";
-import { buildReport, type BuiltReport, type ReportInput } from "../../narrative/sections.ts";
+import { buildReport, READINESS_CAVEAT, type BuiltReport, type ReportInput } from "../../narrative/sections.ts";
 import type { Pseudonymiser } from "../../privacy/pseudonymiser.ts";
 import { loadRun } from "../../render/render-run.ts";
 import type { Finding, Metric } from "../../schemas/index.ts";
@@ -206,6 +206,8 @@ export function assertWellFormed(d: RunDigest, report: BuiltReport): void {
     for (const [text, own] of [[p.label, table.label], [p.question, table.question]] as const) assert.ok(text === own || replaced(text), `${p.key}: ${text}`);
   }
   for (const k of keysOf(d)) assert.ok(DIGEST_KEYS.has(k), `${k} isn't in DIGEST_KEYS`);
+  // The raw notes' caveat, the same text, or withheld or replaced whole (DECISIONS.md 762).
+  assert.ok(r.caveat === READINESS_CAVEAT || replaced(r.caveat ?? ""), `caveat: ${r.caveat}`);
   r.pillars.forEach((p, i) => {
     const made = report.readiness.pillars[i]!;
     // A reason not served as made carries no figures: the numbers went with it.

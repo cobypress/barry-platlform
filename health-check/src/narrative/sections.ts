@@ -233,11 +233,19 @@ export function readinessOpening(r: Readiness): string {
   return `Some of the way there${behind.length ? `: ${list(behind)} ${need} work first` : ""}. Each pillar below says where this org stands, and why.`;
 }
 
+/**
+ * What the pillars' verdicts are and aren't, said under the opening wherever the
+ * readiness reading is (DECISIONS.md 762): the raw notes print it, and the digest
+ * serves it as `readiness.caveat`, this one text, so the two can't drift apart. No figures.
+ */
+export const READINESS_CAVEAT =
+  "Each pillar's verdict is decided by code from the checks and figures named with it: ready, nearly, not yet, or not measurable. There's no money figure here, because what an AI agent would be worth to this business can't be measured from Salesforce.";
+
 function readinessText(r: Readiness, findings: Finding[]): string {
   const title = (id: string): string => findings.find((f) => f.id === id)?.title ?? id;
   return lines(
     readinessOpening(r),
-    "Each pillar's verdict is decided by code from the checks and figures named with it: ready, nearly, not yet, or not measurable. There's no money figure here, because what an AI agent would be worth to this business can't be measured from Salesforce.",
+    READINESS_CAVEAT,
     ...r.pillars.map((p) => `${p.label}. ${p.question} ${VERDICT_WORDS[p.verdict]}. ${p.reason}${p.findingIds.length ? ` Behind it: ${p.findingIds.map(title).join("; ")}.` : ""}`),
     r.fixes.length ? `What to fix before an agent goes live, in order: ${r.fixes.map((f) => f.title).join("; ")}.` : "We found nothing to fix first.",
   );
