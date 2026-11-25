@@ -9,7 +9,7 @@ import { unstorableAt } from "./inventory.ts";
 import { Run, type BenchmarkRow, type Calibration, type ConnectLink, type Metric, type Release, type ReportSection } from "../schemas/index.ts";
 import { assertChecks, CONSOLE_CHECKS } from "./console-checks.ts";
 import { readLosses, type RunLosses } from "./release.ts";
-import { pulseShowRefusal } from "./postgres-store.ts";
+import { pulseShowAudit, pulseShowRefusal, type KeptPulse } from "./postgres-store.ts";
 import { storedFromRow, waitingRow, type ConsoleSummariesRow, type SummariesToSave } from "../handbook/summary-row.ts";
 import { DISCONNECT_STEP, ORG_AWAITING_CONNECT, RunClosedError, SCAN_REVOKE_NOT_CONFIRMED, type ConnectJobInput, type DocumentsJobInput, type DocumentsJobReads, type DriveShare, type ShareJobInput, type DocumentsMade, type LinkConnected, type LinkState, type PulseRun, type ReleasedRun, type RunJobInput, type RunOutputRecord, type RunProgress, type WorkerStore, type CurrencyWas, type RunLineage, type PulseState, type RunDelivery, type AutomaticOutcome, type AutomaticRunState, RUN_FAILED_FLAG, STOPPED_BUDGET_FLAG, DOCUMENTS_HELD_FLAG, type PortalDocumentRow } from "./types.ts";
 
@@ -111,8 +111,9 @@ export class MemoryWorkerStore implements WorkerStore {
     this.writes.push({ method: "saveRunOutput", id: runId, detail: progress.status });
     if (automatic) this.#writeAutomatic(run, automatic);
     // As the Postgres store: a held pulse's earlier result goes, and its flags are raised (746).
-    if (output.pulseHold) {
-      if (this.pulseResults.delete(runId)) this.writes.push({ method: "deletePulseResult", id: runId });
+    // Never over a result already there: one shown or released while this delivery ran stands (as PULSE_HAS_RESULT_SQL).
+    if (output.pulseHold && this.pulseResults.has(runId)) this.writes.push({ method: "pulseHoldLeftUnwritten", id: runId });
+    else if (output.pulseHold) {
       if (output.pulseHold.kept) this.keptPulses.set(runId, structuredClone(output.pulseHold.kept));
       for (const f of [{ kind: output.pulseHold.reason, counts: output.pulseHold.counts }, ...output.pulseHold.also]) this.#raiseFlag(runId, f.kind, output.pulseHold.at, f.counts);
     }
@@ -212,7 +213,7 @@ export class MemoryWorkerStore implements WorkerStore {
   }
 
   /** A held pulse's kept result, by run id: in "budget" in Postgres, which a progress save writes whole (746). */
-  readonly keptPulses = new Map<string, PulseResult>();
+  readonly keptPulses = new Map<string, KeptPulse>();
   /** The audit rows a person's Show writes. */
   readonly audit: Array<Record<string, unknown>> = [];
 
@@ -232,10 +233,12 @@ export class MemoryWorkerStore implements WorkerStore {
     const state = run ? await this.pulseState(runId) : null;
     const why = pulseShowRefusal(run && state ? { product: run.run.product, source: run.calibration?.source ?? null, ...state } : null);
     if (why) return { ok: false, why };
-    this.pulseResults.set(runId, { result: this.keptPulses.get(runId)!, madeAt: at });
+    const kept = this.keptPulses.get(runId)!;
+    const flags = state!.openFlags.map((kind) => ({ kind, counts: this.flags.get(`${runId}|${kind}`)!.counts }));
+    this.pulseResults.set(runId, { result: kept.result, madeAt: kept.madeAt });
     this.keptPulses.delete(runId);
     for (const kind of state!.openFlags) this.postAndClearFlag(runId, kind, by, at);
-    this.audit.push({ action: "show_to_customer", runId, by, at, state: state!.openFlags[0], product: "pulse", flags: state!.openFlags });
+    this.audit.push(pulseShowAudit(runId, by, at, flags, this.digests.get(runId)?.madeAt ?? null));
     this.writes.push({ method: "showHeldPulse", id: runId });
     return { ok: true, flagsCleared: state!.openFlags };
   }
