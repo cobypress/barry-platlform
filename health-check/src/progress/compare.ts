@@ -3,7 +3,8 @@ import type { OverallScore } from "../domains/scoring.ts";
 import type { ValueModel } from "../value/model.ts";
 import { apiLimitsExtractor } from "../extract/integrations.ts";
 import { UNSCORED_RULES } from "../domains/scoring.ts";
-import { issueUnder, passedOnlyByChange } from "../engine/loosened.ts";
+import { foundByStricter, issueUnder, passedOnlyByChange, passedUnder } from "../engine/loosened.ts";
+import { said, type Said } from "../engine/org-words.ts";
 
 // The re-check (roadmap Stage 5): what changed since the first health check.
 // Checks are lined up by rule, not by finding, because a rule can raise one
@@ -46,6 +47,12 @@ export type Progress = {
    * comparison stored before it reads as before.
    */
   ruleChanged?: RuleChange[];
+  /**
+   * Rules with an issue now that the earlier run passed, found only because we
+   * tightened the rule since (DECISIONS.md 754): open, so in the open count, the
+   * score, the plan and the value, but never new; said once. Only when there are any.
+   */
+  stricter?: RuleChange[];
   /**
    * By rule, the version of the issue each pass in ruleChanged stands apart from,
    * and for a rule this run didn't check that the baseline carried, the baseline's:
@@ -120,6 +127,16 @@ function fixedAsRead(then: Finding[], now: Finding[]): boolean {
   return (pass.facts.alreadyListed ?? 0) === 0;
 }
 
+/**
+ * Whether a rule's issues now, after the earlier run passed it, were found only
+ * because we tightened the rule since (DECISIONS.md 754): every pass then and every
+ * issue now are across a tightening from the pass's version, and no issue's reading
+ * would have been raised under it. One issue the old line would also raise is new.
+ */
+function foundByStricterCheck(passes: Finding[], issues: Finding[], ruleId: string, ownCalls: number | undefined): boolean {
+  return passes.length > 0 && passes.every((p) => issues.every((i) => foundByStricter(ruleId, p.ruleVersion, i.ruleVersion, passedUnder(i, ownCalls))));
+}
+
 /** The run folder's file that keeps a comparison's `carried` for the next one (DECISIONS.md 732). */
 export const RULE_CHANGES_FILE = "rule-changes.json";
 
@@ -146,6 +163,7 @@ export function compareWithBaseline(baseline: ProgressSide, current: ProgressSid
   const unknown: RuleChange[] = [];
   const newlyMeasured: RuleChange[] = [];
   const ruleChanged: RuleChange[] = [];
+  const stricter: RuleChange[] = [];
   const carried: Record<string, number> = {};
   const carriedThen = baseline.carried ?? {};
   // An issue standing apart in the baseline (DECISIONS.md 732): the baseline passed it only because we loosened the
@@ -186,6 +204,8 @@ export function compareWithBaseline(baseline: ProgressSide, current: ProgressSid
     if (then.some((f) => f.status === "issue") || Object.hasOwn(carriedThen, ruleId)) continue;
     // New only if the earlier run checked the rule, as the portal's alerts decide (DECISIONS.md 661, 673).
     if (MEASURED_LATER.has(ruleId) && !then.some((f) => f.status === "passed")) newlyMeasured.push(change(ruleId, nowIssues));
+    // Passed then, raised now only because we tightened the rule since: open, never new (DECISIONS.md 754).
+    else if (foundByStricterCheck(then.filter((f) => f.status === "passed"), nowIssues, ruleId, current.ownCalls)) stricter.push(change(ruleId, nowIssues));
     else added.push(change(ruleId, nowIssues));
   }
   const domains = [...new Set([...baseline.scores, ...current.scores].map((s) => s.domain))];
@@ -205,6 +225,7 @@ export function compareWithBaseline(baseline: ProgressSide, current: ProgressSid
     // Only when there are some, so a comparison without them is as it was.
     ...(newlyMeasured.length ? { newlyMeasured } : {}),
     ...(ruleChanged.length ? { ruleChanged } : {}),
+    ...(stricter.length ? { stricter } : {}),
     ...(Object.keys(carried).length ? { carried } : {}),
     areas: domains.map((domain) => ({ domain, before: scoreOf(baseline.scores, domain), after: scoreOf(current.scores, domain) })).filter((a) => a.before !== null || a.after !== null),
     storage: compareStorage(baseline, current),
@@ -330,7 +351,8 @@ export function progressFigures(p: Progress): number[] {
   const notCompared = p.storage && "notCompared" in p.storage && p.storage.notCompared === "not_alike" ? [2] : [];
   const firstTime = p.newlyMeasured?.length ? [p.newlyMeasured.length] : [];
   const changedCheck = p.ruleChanged?.length ? [p.ruleChanged.length] : [];
-  return [...pairs, ...changes, p.fixed.length, p.remaining.length, p.added.length, p.unknown.length, ...overflow, ...storage, ...notCompared, ...firstTime, ...changedCheck];
+  const stricterCheck = p.stricter?.length ? [p.stricter.length] : [];
+  return [...pairs, ...changes, p.fixed.length, p.remaining.length, p.added.length, p.unknown.length, ...overflow, ...storage, ...notCompared, ...firstTime, ...changedCheck, ...stricterCheck];
 }
 
 /** The day counts the storage sentences print ("in 118 days", "every 30 days"). The number check reads them as days, not plain counts. */
@@ -344,6 +366,20 @@ export function progressDays(p: Progress): number[] {
  * the earlier run's, whose findings aren't in this run's data, so the titles go
  * in as text: a figure in one ("90 days") then traces (DECISIONS.md 503).
  */
-export const progressTitles = (p: Progress): string[] => [p.fixed, p.remaining, p.added, p.unknown, p.newlyMeasured ?? []].flatMap((list) => list.map((c) => c.title));
+export const progressTitles = (p: Progress): string[] => [p.fixed, p.remaining, p.added, p.unknown, p.newlyMeasured ?? [], p.stricter ?? []].flatMap((list) => list.map((c) => c.title));
+
+// What the re-check says of issues found by a stricter check (DECISIONS.md 754),
+// for the deck's note and the raw notes' list. Our own sentences, made by said so
+// an automatic run knows them as ours. No tightening has been declared, so none
+// can be printed yet: the owner approves these words before the first one is.
+
+/** The deck's note: one sentence set for one rule, another for several. */
+export const stricterNote = (n: number): Said =>
+  n === 1
+    ? said`We've made one of our checks stricter since your last health check, and it raised an issue it may not have raised before. We count it as open, not as new. The raw notes name it.`
+    : said`We've made ${n} of our checks stricter since your last health check, and they raised issues they may not have raised before. We count them as open, not as new. The raw notes name them.`;
+
+/** The raw notes' heading for the list. */
+export const stricterHeading = (n: number): Said => said`Found by a stricter check (${n}), so not counted as new:`;
 
 export const worthFigures = (p: Progress): number[] => (p.worth ? [p.worth.before, p.worth.after, Math.abs(p.worth.before - p.worth.after)] : []);

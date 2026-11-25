@@ -1,6 +1,6 @@
 import type { BuiltReport } from "../narrative/sections.ts";
 import { domainLabel } from "../narrative/select.ts";
-import { progressListed, storageSentences } from "../progress/compare.ts";
+import { progressListed, storageSentences, stricterNote } from "../progress/compare.ts";
 import { compactMoney } from "./format.ts";
 import type { Render } from "./html.ts";
 
@@ -47,10 +47,12 @@ export function progressPage(r: Render, report: BuiltReport): string {
   const changedCheck = n
     ? `<p class="note">${r.t(n === 1 ? "We've changed how we check one of the earlier issues, and it passes now. We can't tell from this whether it was fixed, so we don't count it as fixed or as open. The raw notes name it." : `We've changed how we check ${n} of the earlier issues, and they pass now. We can't tell from this whether they were fixed, so we don't count them as fixed or as open. The raw notes name them.`)}</p>`
     : "";
+  // Issues only a stricter check found are open, not new (DECISIONS.md 754): said once a comparison, counted open only.
+  const stricter = p.stricter?.length ? `<p class="note">${r.t(stricterNote(p.stricter.length))}</p>` : "";
   // One paragraph for both kinds, so the slide keeps its room (DECISIONS.md 501).
   const sentences = storageSentences(p);
   const storage = sentences.length ? `<p class="note">${r.t(sentences.join(" "))}</p>` : "";
   // The eyebrow and heading sit on the page itself, as on every other slide, so a
   // continued slide carries them (DECISIONS.md 505).
-  return `<div class="eyebrow">${r.t("Since your last health check")}</div><h2>${r.t("What has changed")}</h2><div class="progress">${pair}<div class="lists">${list("Fixed", p.fixed)}${list("Still open", p.remaining)}${list("New since then", p.added)}</div>${areas}${unknown}${firstTime}${changedCheck}${storage}<p class="note">${r.t("Some of the change in money can come from the business itself, not only from fixes.")}</p></div>`;
+  return `<div class="eyebrow">${r.t("Since your last health check")}</div><h2>${r.t("What has changed")}</h2><div class="progress">${pair}<div class="lists">${list("Fixed", p.fixed)}${list("Still open", p.remaining)}${list("New since then", p.added)}</div>${areas}${unknown}${firstTime}${changedCheck}${stricter}${storage}<p class="note">${r.t("Some of the change in money can come from the business itself, not only from fixes.")}</p></div>`;
 }

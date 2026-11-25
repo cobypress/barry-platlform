@@ -74,6 +74,8 @@ export const STRUCTURAL_PATHS: ReadonlySet<string> = new Set([
   "rulesRun", "rulesKnown",
   // A rule's version and versions (DECISIONS.md 732): numbers, never text.
   "findings[].ruleVersion", "findings[].issueUnder", "findings[].carriedFrom",
+  // A tightened rule's verdict on an issue (DECISIONS.md 754): versions, never text.
+  "findings[].passedUnder",
   // AI readiness's codes and ids (DECISIONS.md 742): a figure's value is a number, never text.
   ...READINESS_CODE_PATHS,
 ]);

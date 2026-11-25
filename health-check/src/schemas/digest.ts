@@ -149,6 +149,15 @@ export const DigestFinding = z.object({
    * because we loosened the rule since). Absent: nothing kept apart.
    */
   carriedFrom: z.number().int().positive().optional(),
+  /**
+   * Only on an issue of a rule we have tightened (DECISIONS.md 754), where the engine can
+   * judge it: the earlier versions, ascending, under which this issue's reading would have
+   * passed. After a pass under one of them it was found by a stricter check: open, never
+   * new. Empty: it would have been raised under every one, so after any earlier pass it is
+   * new. Absent on a tightened rule's issue: unknown, never "new" we can't show. Absent on
+   * every other finding, and everywhere until a tightening is declared.
+   */
+  passedUnder: z.array(z.number().int().positive()).optional(),
   /** Its amounts are plain numbers in a currency not known by name (DECISIONS.md 700): show value.currencyNote beside them. Absent otherwise. */
   amountsUnnamed: z.literal(true).optional(),
   /** By sentence, the ones the engine can vouch for, with the org's characters marked (DECISIONS.md 655). */
@@ -487,6 +496,6 @@ export const DIGEST_KEYS: ReadonlySet<string> = new Set([
   "time_cost", "exposure", "groups", "lines", "leftOut", "realisation", "counted", "lineIds", "low", "expected", "high", "group", "annual", "added",
   "phases", "later", "quickWins", "quickFixes", "difficulty", "alsoFor", "key", "effortHours", "basis", "partial", "timeBand", "fixComplexity", "hoursTotal", "partialFindingIds", "withoutHoursFindingIds", "notTotalledFindingIds", "note",
   "checkerRead", "readClasses", "readTriggers", "alreadyListed", "orgWords", "orgWordsMarked", "start", "end", "valueReason", "valueAssumptions", "hoursBasis", "fixPrompt", "textSha256",
-  "valueUnit", "valuePeriod", "editionNote", "caveat", "rulesRun", "rulesKnown", "ruleVersion", "issueUnder", "carriedFrom",
+  "valueUnit", "valuePeriod", "editionNote", "caveat", "rulesRun", "rulesKnown", "ruleVersion", "issueUnder", "carriedFrom", "passedUnder",
   "readiness", "opening", "pillars", "question", "verdict", "metricIds", "figures", "metricId", "stat", "fixIds",
 ]);

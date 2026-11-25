@@ -11,7 +11,7 @@ import { knownPeople } from "../fix/prompt.ts";
 import { spansIfCurrent, textSha256, type OrgSpan } from "../engine/org-words.ts";
 import { engineOwn, orgValuesOf } from "../engine/automatic-words.ts";
 import { UNSCORED_RULES } from "../domains/scoring.ts";
-import { hasLoosened, issueUnder } from "../engine/loosened.ts";
+import { hasLoosened, hasTightened, issueUnder, passedUnder } from "../engine/loosened.ts";
 import { DIGEST_VERSION, NAMED_PEOPLE_SENTENCE, RunDigest, type DigestArea, type DigestReadiness, type DigestFinding, type DigestMetric, type DigestTotal, type DigestValueModel, type SentenceOrgWords } from "../schemas/digest.ts";
 import { FIX_PROMPT_MAX, type Finding, type Metric } from "../schemas/index.ts";
 import type { Inventory } from "../schemas/inventory.ts";
@@ -156,13 +156,20 @@ type RuleChangeContext = { ownCalls: number; carried: Readonly<Record<string, nu
  * the earlier versions its reading would still have been an issue under, and where
  * this run's comparison kept the rule apart, the version of the issue it stands apart
  * from. The console needs these to tell a fix from a pass that came only from our
- * change, since a later run may have no link to the run that raised the issue.
+ * change, since a later run may have no link to the run that raised the issue. For a
+ * rule we have tightened (DECISIONS.md 754), an issue carries the mirror: the earlier
+ * versions its reading would have passed under, so an issue after such a pass is open,
+ * not new.
  */
-function ruleChangeOf(f: Finding, change: RuleChangeContext): Pick<DigestFinding, "ruleVersion" | "issueUnder" | "carriedFrom"> {
-  if (!hasLoosened(f.ruleId)) return { ruleVersion: f.ruleVersion };
-  const under = issueUnder(f, change.ownCalls);
-  const from = Object.hasOwn(change.carried, f.ruleId) && f.status !== "issue" ? change.carried[f.ruleId] : undefined;
-  return { ruleVersion: f.ruleVersion, ...(under ? { issueUnder: under } : {}), ...(from !== undefined ? { carriedFrom: from } : {}) };
+function ruleChangeOf(f: Finding, change: RuleChangeContext): Pick<DigestFinding, "ruleVersion" | "issueUnder" | "carriedFrom" | "passedUnder"> {
+  const loosened = hasLoosened(f.ruleId);
+  const tightened = hasTightened(f.ruleId);
+  if (!loosened && !tightened) return { ruleVersion: f.ruleVersion };
+  const under = loosened ? issueUnder(f, change.ownCalls) : undefined;
+  const from = loosened && Object.hasOwn(change.carried, f.ruleId) && f.status !== "issue" ? change.carried[f.ruleId] : undefined;
+  // For a rule we have tightened, an issue's verdict on the old line (DECISIONS.md 754): the mirror of issueUnder.
+  const passed = tightened ? passedUnder(f, change.ownCalls) : undefined;
+  return { ruleVersion: f.ruleVersion, ...(under ? { issueUnder: under } : {}), ...(from !== undefined ? { carriedFrom: from } : {}), ...(passed ? { passedUnder: passed } : {}) };
 }
 
 /**
