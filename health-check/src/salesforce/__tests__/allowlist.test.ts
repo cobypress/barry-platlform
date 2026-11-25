@@ -35,6 +35,7 @@ const ALLOWED: Array<[string, SfRequest]> = [
   ["tooling.query", { method: "GET", path: `${V}/tooling/query${q("SELECT Id FROM ApexClass")}` }],
   ["tooling.queryMore", { method: "GET", path: `${V}/tooling/query/01g000000000001AAA-200` }],
   ["analytics.reportDescribe", { method: "GET", path: `${V}/analytics/reports/00O000000000001AAA/describe` }],
+  ["connect.organization", { method: "GET", path: `${V}/connect/organization` }],
   ["rest.compositeBatch", composite([{ method: "GET", url: `v66.0/query${q("SELECT Id FROM Account")}` }])],
   ["metadata.retrieve", soap("retrieve")],
   ["metadata.checkRetrieveStatus", soap("checkRetrieveStatus")],
@@ -136,6 +137,31 @@ describe("the Analytics API", () => {
     blocked({ method: "GET", path: `${report}/describe?includeDetails=true` });
     blocked({ method: "GET", path: `${V}/analytics/reports/001000000000001AAA/describe` });
     blocked({ method: "GET", path: `${V}/analytics/reports/00O000000000001AAA/describe/x` });
+  });
+});
+
+// DECISIONS.md 740: the Connect REST API's Organization resource, approved by the owner on 25 November 2026 for the
+// currency of a single-currency org. That one resource, GET, with no parameters: nothing else in Connect.
+describe("the Connect REST API", () => {
+  const org = `${V}/connect/organization`;
+  test("with a trailing slash", () => assert.equal(authorise({ method: "GET", path: `${org}/` }), "connect.organization"));
+  test("any write to it", () => {
+    for (const method of ["POST", "PUT", "PATCH", "DELETE"]) blocked({ method, path: org, body: "{}" });
+  });
+  test("parameters, a body, or anything under it", () => {
+    blocked({ method: "GET", path: `${org}?x=1` });
+    blocked({ method: "GET", path: `${org}?_HttpMethod=PATCH` });
+    blocked({ method: "GET", path: org, body: "{}" });
+    blocked({ method: "GET", path: `${org}/x` });
+    blocked({ method: "GET", path: `${org}/../users/me` });
+    blocked({ method: "GET", path: `${V}/connect/organization%2Fx` });
+  });
+  test("every other Connect resource: people, feeds, files, communities, the root", () => {
+    for (const rest of ["", "/", "/users/me", "/users/005000000000001AAA", "/communities", "/files/users/me", "/feeds/news/me", "/chatter/users/me", "/organizations"]) {
+      blocked({ method: "GET", path: `${V}/connect${rest}` });
+    }
+    blocked({ method: "GET", path: `${V}/chatter/users/me` });
+    blocked({ method: "GET", path: "/services/data/connect/organization" });
   });
 });
 

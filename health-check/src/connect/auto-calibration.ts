@@ -66,13 +66,19 @@ const REASONS: Record<HoldCause, string> = { stages_unread: STAGES_UNREAD, no_wo
  * own code (several currencies), and never where the read failed, since that
  * org may hold several and its amounts can't all be in the one named. The
  * locale's suggestion never stands in for it.
+ *
+ * A currency the org's settings named ("settings", DECISIONS.md 740) is
+ * Salesforce's own answer, so it wins over the customer's: `answered` is then
+ * not used (the caller logs a difference).
  */
 export function automaticCalibration(stages: OrgStage[] | null, options: { orgId: string; at: string; currency: OrgCurrency | string | null; answered?: string | null }): AutomaticCalibration {
   const won = (stages ?? []).filter((s) => s.isClosed && s.isWon);
   const hold = (cause: HoldCause): AutomaticCalibration => ({ ok: false, heldReason: CALIBRATION_UNREADABLE, cause, reason: REASONS[cause], counts: { stages: stages?.length ?? 0, won: won.length } });
   if (!stages) return hold("stages_unread");
   if (won.length === 0) return hold("no_won_stage");
-  const currency: OrgCurrency = typeof options.currency === "string" ? { kind: "code", code: options.currency } : (options.currency ?? { kind: "unread" });
+  const given: OrgCurrency = typeof options.currency === "string" ? { kind: "code", code: options.currency } : (options.currency ?? { kind: "unread" });
+  // The settings' code was checked against the list where it was read; one that isn't on it here is one currency, unnamed.
+  const currency: OrgCurrency = given.kind === "settings" && !isCurrencyCode(given.code) ? { kind: "single", suggested: null } : given;
   const answered = currency.kind === "single" && isCurrencyCode(options.answered) ? options.answered : null;
   // In sort order, ties by API name, whatever order they came in.
   const open = stages
@@ -94,9 +100,11 @@ export function automaticCalibration(stages: OrgStage[] | null, options: { orgId
     // The org's own code is written as before 700, with no mark.
     ...(currency.kind === "code"
       ? { currency: currency.code }
-      : answered
-        ? { currency: answered, currencyFrom: "customer" }
-        : { currency: NO_CURRENCY, currencyFrom: currency.kind === "single" ? "org" : "unread", ...(currency.kind === "single" && currency.suggested ? { currencySuggested: currency.suggested } : {}) }),
+      : currency.kind === "settings"
+        ? { currency: currency.code, currencyFrom: "connect_api" }
+        : answered
+          ? { currency: answered, currencyFrom: "customer" }
+          : { currency: NO_CURRENCY, currencyFrom: currency.kind === "single" ? "org" : "unread", ...(currency.kind === "single" && currency.suggested ? { currencySuggested: currency.suggested } : {}) }),
   });
   if (!parsed.success) return hold("calibration_refused");
   return { ok: true, calibration: parsed.data };

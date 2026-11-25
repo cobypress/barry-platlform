@@ -266,6 +266,8 @@ export const CLIENT_METHODS = [
   "describeGlobal",
   "recordCounts",
   "describeReport",
+  // The Connect REST API's Organization resource, org-level settings only (DECISIONS.md 740).
+  "connectOrganization",
   "retrieveMetadata",
 ] as const;
 
@@ -567,6 +569,15 @@ export class SalesforceClient {
   async describeReport<T>(reportId: string): Promise<T> {
     if (!/^00O[A-Za-z0-9]{12}(?:[A-Za-z0-9]{3})?$/.test(reportId)) throw new ForbiddenOperationError("not a report id");
     return JSON.parse((await this.#send({ method: "GET", path: this.#data(`/analytics/reports/${reportId}/describe`) })).text) as T;
+  }
+
+  /**
+   * The Connect REST API's Organization resource: the org's settings, no records and no people (DECISIONS.md 740).
+   * One call against the budget, retried only as every read is. The body is parsed and handed back unchecked:
+   * its shape isn't verified (docs/QUESTIONS.md), so the one caller checks every field it uses.
+   */
+  async connectOrganization(): Promise<unknown> {
+    return JSON.parse((await this.#send({ method: "GET", path: this.#data("/connect/organization") })).text) as unknown;
   }
 
   /** True if the provider found another process's tokens rather than refreshing (DECISIONS.md 631). */

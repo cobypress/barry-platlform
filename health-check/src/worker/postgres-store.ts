@@ -508,8 +508,8 @@ export function calibrationFromRow(row: Record<string, unknown>): Calibration {
   const fields = read.fields as Record<string, unknown> | undefined;
   const from = fields?.currencyFrom;
   const suggested = fields?.currencySuggested;
-  // A currency the customer named (KAN-41): its code is the column's own, and nothing is suggested beside it.
-  if (read.source === "org_settings" && from === "customer") return Calibration.parse({ ...read, currencyFrom: from });
+  // A currency the customer named (KAN-41), or the org's settings (740): its code is the column's own, and nothing is suggested beside it.
+  if (read.source === "org_settings" && (from === "customer" || from === "connect_api")) return Calibration.parse({ ...read, currencyFrom: from });
   if (read.source === "org_settings" && (from === "org" || from === "unread")) return Calibration.parse({ ...read, currencyFrom: from, ...(typeof suggested === "string" && /^[A-Z]{3}$/.test(suggested) ? { currencySuggested: suggested } : {}) });
   return Calibration.parse(read);
 }

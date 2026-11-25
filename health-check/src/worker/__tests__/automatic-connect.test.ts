@@ -57,12 +57,15 @@ class Org implements Transport {
   // "single": no DefaultCurrencyIsoCode, as on every org with one currency, so the locale answers (DECISIONS.md 700).
   currency: string | "refused" | "single" = "EUR";
   locale: string | "refused" = "en_GB";
+  // The org's settings through the Connect API (DECISIONS.md 740): left null, they answer like any unknown read here, an object with no currency in it.
+  settings: TransportResponse | null = null;
   async send(request: TransportRequest): Promise<TransportResponse> {
     this.requests.push(request);
     const url = new URL(request.url);
     const ok = (json: unknown): TransportResponse => ({ status: 200, header: () => null, text: JSON.stringify(json) });
     if (url.pathname === "/services/data/") return ok([{ version: "68.0" }]);
     if (url.pathname.endsWith("/limits")) return ok({ DailyApiRequests: { Max: 1000, Remaining: 990 } });
+    if (url.pathname.endsWith("/connect/organization") && this.settings) return this.settings;
     const q = url.searchParams.get("q") ?? "";
     if (/FROM PermissionSet WHERE/.test(q)) return ok({ records: [{ Name: "Barometer_Read_Only" }], totalSize: 1, done: true });
     // The org's own currency, read for an automatic run's calibration (DECISIONS.md 693).
@@ -756,5 +759,79 @@ describe("the currency a customer named in the portal, at connect (KAN-41)", () 
       await f.handle(f.job, once);
     }
     assert.equal(asked, 0);
+  });
+});
+
+// DECISIONS.md 740: the org's settings name a single-currency org's currency through the Connect REST API.
+describe("the currency the org's settings name, at connect (740)", () => {
+  const named = (code: string): TransportResponse => ({ status: 200, header: () => null, text: JSON.stringify({ defaultCurrencyIsoCode: code, multiCurrency: false }) });
+  const failing: TransportResponse = { status: 500, header: () => null, text: JSON.stringify([{ errorCode: "UNKNOWN_EXCEPTION", message: "planted message" }]) };
+  const settingsCalls = (f: Flow) => f.org.requests.filter((r) => new URL(r.url).pathname.endsWith("/connect/organization")).length;
+
+  test("a single-currency org whose settings name it: calibrated in that code, marked as the settings', no suggestion, queued, logged by its code", async () => {
+    const f = await flow();
+    f.org.currency = "single";
+    f.org.settings = named("GBP");
+    const outcome = await f.handle(f.job, once);
+    assert.match(outcome.detail, / The run is calibrated from the org's settings and queued\.$/);
+    const c = f.deps.store.runs.get(RUN_ID)!.calibration!;
+    assert.equal(c.currency, "GBP");
+    assert.equal(c.currencyFrom, "connect_api");
+    assert.equal(c.currencySuggested, undefined);
+    assert.deepEqual(f.queued, [RUN_ID]);
+    assert.equal(settingsCalls(f), 1);
+    // The locale isn't needed once the settings name the currency.
+    assert.ok(!f.org.requests.some((r) => new URL(r.url).searchParams.get("q") === ORG_LOCALE_SOQL));
+    assert.ok(f.deps.lines.includes(`Automatic run ${RUN_ID}'s org has one currency, which its settings name: GBP.`));
+  });
+
+  test("Salesforce's answer wins over the customer's: a different one is logged once and never applied; the same one says nothing more", async () => {
+    const f = await flow();
+    f.org.currency = "single";
+    f.org.settings = named("GBP");
+    f.deps.store.customerCurrencies.set(ORG15, "EUR");
+    await f.handle(f.job, once);
+    const c = f.deps.store.runs.get(RUN_ID)!.calibration!;
+    assert.deepEqual([c.currency, c.currencyFrom], ["GBP", "connect_api"]);
+    assert.deepEqual(f.deps.lines.filter((l) => /customer named/.test(l)), [`Automatic run ${RUN_ID}'s customer named EUR in the portal, but the org's settings name GBP: the settings' currency is used.`]);
+    const same = await flow();
+    same.org.currency = "single";
+    same.org.settings = named("GBP");
+    same.deps.store.customerCurrencies.set(ORG15, "GBP");
+    await same.handle(same.job, once);
+    assert.equal(same.deps.store.runs.get(RUN_ID)!.calibration!.currencyFrom, "connect_api");
+    assert.ok(!same.deps.lines.some((l) => /customer named/.test(l)));
+  });
+
+  test("never read on a multi-currency org or after a failed read, whatever the settings would say", async () => {
+    for (const currency of ["USD", "refused"]) {
+      const f = await flow();
+      f.org.currency = currency;
+      f.org.settings = named("GBP");
+      await f.handle(f.job, once);
+      assert.equal(settingsCalls(f), 0, currency);
+      assert.notEqual(f.deps.store.runs.get(RUN_ID)!.calibration!.currencyFrom, "connect_api");
+    }
+  });
+
+  test("a 500 on a delivery the queue will make again, and on the last: the connect goes on, calibrated exactly as before 740, never thrown or held", async () => {
+    const before = await flow();
+    before.org.currency = "single";
+    await before.handle(before.job, once);
+    const asBefore = before.deps.store.runs.get(RUN_ID)!.calibration!;
+    for (const attempt of [{ final: false }, { final: true }]) {
+      const f = await flow();
+      f.org.currency = "single";
+      f.org.settings = failing;
+      const outcome = await f.handle(f.job, attempt);
+      assert.equal(outcome.outcome, "connected", JSON.stringify(attempt));
+      const c = f.deps.store.runs.get(RUN_ID)!.calibration!;
+      assert.deepEqual(c, asBefore, "the same calibration as an org whose settings can't say");
+      assert.deepEqual([c.currency, c.currencyFrom, c.currencySuggested], ["XXX", "org", "GBP"]);
+      assert.deepEqual(f.queued, [RUN_ID]);
+      assert.equal(f.deps.store.held.size, 0);
+      assert.ok(f.deps.lines.some((l) => /The org's settings didn't name its currency \(Salesforce answered UNKNOWN_EXCEPTION, HTTP 500\)/.test(l)));
+      assert.ok(!f.deps.lines.some((l) => l.includes("planted")));
+    }
   });
 });

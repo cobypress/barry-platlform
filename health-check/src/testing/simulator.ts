@@ -78,7 +78,21 @@ export type SimulatorOptions = {
    * HasActivationRequired sets gets its permissions too.
    */
   access?: { viewAllData: boolean; viewAllRecords: string[]; session?: { viewAllData: boolean; viewAllRecords: string[] } };
+  /**
+   * How the Connect REST API's Organization resource answers (DECISIONS.md 740).
+   * NOT VERIFIED: the real shape is to be read off the first real run's log
+   * (docs/QUESTIONS.md), so each variant is a shape we might meet, not one we
+   * know. "top" by default. `multiCurrency` is the org's own: false where the
+   * Organization query answers INVALID_FIELD (dropFields), true otherwise.
+   */
+  orgSettings?: OrgSettingsVariant;
+  /** The code the settings name: the synthetic org's GBP by default. */
+  orgSettingsCurrency?: string;
 };
+
+/** A shape the Connect API's Organization answer might take (DECISIONS.md 740), or a way it might fail. */
+export const ORG_SETTINGS_VARIANTS = ["top", "features", "both", "both_disagree", "multi_true", "multi_absent", "off_list", "404", "403", "500", "not_json", "hang"] as const;
+export type OrgSettingsVariant = (typeof ORG_SETTINGS_VARIANTS)[number];
 
 /** The parts of an org that grow with it. A scale test swaps them for a generated org's (src/testing/scale-org.ts). */
 export type OrgRecords = {
@@ -347,9 +361,13 @@ export class Simulator implements Transport {
   #recordTypeGroups: Record<string, org.RecordTypeGroup[]> | undefined;
   #access: NonNullable<SimulatorOptions["access"]>;
   #organizationType: string | null;
+  #orgSettings: OrgSettingsVariant;
+  #orgSettingsCurrency: string;
 
   constructor(options: SimulatorOptions = {}) {
     this.#organizationType = options.organizationType === undefined ? "Enterprise Edition" : options.organizationType;
+    this.#orgSettings = options.orgSettings ?? "top";
+    this.#orgSettingsCurrency = options.orgSettingsCurrency ?? "GBP";
     this.#used = options.used ?? 1000;
     this.#limit = options.dailyLimit ?? 100_000;
     this.#failQuery = options.failQuery;
@@ -393,6 +411,7 @@ export class Simulator implements Transport {
     if (path.endsWith("/composite/batch")) return this.#composite(request);
     if (path.includes("/Soap/m/")) return this.#soap(request);
 
+    if (/\/connect\/organization\/?$/.test(path)) return this.#orgSettingsAnswer();
     const report = path.match(/\/analytics\/reports\/([A-Za-z0-9]+)\/describe$/);
     if (report) {
       const body = reportDescribe(report[1]!);
@@ -424,6 +443,28 @@ export class Simulator implements Transport {
       return jsonResponse(200, this.#paged(result, 0), this.#limitInfo);
     }
     return jsonResponse(404, [{ errorCode: "NOT_FOUND", message: `No route for ${path}` }], this.#limitInfo);
+  }
+
+  /**
+   * The Connect API's Organization resource, in the variant asked for
+   * (DECISIONS.md 740). The keys beside the two we read are made up to look like
+   * settings: none is claimed as Salesforce's. NOT VERIFIED against a real org.
+   */
+  #orgSettingsAnswer(): Promise<TransportResponse> | TransportResponse {
+    const v = this.#orgSettings;
+    if (v === "hang") return new Promise(() => {});
+    if (v === "404") return jsonResponse(404, [{ errorCode: "NOT_FOUND", message: "The requested resource does not exist" }], this.#limitInfo);
+    if (v === "403") return jsonResponse(403, [{ errorCode: "FUNCTIONALITY_NOT_ENABLED", message: "Chatter is disabled for this organization." }], this.#limitInfo);
+    if (v === "500") return jsonResponse(500, [{ errorCode: "UNKNOWN_EXCEPTION", message: "An unexpected error occurred." }], this.#limitInfo);
+    if (v === "not_json") return { status: 200, header: (name) => (name.toLowerCase() === "sforce-limit-info" ? this.#limitInfo : null), text: "<html><body>Synthetic Co maintenance</body></html>" };
+    const single = (this.#dropFields.Organization ?? []).includes("DefaultCurrencyIsoCode");
+    const code = v === "off_list" ? "QQQ" : this.#orgSettingsCurrency;
+    const currency = { defaultCurrencyIsoCode: code, ...(v === "multi_absent" ? {} : { multiCurrency: v === "multi_true" ? true : !single }) };
+    const other = code === "EUR" ? "USD" : "EUR";
+    const settings = { chatterEnabled: true, communitiesEnabled: false };
+    const top = v === "top" || v === "both" || v === "both_disagree" || v === "multi_true" || v === "multi_absent" || v === "off_list";
+    const inFeatures = v === "features" || v === "both" ? currency : v === "both_disagree" ? { ...currency, defaultCurrencyIsoCode: other } : {};
+    return jsonResponse(200, { name: "Synthetic Co", orgId: org.ORG_ID, accessTimeout: 120, ...(top ? currency : {}), features: { ...settings, ...inFeatures }, userSettings: { userDefaultCurrencyIsoCode: "XXX" } }, this.#limitInfo);
   }
 
   /**
