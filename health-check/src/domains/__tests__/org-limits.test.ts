@@ -117,18 +117,20 @@ describe("our own calls never make the finding", () => {
     assert.equal(parseLimitsReading(null), null);
   });
 
-  test("an org at 94.9% when the check starts, pushed past 95% by the check's own calls, still passes after a resume", async () => {
+  test("an org at 94.9% when the check starts, pushed to 95% by the check's own calls, still passes after a resume", async () => {
     const out = tempDir();
-    const org = new Simulator({ used: 94_900, dailyLimit: 100_000, asyncApex: { Max: 250_000, Remaining: 200_000 } });
-    const stopped = await simulated(org, out, { stopAtShare: 0.95 });
+    // 949,490 of 1,000,000 is 94.9%; the run stops at 94.95%, ten calls in, before the limit steps run.
+    const org = new Simulator({ used: 949_490, dailyLimit: 1_000_000, asyncApex: { Max: 250_000, Remaining: 200_000 } });
+    const stopped = await simulated(org, out, { stopAtShare: 0.9495 });
     assert.equal(stopped.run.status, "stopped_budget");
+    assert.notEqual(stopped.run.steps.find((s) => s.id === apiLimitsExtractor.id)?.status, "done", "the limit step runs only after the resume");
     const resumed = await simulated(org, out, { resume: stopped.run.id, stopAtShare: 1 });
     assert.ok(resumed.output);
-    // The org's own reading on the resume's connect includes our first sitting's calls.
-    assert.ok(stopped.run.budget.callsMade >= 100, `${stopped.run.budget.callsMade} calls before the stop`);
+    // The resume's own connection reads 949,500 or more, 95%, with our first sitting's calls in it.
+    assert.ok(stopped.run.budget.callsMade >= 10, `${stopped.run.budget.callsMade} calls before the stop`);
     const f = one(resumed.output.findings, "int.api-usage");
     assert.equal(f.status, "passed");
-    assert.equal(f.facts.DailyApiRequestsUsed, 94_900);
+    assert.equal(f.facts.DailyApiRequestsUsed, 949_490);
   });
 });
 
