@@ -3,6 +3,7 @@ import type { OverallScore } from "../domains/scoring.ts";
 import type { ValueModel } from "../value/model.ts";
 import { apiLimitsExtractor } from "../extract/integrations.ts";
 import { UNSCORED_RULES } from "../domains/scoring.ts";
+import { issueUnder, passedOnlyByChange } from "../engine/loosened.ts";
 
 // The re-check (roadmap Stage 5): what changed since the first health check.
 // Checks are lined up by rule, not by finding, because a rule can raise one
@@ -35,6 +36,12 @@ export type Progress = {
    * compares as before. Optional, so a comparison stored before it reads as before.
    */
   newlyMeasured?: RuleChange[];
+  /**
+   * Issues the earlier run raised that pass now only because we loosened the rule
+   * since (DECISIONS.md 732): out of every count, said once. Optional, so a
+   * comparison stored before it reads as before.
+   */
+  ruleChanged?: RuleChange[];
   areas: Array<{ domain: string; before: number | null; after: number | null }>;
   /** Storage then and now (DECISIONS.md 500). Null when this run has no storage finding, so nothing is said. */
   storage: StorageProgress | null;
@@ -86,18 +93,18 @@ function fixedAsRead(then: Finding[], now: Finding[]): boolean {
   return (pass.facts.alreadyListed ?? 0) === 0;
 }
 
-// Decision 726 raised int.api-usage's line from 80% to 95% in version 3. An earlier
-// issue of version 1 or 2 with every share under 95 is one today's rule wouldn't
-// raise, so its pass now isn't a fix: it's left out of Fixed. This rule only; no
-// general handling of rule versions.
-const API_USAGE = "int.api-usage";
-const API_USAGE_LINE_RAISED = 3;
-function raisedOnlyBelowToday(thenIssues: Finding[]): boolean {
-  return thenIssues.every((f) => {
-    if (f.ruleId !== API_USAGE || f.ruleVersion >= API_USAGE_LINE_RAISED) return false;
-    const shares = Object.entries(f.facts).filter(([key]) => key.endsWith("Share")).map(([, value]) => value);
-    return shares.length > 0 && shares.every((share) => share < 95);
-  });
+/**
+ * Whether a rule's pass now passed only because the rule changed since the
+ * earlier issue (DECISIONS.md 732, replacing 726's case for int.api-usage):
+ * every earlier issue was raised under a version a later one loosened, and this
+ * run's reading would still have been an issue under it. Not fixed, still open,
+ * new or can't tell: listed apart once.
+ */
+function passedOnlyByRuleChange(thenIssues: Finding[], nowFindings: Finding[]): boolean {
+  const pass = nowFindings.find((f) => f.status === "passed");
+  if (!pass) return false;
+  const under = issueUnder(pass);
+  return thenIssues.every((f) => passedOnlyByChange(f.ruleId, f.ruleVersion, pass.ruleVersion, under));
 }
 
 export function compareWithBaseline(baseline: ProgressSide, current: ProgressSide): Progress {
@@ -108,6 +115,7 @@ export function compareWithBaseline(baseline: ProgressSide, current: ProgressSid
   const added: RuleChange[] = [];
   const unknown: RuleChange[] = [];
   const newlyMeasured: RuleChange[] = [];
+  const ruleChanged: RuleChange[] = [];
   for (const [ruleId, then] of before) {
     const thenIssues = then.filter((f) => f.status === "issue");
     if (thenIssues.length === 0) continue;
@@ -116,7 +124,10 @@ export function compareWithBaseline(baseline: ProgressSide, current: ProgressSid
     // without it, says nothing of them, never "can't tell" (DECISIONS.md 673).
     if (MEASURED_LATER.has(ruleId) && nowFindings.length === 0) continue;
     const nowIssues = nowFindings.filter((f) => f.status === "issue");
-    if (!nowIssues.length && raisedOnlyBelowToday(thenIssues)) continue;
+    if (!nowIssues.length && passedOnlyByRuleChange(thenIssues, nowFindings)) {
+      ruleChanged.push(change(ruleId, thenIssues));
+      continue;
+    }
     if (nowIssues.length) remaining.push(change(ruleId, nowIssues));
     else if (nowFindings.some((f) => f.status === "passed") && (!MEASURED_LATER.has(ruleId) || fixedAsRead(thenIssues, nowFindings))) fixed.push(change(ruleId, thenIssues));
     else unknown.push({ ...change(ruleId, thenIssues), ...kindNow(nowFindings) });
@@ -146,6 +157,7 @@ export function compareWithBaseline(baseline: ProgressSide, current: ProgressSid
     unknown,
     // Only when there are some, so a comparison without them is as it was.
     ...(newlyMeasured.length ? { newlyMeasured } : {}),
+    ...(ruleChanged.length ? { ruleChanged } : {}),
     areas: domains.map((domain) => ({ domain, before: scoreOf(baseline.scores, domain), after: scoreOf(current.scores, domain) })).filter((a) => a.before !== null || a.after !== null),
     storage: compareStorage(baseline, current),
   };
@@ -269,7 +281,8 @@ export function progressFigures(p: Progress): number[] {
   // "The two health checks'" reads as a figure, so the sentence that says it carries its 2.
   const notCompared = p.storage && "notCompared" in p.storage && p.storage.notCompared === "not_alike" ? [2] : [];
   const firstTime = p.newlyMeasured?.length ? [p.newlyMeasured.length] : [];
-  return [...pairs, ...changes, p.fixed.length, p.remaining.length, p.added.length, p.unknown.length, ...overflow, ...storage, ...notCompared, ...firstTime];
+  const changedCheck = p.ruleChanged?.length ? [p.ruleChanged.length] : [];
+  return [...pairs, ...changes, p.fixed.length, p.remaining.length, p.added.length, p.unknown.length, ...overflow, ...storage, ...notCompared, ...firstTime, ...changedCheck];
 }
 
 /** The day counts the storage sentences print ("in 118 days", "every 30 days"). The number check reads them as days, not plain counts. */

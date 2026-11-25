@@ -42,10 +42,12 @@ export function progressPage(r: Render, report: BuiltReport): string {
   const unknown = p.unknown.length ? `<p class="note">${r.t(`We can't tell yet for ${p.unknown.length} more, because they couldn't be measured this time. The raw notes list them.`)}</p>` : "";
   // Checks the earlier health check didn't make aren't new problems (DECISIONS.md 673).
   const firstTime = p.newlyMeasured?.length ? `<p class="note">${r.t(`We checked ${p.newlyMeasured.length} more for the first time, so they aren't counted as new. The raw notes list them.`)}</p>` : "";
+  // Passes after we loosened the check aren't fixes (DECISIONS.md 732): said once, never counted.
+  const changedCheck = p.ruleChanged?.length ? `<p class="note">${r.t(`We changed how we check ${p.ruleChanged.length} more since then, and they pass now. We can't say anything in your org changed, so they aren't counted as fixed. The raw notes list them.`)}</p>` : "";
   // One paragraph for both kinds, so the slide keeps its room (DECISIONS.md 501).
   const sentences = storageSentences(p);
   const storage = sentences.length ? `<p class="note">${r.t(sentences.join(" "))}</p>` : "";
   // The eyebrow and heading sit on the page itself, as on every other slide, so a
   // continued slide carries them (DECISIONS.md 505).
-  return `<div class="eyebrow">${r.t("Since your last health check")}</div><h2>${r.t("What has changed")}</h2><div class="progress">${pair}<div class="lists">${list("Fixed", p.fixed)}${list("Still open", p.remaining)}${list("New since then", p.added)}</div>${areas}${unknown}${firstTime}${storage}<p class="note">${r.t("Some of the change in money can come from the business itself, not only from fixes.")}</p></div>`;
+  return `<div class="eyebrow">${r.t("Since your last health check")}</div><h2>${r.t("What has changed")}</h2><div class="progress">${pair}<div class="lists">${list("Fixed", p.fixed)}${list("Still open", p.remaining)}${list("New since then", p.added)}</div>${areas}${unknown}${firstTime}${changedCheck}${storage}<p class="note">${r.t("Some of the change in money can come from the business itself, not only from fixes.")}</p></div>`;
 }

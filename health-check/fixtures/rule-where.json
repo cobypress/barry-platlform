@@ -245,7 +245,13 @@
     "version": 1
   },
   "int.api-usage": {
-    "version": 3
+    "version": 3,
+    "loosenedFrom": {
+      "3": [
+        1,
+        2
+      ]
+    }
   },
   "int.failed-async-jobs": {
     "version": 2,

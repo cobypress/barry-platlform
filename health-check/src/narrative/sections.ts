@@ -352,6 +352,7 @@ function progressText(p: Progress, currency: string): string {
     list("New since then", p.added),
     list("Can't tell yet", p.unknown, ", because these couldn't be measured this time"),
     list("Checked for the first time", p.newlyMeasured ?? [], ", so not counted as new"),
+    list("Passing since we changed the check", p.ruleChanged ?? [], ", so not counted as fixed"),
     storageSentences(p).join("\n"),
   );
 }

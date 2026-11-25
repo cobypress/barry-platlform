@@ -10,6 +10,7 @@ import { knownPeople } from "../fix/prompt.ts";
 import { spansIfCurrent, textSha256, type OrgSpan } from "../engine/org-words.ts";
 import { engineOwn, orgValuesOf } from "../engine/automatic-words.ts";
 import { UNSCORED_RULES } from "../domains/scoring.ts";
+import { hasLoosened, issueUnder } from "../engine/loosened.ts";
 import { DIGEST_VERSION, NAMED_PEOPLE_SENTENCE, RunDigest, type DigestArea, type DigestFinding, type DigestMetric, type DigestTotal, type DigestValueModel, type SentenceOrgWords } from "../schemas/digest.ts";
 import { FIX_PROMPT_MAX, type Finding, type Metric } from "../schemas/index.ts";
 import type { Inventory } from "../schemas/inventory.ts";
@@ -131,6 +132,7 @@ function digestFinding(f: Finding): DigestFinding {
     ...(f.difficulty ? { difficulty: f.difficulty } : {}),
     ...fixPromptOf(f),
     ...checkerReadOf(f),
+    ...ruleChangeOf(f),
     ...(f.amountsUnnamed ? { amountsUnnamed: true as const } : {}),
     ...orgWordsOf(f),
   };
@@ -143,6 +145,18 @@ function checkerReadOf(f: Finding): { checkerRead?: DigestFinding["checkerRead"]
   const count = (n: number | undefined): n is number => typeof n === "number" && Number.isInteger(n) && n >= 0;
   if (!count(readClasses) || !count(readTriggers) || !count(alreadyListed)) return {};
   return { checkerRead: { readClasses, readTriggers, alreadyListed } };
+}
+
+/**
+ * For a rule we have loosened (DECISIONS.md 732): its version on every finding, and on
+ * a pass the earlier versions its reading would still have been an issue under. The
+ * console needs both to tell a fix from a pass that came only from our change, since a
+ * later run has no link to the run that raised the issue. Absent on every other rule.
+ */
+function ruleChangeOf(f: Finding): Pick<DigestFinding, "ruleVersion" | "issueUnder"> {
+  if (!hasLoosened(f.ruleId)) return {};
+  const under = issueUnder(f);
+  return { ruleVersion: f.ruleVersion, ...(under ? { issueUnder: under } : {}) };
 }
 
 /**

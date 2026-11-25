@@ -12,7 +12,7 @@ import { REMAKE, RULE_WHERE_FILE, ruleWhere, ruleWhereText, type RuleWhere } fro
 const text = readFileSync(RULE_WHERE_FILE, "utf8");
 const committed = JSON.parse(text) as RuleWhere;
 const rules = ALL_MODULES.flatMap((m) => m.rules);
-const STALE = `fixtures/rule-where.json is out of date. Make it again from health-check/ with \`${REMAKE}\`, and copy it to the console's docs/health-check/engine-rules/where.json`;
+const STALE = `fixtures/rule-where.json is out of date. If a rule's version moved, decide whether the new version loosened it (src/engine/loosened.ts, DECISIONS.md 732). Make it again from health-check/ with \`${REMAKE}\`, and copy it to the console's docs/health-check/engine-rules/where.json`;
 
 describe("the rules' Setup labels exported for the console (decision 626)", () => {
   test("the exported where.json equals the rules' where fields: made again from the rules, it is the same bytes", () => {
@@ -27,7 +27,7 @@ describe("the rules' Setup labels exported for the console (decision 626)", () =
       const entry = committed[rule.id]!;
       assert.equal(entry.version, rule.version, rule.id);
       assert.deepEqual(entry.where, rule.where ? [...rule.where] : undefined, rule.id);
-      assert.deepEqual(Object.keys(entry), rule.where ? ["version", "where"] : ["version"], rule.id);
+      assert.deepEqual(Object.keys(entry), ["version", ...(rule.where ? ["where"] : []), ...(entry.loosenedFrom ? ["loosenedFrom"] : [])], rule.id);
     }
     assert.ok(Object.values(committed).filter((e) => e.where).length >= 29, "623's 29 scan rules keep their labels");
   });
