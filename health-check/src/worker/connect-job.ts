@@ -342,7 +342,7 @@ async function calibrateAndQueue(runId: string, stages: OrgStage[] | null, curre
     log(`Automatic run ${runId} already had a calibration but was never queued, so it's queued now.`);
     return queueAutomatic(runId, deps, at, log);
   }
-  const built = automaticCalibration(stages, { orgId, at: at(), currency });
+  const built = automaticCalibration(stages, { orgId, at: at(), currency, answered: await answeredCurrency(currency, orgId, deps, log) });
   if (!built.ok) {
     const held = await deps.store.holdRun(runId, built.heldReason, at(), built.counts).catch(() => false);
     log(`Automatic run ${runId} wasn't calibrated or queued: ${built.heldReason} (${HOLD_CAUSE_WORDS[built.cause]}; ${built.counts.stages} stages read, ${built.counts.won} won)${held ? "" : ", and the hold couldn't be recorded"}.`);
@@ -373,10 +373,28 @@ async function calibrateAndQueue(runId: string, stages: OrgStage[] | null, curre
 /** Each hold's true cause, for the log (DECISIONS.md 700). The outcome says it in the reason's own words. */
 export const HOLD_CAUSE_WORDS: Record<HoldCause, string> = { stages_unread: "no stages could be read", no_won_stage: "no stage is closed and won", calibration_refused: "the calibration was refused" };
 
+/**
+ * The currency the org's customer named in the portal (KAN-41), asked only
+ * where connect read that the org has one currency: never for an org whose
+ * own code Salesforce gave, or whose read failed. A store that can't answer
+ * costs the answer, never the calibration.
+ */
+async function answeredCurrency(currency: OrgCurrency | null, orgId: string, deps: WorkerDeps, log: (line: string) => void): Promise<string | null> {
+  if (currency?.kind !== "single") return null;
+  try {
+    return await deps.store.customerCurrency(orgId.slice(0, 15));
+  } catch (err) {
+    const reason = err instanceof StoreError ? err.message : "an unexpected error";
+    log(`The currency the org's customer named couldn't be read, so its amounts are shown with none: ${reason}.`);
+    return null;
+  }
+}
+
 /** What the calibration's currency is, for the log: a code only, never a locale or any other value the org chose. */
 function logCurrency(runId: string, calibration: Calibration, log: (line: string) => void): void {
   const standing = currencyStanding(calibration);
-  if (standing === "org") log(`Automatic run ${runId}'s org has one currency, not known by name, so its amounts will be shown with none${calibration.currencySuggested ? ` (its locale suggests ${calibration.currencySuggested})` : ""}.`);
+  if (standing === "customer") log(`Automatic run ${runId}'s org has one currency, which its customer named in the portal: ${calibration.currency}.`);
+  else if (standing === "org") log(`Automatic run ${runId}'s org has one currency, not known by name, so its amounts will be shown with none${calibration.currencySuggested ? ` (its locale suggests ${calibration.currencySuggested})` : ""}.`);
   else if (standing === "unread") log(`Automatic run ${runId}'s currency wasn't read, so the run decides from its opportunities whether to show amounts.`);
 }
 
@@ -495,7 +513,7 @@ export async function recalibrateForRunAgain(runId: string, name: string, runOrg
   const stored = await deps.tokens.load(name);
   if (stored.orgId.slice(0, 15) !== runOrgId.slice(0, 15)) return { kind: "unsaved", detail: `The connection "${name}" is for a different org from this run, so nothing was read.` };
   const read = await readOrgAgain(runId, name, deps, at, log);
-  const built = automaticCalibration(read.stages, { orgId: read.orgId, at: at(), currency: read.currency });
+  const built = automaticCalibration(read.stages, { orgId: read.orgId, at: at(), currency: read.currency, answered: await answeredCurrency(read.currency, read.orgId, deps, log) });
   if (!built.ok) {
     const held = await deps.store.holdRun(runId, built.heldReason, at(), built.counts).catch(() => false);
     log(`Automatic run ${runId} was run again with no calibration, and none could be built: ${built.heldReason} (${HOLD_CAUSE_WORDS[built.cause]}; ${built.counts.stages} stages read, ${built.counts.won} won)${held ? "" : ", and the hold couldn't be recorded"}.`);

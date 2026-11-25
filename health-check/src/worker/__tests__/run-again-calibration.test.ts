@@ -175,3 +175,28 @@ describe("Run again of an automatic run with no calibration (DECISIONS.md 700)",
     assert.ok(deps.store.flagsOf(RUN_ID).includes("run_failed"));
   });
 });
+
+describe("Run again with a currency the customer named in the portal (KAN-41)", () => {
+  test("the rebuilt calibration names it, and the released run's digest names it with no note", async () => {
+    const { deps, handle } = await pressed();
+    deps.store.customerCurrencies.set(ORG15, "EUR");
+    const outcome = await handle({ kind: "run", runId: RUN_ID }, AGAIN);
+    assert.equal(outcome.outcome, "done", outcome.detail);
+    const c = deps.store.runs.get(RUN_ID)!.calibration!;
+    assert.equal(c.currency, "EUR");
+    assert.equal(c.currencyFrom, "customer");
+    assert.equal(deps.store.runs.get(RUN_ID)!.run.status, "released");
+    const digest = deps.store.digests.get(RUN_ID)!.digest;
+    assert.equal(digest.value.currency, "EUR");
+    assert.equal(digest.value.currencyNote, undefined);
+    assert.ok(digest.findings.every((f) => f.amountsUnnamed === undefined));
+  });
+
+  test("an answer changed later: the newest stands at the next calibration", async () => {
+    const { deps, handle } = await pressed();
+    deps.store.customerCurrencies.set(ORG15, "EUR");
+    deps.store.customerCurrencies.set(ORG15, "CHF");
+    await handle({ kind: "run", runId: RUN_ID }, AGAIN);
+    assert.equal(deps.store.runs.get(RUN_ID)!.calibration!.currency, "CHF");
+  });
+});

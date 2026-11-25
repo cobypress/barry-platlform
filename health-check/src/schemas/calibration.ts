@@ -18,6 +18,14 @@ export const CalibratedStage = z.object({
 export const UserKind = z.enum(["sales_rep", "manager", "admin", "shared", "system", "integration", "test", "other"]);
 export type UserKind = z.infer<typeof UserKind>;
 
+/**
+ * The codes a currency can be named by: ISO 4217's, as the runtime's own
+ * Intl knows them (the list Intl.NumberFormat formats), with "no currency"
+ * and the testing code left out. Never a list we keep by hand.
+ */
+export const CURRENCY_CODES: ReadonlySet<string> = new Set(Intl.supportedValuesOf("currency").filter((c) => /^[A-Z]{3}$/.test(c) && c !== "XXX" && c !== "XTS"));
+export const isCurrencyCode = (code: unknown): code is string => typeof code === "string" && CURRENCY_CODES.has(code);
+
 export const Calibration = z
   .object({
     version: z.literal(1),
@@ -52,8 +60,10 @@ export const Calibration = z
     // with source org_settings. "org": one currency, not known by name ("XXX",
     // ISO 4217's code for none), its amounts shown as plain numbers. "unread":
     // connect couldn't tell; the run decides from its opportunities. Absent: the
-    // code is the org's own, as before 700, or a person's.
-    currencyFrom: z.enum(["org", "unread"]).optional(),
+    // code is the org's own, as before 700, or a person's. "customer": the org
+    // has one currency, and its customer named it in the portal (KAN-41): a
+    // real code, printed as the org's own would be.
+    currencyFrom: z.enum(["org", "unread", "customer"]).optional(),
     // The currency the org's default locale suggests, for the question the
     // portal asks. Never printed as the currency and never formats an amount.
     currencySuggested: z.string().regex(/^[A-Z]{3}$/).optional(),
@@ -80,6 +90,10 @@ export const Calibration = z
     // a person's always names its currency, so its amounts are never plain numbers with no line to say why.
     if ((c.currency === "XXX" || c.currency === "XTS") && c.source !== "org_settings") {
       ctx.addIssue({ code: "custom", path: ["currency"], message: "A person's calibration names its currency" });
+    }
+    // A currency the customer named (KAN-41) is a real code, on a calibration read from the org's settings only.
+    if (c.currencyFrom === "customer" && (c.source !== "org_settings" || !isCurrencyCode(c.currency))) {
+      ctx.addIssue({ code: "custom", path: ["currencyFrom"], message: "A currency the customer named is a real code, on a calibration read from the org's settings" });
     }
     const seen = new Set<string>();
     for (const stage of c.stages) {
