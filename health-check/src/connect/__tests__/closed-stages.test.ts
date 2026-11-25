@@ -5,6 +5,7 @@ import type { OrgStage } from "../org-stages.ts";
 import { normaliseStageName, outcomeFromName, STAGE_NAME_WORDS } from "../stage-names.ts";
 import { machineSet, parseStageAnswer, withMachineStages, type StageAnswer } from "../stage-outcomes.ts";
 import { Calibration } from "../../schemas/calibration.ts";
+import { stageMap } from "../../domains/historic-pipeline/cohort.ts";
 
 // Which closed, not-won stages are lost and which no decision on an automatic
 // calibration (DECISIONS.md 756): the customer's answer, and behind
@@ -135,6 +136,14 @@ describe("at calibration: what an answer can set", () => {
     assert.equal(withMachineStages(build(), reopened, answer({ "Kestrel Down": "lost" }), false).answered, 0);
   });
 
+  test("a won stage the saved calibration doesn't name (added in Salesforce since): an answer or a name still never sets it", () => {
+    const later = [...STAGES, st("Kestrel Won Too", "Lost and Won", { isClosed: true, isWon: true })];
+    const set = withMachineStages(build(), later, answer({ "Kestrel Won Too": "lost" }), true);
+    assert.ok(!set.stages.some((s) => s.name === "Kestrel Won Too"));
+    assert.equal(set.answered, 0);
+    assert.equal(set.ignored, 1);
+  });
+
   test("the switch off: no name is read; on: each closed stage the answer leaves out is read by its name, marked so", () => {
     assert.deepEqual(closed(build()), []);
     assert.deepEqual(closed(build({ stageNames: true })), [
@@ -192,5 +201,25 @@ describe("precedence: a person's word, then the customer's, then the name, then 
     const c = build({ stageNames: true, stageAnswer: answer({ "Kestrel Down": "no_decision" }) });
     assert.deepEqual(Calibration.parse(JSON.parse(JSON.stringify(c))), c);
     assert.ok(Calibration.safeParse({ ...c, source: "confirmed", confirmedBy: "consultant@example.com" }).success, "a person's save with the mark still parses");
+  });
+});
+
+describe("at analysis: a customer's or name's stage the run's own flags no longer hold as closed and not won", () => {
+  const flag = (ApiName: string, IsClosed: boolean, IsWon = false) => ({ ApiName, MasterLabel: ApiName, IsActive: true, IsClosed, IsWon, SortOrder: null }) as never;
+  const c = build({ stageNames: true, stageAnswer: answer({ "Kestrel Grey": "no_decision" }) });
+
+  test("set aside, and the flags decide, as for a stage the calibration doesn't name", () => {
+    const map = stageMap(c, [flag("Kestrel Down", false), flag("Kestrel Grey", true, true), flag("Kestrel Quiet", true)]);
+    assert.equal(map.categoryOf("Kestrel Down"), "open");
+    assert.ok(map.isInferred("Kestrel Down"));
+    assert.equal(map.categoryOf("Kestrel Grey"), "won");
+    assert.equal(map.categoryOf("Kestrel Quiet"), "no_decision", "still closed and not won: the name's reading stands");
+    assert.equal(stageMap(c, [flag("Kestrel Quiet", true)]).categoryOf("Kestrel Down"), null, "a stage the flags no longer hold at all");
+  });
+
+  test("with no flags read, or on a person's calibration, the calibration's word stands", () => {
+    assert.equal(stageMap(c, null).categoryOf("Kestrel Down"), "lost");
+    const person = { ...c, source: "confirmed" as const, confirmedBy: "consultant@example.com" };
+    assert.equal(stageMap(person, [flag("Kestrel Down", false)]).categoryOf("Kestrel Down"), "lost");
   });
 });
