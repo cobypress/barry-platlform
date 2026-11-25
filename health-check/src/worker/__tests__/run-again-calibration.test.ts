@@ -233,3 +233,18 @@ describe("Run again with a currency the org's settings name (740)", () => {
     assert.ok(deps.store.digests.get(RUN_ID)!.digest.value.currencyNote);
   });
 });
+
+describe("Run again with the customer's closed stages (DECISIONS.md 756)", () => {
+  test("the rebuilt calibration takes the answer, and the released run measures what the four checks need", async () => {
+    const { deps, handle } = await pressed();
+    deps.store.customerStageAnswers.set(ORG15, { "Closed Lost": "lost", "Closed Lost - No Budget": "lost", "Closed No Decision": "no_decision" });
+    const outcome = await handle({ kind: "run", runId: RUN_ID }, AGAIN);
+    assert.equal(outcome.outcome, "done", outcome.detail);
+    const c = deps.store.runs.get(RUN_ID)!.calibration!;
+    assert.deepEqual(c.stages.filter((s) => s.from === "customer").map((s) => [s.name, s.category]), [["Closed Lost", "lost"], ["Closed No Decision", "no_decision"], ["Closed Lost - No Budget", "lost"]]);
+    assert.equal(deps.store.runs.get(RUN_ID)!.run.status, "released");
+    assert.ok(!JSON.stringify(deps.store.digests.get(RUN_ID)!.digest).includes("can't tell lost from no decision"));
+    // Built by this press: the fresh start that follows finds nothing to set again.
+    assert.equal(deps.store.writes.filter((w) => w.method === "answerCalibrationStages").length, 0);
+  });
+});

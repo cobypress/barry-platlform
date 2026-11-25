@@ -235,7 +235,7 @@ describe("unsure means unmarked, never wrongly marked (decision 672)", () => {
     assert.deepEqual(sliceMarked(cat(ours("ab"), theirs("cdef")), 1, 4), { text: "bcd", spans: [{ start: 1, end: 3 }] });
   });
 
-  test("a summary cut to fit keeps its marks only when no joining space falls inside an org value", () => {
+  test("a summary cut to fit keeps its marks, and is never cut inside an org value (DECISIONS.md 756)", () => {
     const long = "x".repeat(900);
     const words = (summary: string, spans: Array<{ start: number; end: number }>) => ({ ...base, summary, orgWords: { title: marks(base.title, []), summary: marks(summary, spans), recommendation: marks(base.recommendation, []) } });
     const apart = `${long}. Value A. ${long}. ${long}.`;
@@ -244,12 +244,12 @@ describe("unsure means unmarked, never wrongly marked (decision 672)", () => {
     assert.match(cut.text, /\(The finding says more\.\)/);
     assert.ok(cut.text.length <= FIX_PROMPT_MAX);
     assert.deepEqual(spanTexts(cut.text, cut.spans!), ["Value A"]);
-    // The org's value "Value. A" holds a sentence's end, and the cut prompt joins across it.
+    // The org's value "Value. A" holds a full stop that isn't a sentence's end: never cut there, so the value stays whole and marked.
     const inside = `${long}. Value. A short. ${long}.`;
     const from = inside.indexOf("Value.");
-    const joined = assembleMarked(words(inside, [{ start: from, end: from + 8 }]), rule);
-    assert.ok(joined.text.includes("Value. A short. (The finding says more.)"), "the cut keeps the sentence after the value's full stop");
-    assert.equal(joined.spans, null);
+    const kept = assembleMarked(words(inside, [{ start: from, end: from + 8 }]), rule);
+    assert.ok(kept.text.includes("Value. A short. (The finding says more.)"), "the cut keeps the sentence holding the value whole");
+    assert.deepEqual(spanTexts(kept.text, kept.spans!), ["Value. A"]);
   });
 });
 

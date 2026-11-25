@@ -835,3 +835,44 @@ describe("the currency the org's settings name, at connect (740)", () => {
     }
   });
 });
+
+describe("the customer's closed stages, and the name rule, at connect (DECISIONS.md 756)", () => {
+  test("an answer names the closed stage it covers, marked as the customer's; a won or open stage in it is ignored; logged by count only", async () => {
+    const f = await flow();
+    f.deps.store.customerStageAnswers.set(ORG15, JSON.stringify({ "Quokka Lost": "no_decision", "Quokka Won": "lost", "Quokka Prospect": "lost", "Quokka Gone": "lost" }));
+    const outcome = await f.handle(f.job, once);
+    const c = f.deps.store.runs.get(RUN_ID)!.calibration!;
+    assert.deepEqual(c.stages.filter((s) => s.category === "lost" || s.category === "no_decision"), [{ name: "Quokka Lost", category: "no_decision", from: "customer" }]);
+    assert.deepEqual(c.stages.find((s) => s.name === "Quokka Won"), { name: "Quokka Won", category: "won" });
+    assert.equal(c.stages.find((s) => s.name === "Quokka Prospect")!.category, "open");
+    assert.deepEqual(f.queued, [RUN_ID]);
+    assert.ok(f.deps.lines.includes(`Automatic run ${RUN_ID}'s calibration takes its customer's answer for 1 closed stage; 3 entries in the answer named no stage the org has that is closed and not won, or weren't an answer, so they were ignored.`));
+    noStageNames(f, outcome.detail);
+  });
+
+  test("with HC_STAGE_NAMES on and no answer: read from its name, marked so; off: left out, as before", async () => {
+    const on = await flow();
+    on.deps.stageNames = true;
+    // A name plainly an outcome; "Quokka Lost label" is not (a word beside the outcome), and stays undecided.
+    on.org.stages = [...STAGES, { ...stage("Closed_Lost", 6, { IsClosed: true }), MasterLabel: "Closed Lost" }];
+    await on.handle(on.job, once);
+    assert.deepEqual(on.deps.store.runs.get(RUN_ID)!.calibration!.stages.filter((s) => s.from), [{ name: "Closed_Lost", category: "lost", from: "name" }]);
+    noStageNames(on, "");
+    const off = await flow();
+    await off.handle(off.job, once);
+    assert.ok(off.deps.store.runs.get(RUN_ID)!.calibration!.stages.every((s) => s.name !== "Quokka Lost"));
+  });
+
+  test("an answer the store can't give, or can't be read: calibrated and queued as before", async () => {
+    const f = await flow();
+    f.deps.store.failStageAnswer = true;
+    await f.handle(f.job, once);
+    assert.ok(f.deps.store.runs.get(RUN_ID)!.calibration!.stages.every((s) => s.name !== "Quokka Lost"));
+    assert.deepEqual(f.queued, [RUN_ID]);
+    const g = await flow();
+    g.deps.store.customerStageAnswers.set(ORG15, "{oops");
+    await g.handle(g.job, once);
+    assert.deepEqual(g.queued, [RUN_ID]);
+    assert.ok(g.deps.lines.includes(`Automatic run ${RUN_ID}'s customer's answer about its closed stages isn't in a shape we read, so it was ignored.`));
+  });
+});

@@ -48,6 +48,7 @@ export const WORKER_ENV = {
     HC_AUTOMATIC_ORGS: "Comma-separated 15-character org ids automatic runs are allowed for while they're proved. An automatic run for any other org is refused at connect, and fails at its claim, with nothing read",
     HC_MICROSITE_KEY: "The customer microsite: 32 bytes, base64 (openssl rand -base64 32), the same value as the console's, and different from HC_CONNECT_KEY and HC_TOKEN_KEY. Without it, released runs get documents but no microsite",
     HC_DOCUMENTS_ON_DEMAND: "on, exactly, to make a released automatic run's three PDFs when the portal asks, sealed into the console's database and put nowhere else (DECISIONS.md 698). Anything else, or unset, is off: every such request is refused",
+    HC_STAGE_NAMES: "on, exactly, to let an automatic run read a closed stage that isn't won as lost or no decision from its name, by the engine's fixed word list, said to the customer as an assumption they can correct (DECISIONS.md 756). Anything else, or unset, is off: such a stage stays undecided until the customer says which it is",
     HC_DOCUMENTS_KEY: "Seals the portal's documents: 32 bytes, base64 (openssl rand -base64 32), the same value as the console's, and different from HC_CONNECT_KEY, HC_TOKEN_KEY and HC_MICROSITE_KEY. Missing or wrong, the worker still starts and every portal request is refused, with nothing made",
   },
 } as const;
@@ -98,6 +99,8 @@ export type WorkerConfig = {
   automatic: AutomaticSwitch;
   /** HC_DOCUMENTS_ON_DEMAND=on, exactly, and HC_DOCUMENTS_KEY (DECISIONS.md 698). A bad key never stops the worker: it's kept as the reason every portal make is refused. */
   portalDocuments: PortalDocumentsSwitch;
+  /** HC_STAGE_NAMES=on, exactly: an automatic calibration reads undecided closed stages from their names (DECISIONS.md 756). */
+  stageNames: boolean;
 };
 
 const key32 = (raw: string): Buffer | null => {
@@ -210,6 +213,8 @@ export function readWorkerEnv(env: NodeJS.ProcessEnv): { ok: true; config: Worke
       automatic: { on: env.HC_AUTOMATIC === "on", orgs: automaticOrgs.ok ? automaticOrgs.orgs : new Set() },
       // Exactly "on", untrimmed, as the other switches that put something before a customer with no person reading it.
       portalDocuments: { on: env.HC_DOCUMENTS_ON_DEMAND === "on", key: docsKey, keyProblem: docsKeyProblem },
+      // Exactly "on", untrimmed, as the other switches that change what a customer reads with no person reading it.
+      stageNames: env.HC_STAGE_NAMES === "on",
     },
   };
 }

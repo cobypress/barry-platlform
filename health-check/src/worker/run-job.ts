@@ -26,6 +26,7 @@ import { withJobLock } from "./lock.ts";
 import { automaticRefusal } from "./automatic.ts";
 import { recalibrateForRunAgain, type Recalibrated } from "./connect-job.ts";
 import { CalibrationUnsettled, nameCurrencyBeforeRun } from "./name-currency.ts";
+import { setStagesBeforeRun } from "./stage-answer.ts";
 import { checkedDigest } from "../digest/checked.ts";
 import { checkSections, decidePulse, decideRelease, lossesOf, SHOWABLE_PULSE_HOLDS, type PulseDecision, sameAsLast, SERVER_FAULT_CODES, type ReleaseDecision, type RunLosses, type SameAsLast } from "./release.ts";
 import { letGoAfterRun, type SeenRun } from "./scan-release.ts";
@@ -484,6 +485,17 @@ async function runLocked(runId: string, deps: WorkerDeps, attempt: Attempt, seen
       throw new Error(err.message);
     }
   }
+  // Its closed stages likewise (DECISIONS.md 756): the customer's newest answer, and with HC_STAGE_NAMES on the name
+  // rule, put into a calibration the machine built, on a start that reads the org afresh. Reads no Salesforce.
+  if (!resume && input.run.reviewMode === "automatic") {
+    try {
+      input = { ...input, calibration: await setStagesBeforeRun({ runId, input, deps, log, final: attempt.final === true }) };
+    } catch (err) {
+      if (!(err instanceof CalibrationUnsettled)) throw err;
+      log(err.message);
+      throw new Error(err.message);
+    }
+  }
   const provider = new OAuthConnectionProvider(name, { store: deps.tokens, client: app, transport: deps.oauthTransport, env: approvedFromConsole(name), log });
   const secrets = [stored.accessToken, stored.refreshToken];
   // A health check or essentials run only, with Claude to ask: a scan and a
@@ -507,6 +519,8 @@ async function runLocked(runId: string, deps: WorkerDeps, attempt: Attempt, seen
       product: input.run.product,
       // The folder's run.json says how the run is reviewed, so its documents read the true mode (DECISIONS.md 692).
       reviewMode: input.run.reviewMode,
+      ...(gatedPulse ? { gated: true } : {}),
+      ...(deps.stageNames === true ? { stageNames: true } : {}),
       baselineRunId: input.run.baselineRunId,
       keepApexSource: apexSummaries,
       // A health check runs PMD and ESLint beside our scan, and only stores what they find; a scan and a pulse don't (DECISIONS.md 670).

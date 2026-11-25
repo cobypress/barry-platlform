@@ -9,7 +9,7 @@ import { loadPipeline, unsplitLostReason, type Deal } from "../historic-pipeline
 import { groupBy, median } from "../historic-pipeline/metrics.ts";
 import type { DomainModule } from "../types.ts";
 import { discountOf, presenceGap } from "./shared.ts";
-import { org, said, type Said } from "../../engine/org-words.ts";
+import { eng, org, said, type Said } from "../../engine/org-words.ts";
 import { andList, grouped } from "../../engine/said-forms.ts";
 
 // How quotes are priced and handed on: discounts against list price and who
@@ -43,7 +43,7 @@ function quotedDeals(ctx: RuleContext): { rows: Quoted[]; multiCurrency: boolean
   if (quotes.truncated) return { reason: cutOff("quotes", quotes.data.length), evidence: [ctx.ev(quotes.source, { count: quotes.data.length })] };
   if (data.status !== "ok") return { reason: data.reason, evidence: data.evidence };
   // Won against lost, with no decision left out (DECISIONS.md 600).
-  const unsplit = unsplitLostReason(data);
+  const unsplit = unsplitLostReason(data, ctx);
   if (unsplit) return { reason: unsplit, evidence: data.evidence };
   const byDeal = new Map(quotes.data.filter((q) => q.SBQQ__Opportunity2__c).map((q) => [q.SBQQ__Opportunity2__c!, q]));
   const rows = data.deals.flatMap((deal): Quoted[] => {
@@ -136,7 +136,7 @@ const discountLeakage: Rule = {
             amount,
             unit: ctx.calibration.currency,
             // The value model reads the start of this to put it over 12 months (value/model.ts, OVER_WINDOW).
-            period: `in discount beyond what peers gave, ${ctx.window.from} to ${ctx.window.to}, a potential figure`,
+            period: said`in discount beyond what peers gave, ${eng(ctx.window.from)} to ${eng(ctx.window.to)}, a potential figure`,
             assumptions: [
               said`${plural(excess.size, "won deal")} in the teams and reps named, each counted once, at the most it went past its peers' median`,
               said`Each deal's discount beyond its peers' median, applied to its quote's list amount`,

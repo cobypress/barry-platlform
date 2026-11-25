@@ -28,6 +28,12 @@ const SIGNED_OFF: string[] = [
   "src/domains/utilisation/index.ts: phrase",
   // The analysis window's two dates, which the engine works out from the run's date: digits and dashes (DECISIONS.md 663).
   "src/domains/historic-pipeline/potential.ts: `${ctx.window.from} to ${ctx.window.to}`",
+  // The same dates, and a quarter's first day, in the value periods said since DECISIONS.md 756.
+  "src/domains/cpq/quoting.ts: ctx.window.from",
+  "src/domains/cpq/quoting.ts: ctx.window.to",
+  "src/domains/current-pipeline/index.ts: result.quarter.from",
+  "src/domains/historic-pipeline/index.ts: ctx.window.from",
+  "src/domains/historic-pipeline/index.ts: ctx.window.to",
   // A list price's plan, figure, billing, link and date, all from our own table in list-prices.ts (DECISIONS.md 663).
   "src/money/seat-cost.ts: `${p.plan} (${p.monthly} ${p.currency} a user a month, ${p.billing.toLowerCase()}; ${p.url}, read on ${p.checked})`",
   // Decision 743. The drivers' factor labels, our own table, alone and as the note that lists them.

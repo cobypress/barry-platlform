@@ -6,7 +6,7 @@ import type { Complexity } from "../schemas/complexity.ts";
 import type { ScanResult } from "../scan/result.ts";
 import type { PulseResult } from "../pulse/result.ts";
 import { DIGEST_KEYS, type RunDigest } from "../schemas/digest.ts";
-import { isCurrencyCode } from "../schemas/calibration.ts";
+import { isCurrencyCode, type CalibratedStage } from "../schemas/calibration.ts";
 import { ORG_SETTINGS_CALIBRATOR } from "../connect/auto-calibration.ts";
 import { unstorableAt } from "./inventory.ts";
 import { randomUUID } from "node:crypto";
@@ -680,6 +680,30 @@ export const CUSTOMER_CURRENCY_SQL =
   `SELECT a."value" FROM "HealthCheckCustomerAnswer" a JOIN "HealthCheckCustomer" c ON c."id" = a."customerId" ` +
   `WHERE c."orgId15" = $1 AND c."status" = 'active' AND a."question" = 'currency' ORDER BY a."answeredAt" DESC, a."id" DESC LIMIT 1`;
 
+/** The customer's newest answer to which closed stages are lost and which no decision (DECISIONS.md 756): as the currency's, another question. */
+export const CUSTOMER_STAGE_ANSWER_SQL =
+  `SELECT a."value" FROM "HealthCheckCustomerAnswer" a JOIN "HealthCheckCustomer" c ON c."id" = a."customerId" ` +
+  `WHERE c."orgId15" = $1 AND c."status" = 'active' AND a."question" = 'closed_stages' ORDER BY a."answeredAt" DESC, a."id" DESC LIMIT 1`;
+/** The org's stages as the worker last saved them for this run (DECISIONS.md 611, 756). */
+export const SAVED_ORG_STAGES_SQL = `SELECT "stages" FROM "HealthCheckOrgStages" WHERE "runId" = $1`;
+/**
+ * The customer's answer put into a saved automatic calibration (DECISIONS.md 756): the stages only, and only while
+ * the row is still the one the run read: the org's settings' with no person's confirmation and exactly those stages,
+ * so two deliveries can't both write and a person's save is never written over.
+ */
+export const ANSWER_CALIBRATION_STAGES_SQL =
+  `UPDATE "HealthCheckCalibration" SET "stages" = $2::jsonb ` +
+  `WHERE "runId" = $1 AND "source" = 'org_settings' AND "confirmedBy" = $3 AND "stages"::jsonb = $4::jsonb`;
+/** One stage as saveOrgStages writes it. */
+const safeJson = (text: string): unknown => {
+  try {
+    return JSON.parse(text);
+  } catch {
+    return null;
+  }
+};
+const SavedOrgStage = z.object({ apiName: z.string(), label: z.string(), isActive: z.boolean(), isClosed: z.boolean(), isWon: z.boolean(), sortOrder: z.number().nullable() });
+
 export const LAST_SCAN_SQL = `SELECT to_char(MAX("at"), 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"') AS "at" FROM (` +
   `SELECT r."startedAt" AS "at" FROM "HealthCheckRun" r WHERE r."product" = 'scan' AND r."id" <> $2 AND LEFT(r."orgId", 15) = $1 AND r."startedAt" > $3::timestamp(3)` +
   ` UNION ALL ` +
@@ -697,6 +721,7 @@ export class PostgresWorkerStore implements WorkerStore {
   #saidNoOrgStagesTable = false;
   #saidNoAnswersTable = false;
   #saidUnknownAnswer = false;
+  #saidNoStageAnswersTable = false;
 
   constructor(pool: SqlPool, options: { log?: (line: string) => void } = {}) {
     this.#pool = pool;
@@ -1380,6 +1405,45 @@ export class PostgresWorkerStore implements WorkerStore {
         this.#log("The console's database has no HealthCheckCustomerAnswer table yet, so no customer's currency is read. Apply the console's 20261219_health_check_portal_answers.sql migration.");
       }
       return null;
+    }
+  }
+
+  /** DECISIONS.md 756: the stored value as it is, for the engine to read and check. No table yet is none, said once. */
+  async customerStageAnswer(orgId15: string): Promise<unknown> {
+    try {
+      return one(await this.#pool.query(CUSTOMER_STAGE_ANSWER_SQL, [orgId15.slice(0, 15)]))?.value ?? null;
+    } catch (err) {
+      const code = (err as { code?: unknown }).code;
+      if (code !== "42P01") throw new StoreError(`the console's database refused the customer's answer about its closed stages (SQLSTATE ${sqlState(code)})`);
+      if (!this.#saidNoStageAnswersTable) {
+        this.#saidNoStageAnswersTable = true;
+        this.#log("The console's database has no HealthCheckCustomerAnswer table yet, so no customer's answer about its closed stages is read. Apply the console's 20261219_health_check_portal_answers.sql migration.");
+      }
+      return null;
+    }
+  }
+
+  /** DECISIONS.md 756: a row in a shape we don't know, or no table, is none. */
+  async savedOrgStages(runId: string): Promise<OrgStage[] | null> {
+    let value: unknown;
+    try {
+      value = one(await this.#pool.query(SAVED_ORG_STAGES_SQL, [runId]))?.stages;
+    } catch (err) {
+      const code = (err as { code?: unknown }).code;
+      if (code === "42P01") return null;
+      throw new StoreError(`the console's database refused the org's saved stages (SQLSTATE ${sqlState(code)})`);
+    }
+    const parsed = z.array(SavedOrgStage).safeParse(typeof value === "string" ? safeJson(value) : value);
+    return parsed.success ? parsed.data : null;
+  }
+
+  /** DECISIONS.md 756: one guarded statement. */
+  async answerCalibrationStages(runId: string, was: CalibratedStage[], stages: CalibratedStage[]): Promise<"updated" | "unchanged"> {
+    try {
+      const result = await this.#pool.query(ANSWER_CALIBRATION_STAGES_SQL, [runId, JSON.stringify(stages), ORG_SETTINGS_CALIBRATOR, JSON.stringify(was)]);
+      return result.rowCount === 1 ? "updated" : "unchanged";
+    } catch (err) {
+      throw new StoreError(`the console's database refused the calibration's stages (SQLSTATE ${sqlState((err as { code?: unknown }).code)})`);
     }
   }
 

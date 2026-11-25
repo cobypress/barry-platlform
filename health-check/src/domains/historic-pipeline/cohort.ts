@@ -6,6 +6,7 @@ import type { Calibration, Evidence, StageCategory } from "../../schemas/index.t
 import { joinSaid, org, said, type Said } from "../../engine/org-words.ts";
 import { andList } from "../../engine/said-forms.ts";
 import { orderFromOrg } from "../../connect/auto-calibration.ts";
+import { fromName, machineSet } from "../../connect/stage-outcomes.ts";
 
 export type Deal = OpportunityRow & {
   category: StageCategory | null;
@@ -34,9 +35,20 @@ export type StageMap = {
  * it: not closed is open, closed and won is won, closed and not won is lost.
  * "No decision" and a place in the sales order have no flag, so neither is
  * ever inferred (DECISIONS.md 598).
+ *
+ * A stage the customer said is lost or no decision, or that we read so from
+ * its name (DECISIONS.md 756), stands only while this run's own read of the flags, when it has one, still says the
+ * stage is closed and not won: an answer the org has since overtaken is set
+ * aside, and the flags decide as for any stage the calibration doesn't name.
  */
 export function stageMap(calibration: Calibration, flags: StageRow[] | null = null): StageMap {
-  const byName = new Map(calibration.stages.map((s) => [s.name, s]));
+  const flagged = new Map((flags ?? []).map((f) => [f.ApiName, f]));
+  const stale = (s: Calibration["stages"][number]): boolean => {
+    if (calibration.source !== "org_settings" || flags === null || !machineSet(s)) return false;
+    const flag = flagged.get(s.name);
+    return !flag || !flag.IsClosed || flag.IsWon;
+  };
+  const byName = new Map(calibration.stages.filter((s) => !stale(s)).map((s) => [s.name, s]));
   const open = calibration.stages.filter((s) => s.category === "open").sort((a, b) => a.order! - b.order!);
   const position = new Map(open.map((s, i) => [s.name, i]));
   const inferred = new Map<string, StageCategory>();
@@ -79,6 +91,18 @@ export function inferredStagesNote(inferred: Array<{ stage: string; category: St
   // An automatic run's calibration was agreed with nobody (DECISIONS.md 693): no consultant is to come back to it.
   if (fromOrgSettings) return said`You haven't told us yet what ${inferred.length === 1 ? "one stage means" : "some stages mean"}, so we used Salesforce's own setting for ${inferred.length === 1 ? "it" : "each"}: ${andList(items)}.`;
   return said`We haven't yet agreed with you what ${inferred.length === 1 ? "one stage means" : "some stages mean"}, so we used Salesforce's own setting for ${inferred.length === 1 ? "it" : "each"}: ${andList(items)}.`;
+}
+
+/**
+ * The assumption every finding and metric that leaned on a stage read from its
+ * name carries (DECISIONS.md 756), as the inferred stages' note is: with said,
+ * each stage as the org's words, and each outcome in our own words.
+ */
+export function namedStagesNote(named: Array<{ stage: string; category: StageCategory }>): Said {
+  const items = named.map((s) => (s.category === "lost" ? said`${org(s.stage)} as lost` : said`${org(s.stage)} as no decision`));
+  return named.length === 1
+    ? said`We've assumed what one stage means from its name, and you can tell us if it's wrong: ${andList(items)}.`
+    : said`We've assumed what some stages mean from their names, and you can tell us if any is wrong: ${andList(items)}.`;
 }
 
 /** Stage names, as the org named them, joined with commas. */
@@ -147,6 +171,8 @@ export type PipelineData =
       unsplitLost: string[];
       /** How many record types the in-scope deals use. Unnamed deals don't count; absent reads as none. */
       recordTypes?: number;
+      /** Stages those deals used whose lost or no decision we read from their names (DECISIONS.md 756), with it: set only when there are any. */
+      readByName?: Array<{ stage: string; category: StageCategory }>;
       /** The calibration was read from the org's settings, for an automatic run (DECISIONS.md 693): set only then. */
       fromOrgSettings?: true;
     };
@@ -277,6 +303,9 @@ function buildPipeline(ctx: Omit<RuleContext, "metrics">): PipelineData {
   const used = new Set([...finalUsed, ...historyUsed]);
   const historyStart = history.data.reduce<string | null>((min, h) => (min === null || h.CreatedDate < min ? h.CreatedDate : min), null);
   const inferred = [...used].filter((s) => stages.isInferred(s)).sort().map((stage) => ({ stage, category: stages.categoryOf(stage)! }));
+  // Only on a calibration read from the org's settings, and only where the run's own flags left the reading standing (stageMap).
+  const byNameStages = new Set(ctx.calibration.source === "org_settings" ? ctx.calibration.stages.filter(fromName).map((s) => s.name) : []);
+  const readByName = [...used].filter((s) => byNameStages.has(s) && !stages.isInferred(s) && stages.categoryOf(s) !== null).sort().map((stage) => ({ stage, category: stages.categoryOf(stage)! }));
 
   return {
     status: "ok",
@@ -294,11 +323,22 @@ function buildPipeline(ctx: Omit<RuleContext, "metrics">): PipelineData {
     inferred,
     recordTypes: new Set(deals.flatMap((d) => (d.RecordType === null ? [] : [d.RecordType]))).size,
     unsplitLost: [...new Set(deals.filter((d) => stages.isInferred(d.StageName) && d.category === "lost" && d.closedDay >= ctx.window.from && d.closedDay <= ctx.window.to).map((d) => d.StageName))].sort(),
+    ...(readByName.length > 0 ? { readByName } : {}),
     ...(ctx.calibration.source === "org_settings" ? { fromOrgSettings: true as const } : {}),
   };
 }
 
-/** The reason a split of lost from no decision isn't measured, or null when it can be (DECISIONS.md 600). */
-export function unsplitLostReason(data: { unsplitLost: string[]; fromOrgSettings?: boolean }): Said | null {
-  return data.unsplitLost.length > 0 ? unsplitReason(data.unsplitLost, data.fromOrgSettings === true) : null;
+/**
+ * The reason a split of lost from no decision isn't measured, or null when it
+ * can be (DECISIONS.md 600). Every figure that splits the two asks here, so
+ * where it can be measured only because we read some stages from their names,
+ * this is where the figure says so, and only such figures do (DECISIONS.md 756).
+ */
+export function unsplitLostReason(data: { unsplitLost: string[]; fromOrgSettings?: boolean; readByName?: Array<{ stage: string; category: StageCategory }> }, ctx: Pick<RuleContext, "assume" | "assumeOn">, metrics?: readonly string[]): Said | null {
+  if (data.unsplitLost.length > 0) return unsplitReason(data.unsplitLost, data.fromOrgSettings === true);
+  if (!data.readByName) return null;
+  // A metric builder names the metrics that split the two, so its others don't carry it.
+  if (metrics && ctx.assumeOn) ctx.assumeOn(metrics, namedStagesNote(data.readByName));
+  else ctx.assume?.(namedStagesNote(data.readByName));
+  return null;
 }

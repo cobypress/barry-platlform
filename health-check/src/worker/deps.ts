@@ -47,6 +47,12 @@ export type WorkerDeps = {
   apexSummaries?: boolean;
   /** HC_DOCUMENTS_ON_DEMAND and HC_DOCUMENTS_KEY, read once at start in env.ts (DECISIONS.md 698). Absent: off, and every portal make is refused. */
   portalDocuments?: PortalDocumentsSwitch;
+  /**
+   * HC_STAGE_NAMES=on, exactly, read once at start in env.ts (DECISIONS.md 756): an automatic calibration reads a
+   * closed, not-won stage the customer hasn't answered for as lost or no decision from its name, by a fixed rule,
+   * said as an assumption. Off when absent: no name is read, and one read before is dropped at the run's next fresh start.
+   */
+  stageNames?: boolean;
   /** The worker's switch for automatic runs, read once at start in env.ts (DECISIONS.md 688). Absent: off. */
   automatic?: AutomaticSwitch;
   /**

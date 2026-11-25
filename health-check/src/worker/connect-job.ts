@@ -6,6 +6,7 @@ import { currencyStanding } from "../engine/currency.ts";
 import type { Calibration } from "../schemas/calibration.ts";
 import { readOrgStages, StoreError, type OrgStage } from "../connect/org-stages.ts";
 import { readOrgCurrency, type OrgCurrency } from "../connect/org-currency.ts";
+import { fromCustomer, fromName, parseStageAnswer, type StageAnswer } from "../connect/stage-outcomes.ts";
 import { checkReadOnlyUser, permissionNote, type ReadOnlyCheck } from "../connect/read-only-check.ts";
 import { ApiBudget } from "../salesforce/budget.ts";
 import { NoApiAccessError, SalesforceClient } from "../salesforce/client.ts";
@@ -343,13 +344,15 @@ async function calibrateAndQueue(runId: string, stages: OrgStage[] | null, curre
     return queueAutomatic(runId, deps, at, log);
   }
   const answered = await answeredCurrency(currency, orgId, deps, log);
-  const built = automaticCalibration(stages, { orgId, at: at(), currency, answered });
+  const stageAnswer = await answeredStages(runId, orgId, deps, log);
+  const built = automaticCalibration(stages, { orgId, at: at(), currency, answered, stageAnswer, stageNames: deps.stageNames === true });
   if (!built.ok) {
     const held = await deps.store.holdRun(runId, built.heldReason, at(), built.counts).catch(() => false);
     log(`Automatic run ${runId} wasn't calibrated or queued: ${built.heldReason} (${HOLD_CAUSE_WORDS[built.cause]}; ${built.counts.stages} stages read, ${built.counts.won} won)${held ? "" : ", and the hold couldn't be recorded"}.`);
     return `Held: ${built.heldReason}. ${built.reason}`;
   }
   logCurrency(runId, built.calibration, answered, log);
+  logStageAnswer(runId, built.calibration, stageAnswer, log);
   let saved: Awaited<ReturnType<WorkerDeps["store"]["saveCalibration"]>>;
   try {
     saved = await deps.store.saveCalibration(runId, built.calibration);
@@ -391,6 +394,40 @@ export async function answeredCurrency(currency: OrgCurrency | null, orgId: stri
     log(currency.kind === "settings" ? `The currency the org's customer named couldn't be read, so it wasn't compared with the one the org's settings name: ${reason}.` : `The currency the org's customer named couldn't be read, so its amounts are shown with none: ${reason}.`);
     return null;
   }
+}
+
+/**
+ * The customer's answer to which closed stages are lost and which no decision
+ * (DECISIONS.md 756), read for every automatic calibration built: none, or an
+ * answer that isn't one, is none, and a store that can't answer costs the
+ * answer, never the calibration. No stage is ever named in the log.
+ */
+export async function answeredStages(runId: string, orgId: string, deps: WorkerDeps, log: (line: string) => void): Promise<StageAnswer | null> {
+  let value: unknown;
+  try {
+    value = await deps.store.customerStageAnswer(orgId.slice(0, 15));
+  } catch (err) {
+    const reason = err instanceof StoreError ? err.message : "an unexpected error";
+    log(`Automatic run ${runId}'s customer's answer about its closed stages couldn't be read, so they stay as Salesforce's settings leave them: ${reason}.`);
+    return null;
+  }
+  if (value === null || value === undefined) return null;
+  const answer = parseStageAnswer(value);
+  if (answer === "malformed") {
+    log(`Automatic run ${runId}'s customer's answer about its closed stages isn't in a shape we read, so it was ignored.`);
+    return null;
+  }
+  return answer;
+}
+
+/** How much of the customer's answer a calibration took, and how many stages it read from their names, as numbers only (DECISIONS.md 756). */
+export function logStageAnswer(runId: string, calibration: Calibration, answer: StageAnswer | null, log: (line: string) => void): void {
+  const named = calibration.stages.filter(fromName).length;
+  if (named > 0) log(`Automatic run ${runId}'s calibration reads ${named} closed ${named === 1 ? "stage" : "stages"} as lost or no decision from ${named === 1 ? "its name" : "their names"}, as an assumption the customer can correct.`);
+  if (!answer) return;
+  const applied = calibration.stages.filter(fromCustomer).length;
+  const ignored = answer.ignored + answer.outcomes.size - applied;
+  log(`Automatic run ${runId}'s calibration takes its customer's answer for ${applied} closed ${applied === 1 ? "stage" : "stages"}${ignored > 0 ? `; ${ignored} ${ignored === 1 ? "entry" : "entries"} in the answer named no stage the org has that is closed and not won, or weren't an answer, so ${ignored === 1 ? "it was" : "they were"} ignored` : ""}.`);
 }
 
 /** What the calibration's currency is, for the log: a code only, never a locale or any other value the org chose. */
@@ -521,7 +558,8 @@ export async function recalibrateForRunAgain(runId: string, name: string, runOrg
   if (stored.orgId.slice(0, 15) !== runOrgId.slice(0, 15)) return { kind: "unsaved", detail: `The connection "${name}" is for a different org from this run, so nothing was read.` };
   const read = await readOrgAgain(runId, name, deps, at, log);
   const answered = await answeredCurrency(read.currency, read.orgId, deps, log);
-  const built = automaticCalibration(read.stages, { orgId: read.orgId, at: at(), currency: read.currency, answered });
+  const stageAnswer = await answeredStages(runId, read.orgId, deps, log);
+  const built = automaticCalibration(read.stages, { orgId: read.orgId, at: at(), currency: read.currency, answered, stageAnswer, stageNames: deps.stageNames === true });
   if (!built.ok) {
     const held = await deps.store.holdRun(runId, built.heldReason, at(), built.counts).catch(() => false);
     log(`Automatic run ${runId} was run again with no calibration, and none could be built: ${built.heldReason} (${HOLD_CAUSE_WORDS[built.cause]}; ${built.counts.stages} stages read, ${built.counts.won} won)${held ? "" : ", and the hold couldn't be recorded"}.`);
@@ -531,6 +569,7 @@ export async function recalibrateForRunAgain(runId: string, name: string, runOrg
     return { kind: "held", detail: `Held: ${built.heldReason}. ${built.reason}` };
   }
   logCurrency(runId, built.calibration, answered, log);
+  logStageAnswer(runId, built.calibration, stageAnswer, log);
   let saved: Awaited<ReturnType<WorkerDeps["store"]["saveCalibration"]>>;
   try {
     saved = await deps.store.saveCalibration(runId, built.calibration);

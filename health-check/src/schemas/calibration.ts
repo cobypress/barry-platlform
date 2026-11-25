@@ -13,7 +13,13 @@ export const CalibratedStage = z.object({
   order: z.number().int().nonnegative().optional(),
   // The customer says every won deal passes through this open stage (DECISIONS.md 113).
   required: z.boolean().optional(),
+  // Where a closed stage's lost or no decision came from on an automatic calibration (DECISIONS.md 756): "customer",
+  // they said so in the portal; "name", our rule read it from the stage's name, said as an assumption. Absent: a
+  // person's or Salesforce's word. Never checked here, so a stored row always parses: the engine reads it only on a
+  // lost or no decision stage of a calibration read from the org's settings.
+  from: z.enum(["customer", "name"]).optional(),
 });
+export type CalibratedStage = z.infer<typeof CalibratedStage>;
 
 export const UserKind = z.enum(["sales_rep", "manager", "admin", "shared", "system", "integration", "test", "other"]);
 export type UserKind = z.infer<typeof UserKind>;

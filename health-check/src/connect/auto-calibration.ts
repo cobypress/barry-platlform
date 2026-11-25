@@ -2,6 +2,7 @@ import { Calibration, isCurrencyCode } from "../schemas/calibration.ts";
 import { NO_CURRENCY } from "../engine/currency.ts";
 import type { OrgCurrency } from "./org-currency.ts";
 import type { OrgStage } from "./org-stages.ts";
+import { machineStages, type StageAnswer } from "./stage-outcomes.ts";
 
 // An automatic run's calibration, built at connect from the org's opportunity
 // stages and nothing else (DECISIONS.md 692). No person confirms it, so it
@@ -16,7 +17,10 @@ import type { OrgStage } from "./org-stages.ts";
 //   order says so too, at no more than medium confidence (cohort.ts).
 // - A stage that is closed and not won is left out, so the run reads it as
 //   lost from the flags (598) and nothing that splits lost from no decision is
-//   measured from it (600). "No decision" is never inferred.
+//   measured from it (600). "No decision" is never inferred from the flags.
+//   Only where the customer said in the portal which it is (DECISIONS.md 756)
+//   is it named, as they said, marked as theirs; else, with HC_STAGE_NAMES
+//   on, where its name says so by our fixed rule, marked as read from it.
 // - An inactive open stage, or one with no sort order, is left out too: its
 //   place in the order would be a guess, so a check that needs it stays not
 //   measurable, as for any stage the calibration doesn't name.
@@ -70,8 +74,14 @@ const REASONS: Record<HoldCause, string> = { stages_unread: STAGES_UNREAD, no_wo
  * A currency the org's settings named ("settings", DECISIONS.md 740) is
  * Salesforce's own answer, so it wins over the customer's: `answered` is then
  * not used (the caller logs a difference).
+ *
+ * `stageAnswer` is the customer's answer to which closed stages are lost and
+ * which no decision (DECISIONS.md 756): it names only stages read here as
+ * closed and not won, after the open and won ones, and never holds a run.
+ * `stageNames` (HC_STAGE_NAMES on) reads each such stage the answer leaves out
+ * from its name, by the fixed rule in stage-names.ts, marked "name".
  */
-export function automaticCalibration(stages: OrgStage[] | null, options: { orgId: string; at: string; currency: OrgCurrency | string | null; answered?: string | null }): AutomaticCalibration {
+export function automaticCalibration(stages: OrgStage[] | null, options: { orgId: string; at: string; currency: OrgCurrency | string | null; answered?: string | null; stageAnswer?: StageAnswer | null; stageNames?: boolean }): AutomaticCalibration {
   const won = (stages ?? []).filter((s) => s.isClosed && s.isWon);
   const hold = (cause: HoldCause): AutomaticCalibration => ({ ok: false, heldReason: CALIBRATION_UNREADABLE, cause, reason: REASONS[cause], counts: { stages: stages?.length ?? 0, won: won.length } });
   if (!stages) return hold("stages_unread");
@@ -90,7 +100,11 @@ export function automaticCalibration(stages: OrgStage[] | null, options: { orgId
     confirmedBy: ORG_SETTINGS_CALIBRATOR,
     confirmedAt: options.at,
     source: "org_settings",
-    stages: [...open.map((s, i) => ({ name: s.apiName, category: "open", order: i + 1 })), ...won.map((s) => ({ name: s.apiName, category: "won" }))],
+    stages: [
+      ...open.map((s, i) => ({ name: s.apiName, category: "open", order: i + 1 })),
+      ...won.map((s) => ({ name: s.apiName, category: "won" })),
+      ...machineStages(stages, new Set([...open, ...won].map((s) => s.apiName)), options.stageAnswer ?? null, options.stageNames === true).stages,
+    ],
     scope: { recordTypes: "all", businessLines: [] },
     users: [],
     fields: {},

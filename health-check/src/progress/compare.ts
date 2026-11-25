@@ -1,4 +1,5 @@
-import type { Finding, NotMeasurableKind, Run, Score } from "../schemas/index.ts";
+import type { Finding, Metric, NotMeasurableKind, Run, Score } from "../schemas/index.ts";
+import { findingId } from "../engine/evaluate.ts";
 import type { OverallScore } from "../domains/scoring.ts";
 import type { ValueModel } from "../value/model.ts";
 import { apiLimitsExtractor } from "../extract/integrations.ts";
@@ -37,8 +38,9 @@ export type Progress = {
   /**
    * Rules with an issue now that the earlier run never checked (no issue or pass
    * there), listed apart so they don't read as the org getting worse
-   * (DECISIONS.md 673). Only PMD's groups take this path; every other rule
-   * compares as before. Optional, so a comparison stored before it reads as before.
+   * (DECISIONS.md 673). Only PMD's groups take this path, and a rule the earlier
+   * run couldn't measure for want of which closed stages are lost (756); every
+   * other rule compares as before. Optional, so a comparison stored before it reads as before.
    */
   newlyMeasured?: RuleChange[];
   /**
@@ -88,6 +90,16 @@ export type ProgressSide = {
    * passing only because we loosened the rule since that issue.
    */
   carried?: Readonly<Record<string, number>>;
+  /** The baseline's metrics, to know which an issue now rests on that it couldn't measure then (DECISIONS.md 756). Optional: absent, as before. */
+  metrics?: Metric[];
+  /** The findings as the rules read them, before a rep's token is taken off for the team (narrative/select.ts): only to find an issue's own segment by its id (756). */
+  asRead?: Finding[];
+  /**
+   * The current run's only: whether code checks its digest (an automatic run, or a gated pulse). Only then is a check
+   * unmeasured earlier for want of the closed stages' meaning set apart as checked for the first time (756); a
+   * consultant-led re-check compares as before 756, which is the owner's open decision.
+   */
+  checkedByCode?: boolean;
 };
 
 const byRule = (findings: Finding[]): Map<string, Finding[]> => {
@@ -106,6 +118,27 @@ function kindNow(findings: Finding[]): { notMeasurableKind?: NotMeasurableKind }
 
 /** The rules a re-check reads as newly measured when the earlier run didn't check them: PMD's groups (DECISIONS.md 673). */
 const MEASURED_LATER = UNSCORED_RULES;
+
+/**
+ * A rule the earlier run couldn't measure only because nobody had said which
+ * closed stages are lost and which no decision (DECISIONS.md 756): once the
+ * customer says, or we read it from the stages' names, what it finds is found
+ * with nothing earlier to compare, as the portal says, never new.
+ */
+const UNSPLIT_THEN = /^Salesforce's setting can't tell lost from no decision for:/;
+const unsplitThen = (then: Finding[]): boolean =>
+  then.length > 0 && then.every((f) => f.status === "not_measurable") && then.some((f) => UNSPLIT_THEN.test(f.notMeasurableReason ?? ""));
+
+/**
+ * The metrics the earlier run couldn't measure for that same reason (DECISIONS.md 756), and whether an issue now
+ * rests on one: an issue a rule keys by a metric's id and its segment ("<metric>:<dimension>:<segment>", as
+ * pipe.segment-divergence does) whose id is that key's. Such an issue is found where nothing could be read before:
+ * checked for the first time, never new, though the rule passed then on its other figures.
+ */
+const unsplitMetrics = (metrics: Metric[] | undefined): string[] =>
+  (metrics ?? []).filter((m) => m.status === "not_measurable" && UNSPLIT_THEN.test(m.reason)).map((m) => m.id);
+const restsOnUnmeasured = (f: Finding, metricIds: string[], asRead: ReadonlyMap<string, Finding>): boolean =>
+  metricIds.some((m) => (asRead.get(f.id) ?? f).subjects.some((s) => findingId(f.ruleId, `${m}:${s.type}:${s.label}`) === f.id));
 
 /**
  * Whether a pass for one of PMD's groups can be called fixed (DECISIONS.md 673,
@@ -199,13 +232,20 @@ export function compareWithBaseline(baseline: ProgressSide, current: ProgressSid
     else if (nowFindings.some((f) => f.status === "passed") && (!MEASURED_LATER.has(ruleId) || fixedAsRead(thenIssues, nowFindings))) fixed.push(change(ruleId, thenIssues));
     else unknown.push({ ...change(ruleId, thenIssues), ...kindNow(nowFindings) });
   }
+  const unmeasuredThen = current.checkedByCode === true ? unsplitMetrics(baseline.metrics) : [];
+  const asRead = new Map((current.asRead ?? []).map((f) => [f.id, f]));
   for (const [ruleId, nowFindings] of now) {
-    const nowIssues = nowFindings.filter((f) => f.status === "issue");
-    if (!nowIssues.length) continue;
+    const raised = nowFindings.filter((f) => f.status === "issue");
+    if (!raised.length) continue;
     const then = before.get(ruleId) ?? [];
     if (then.some((f) => f.status === "issue") || Object.hasOwn(carriedThen, ruleId)) continue;
+    // Issues resting on a figure the earlier run couldn't measure for want of the closed stages' meaning (756) stand apart; the rest go on as before.
+    const unlocked = unmeasuredThen.length ? raised.filter((f) => restsOnUnmeasured(f, unmeasuredThen, asRead)) : [];
+    if (unlocked.length) newlyMeasured.push(change(ruleId, unlocked));
+    const nowIssues = raised.filter((f) => !unlocked.includes(f));
+    if (!nowIssues.length) continue;
     // New only if the earlier run checked the rule, as the portal's alerts decide (DECISIONS.md 661, 673).
-    if (MEASURED_LATER.has(ruleId) && !then.some((f) => f.status === "passed")) newlyMeasured.push(change(ruleId, nowIssues));
+    if ((MEASURED_LATER.has(ruleId) && !then.some((f) => f.status === "passed")) || (current.checkedByCode === true && unsplitThen(then))) newlyMeasured.push(change(ruleId, nowIssues));
     // Passed then, raised now only because we tightened the rule since: open, never new (DECISIONS.md 754).
     else if (foundByStricterCheck(then, nowIssues, ruleId, current.ownCalls)) stricter.push(change(ruleId, nowIssues));
     else added.push(change(ruleId, nowIssues));
