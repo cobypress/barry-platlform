@@ -100,6 +100,9 @@ describe("the name rule's word list", () => {
       assert.equal(outcomeFromName(w, ""), null, w);
       assert.equal(outcomeFromName(`Lost ${w}`, ""), null, `lost ${w}`);
       assert.equal(outcomeFromName(`${w} - On Hold`, ""), null, `${w} on hold`);
+      // A stop word in the label holds the API name's reading back too ("Duplicate" over "Closed_Lost").
+      assert.equal(outcomeFromName(w, "Closed_Lost"), null, `${w} over Closed_Lost`);
+      assert.equal(outcomeFromName("Closed Lost", `${w}_stage`), null, `Closed Lost over ${w}_stage`);
     }
   });
 
