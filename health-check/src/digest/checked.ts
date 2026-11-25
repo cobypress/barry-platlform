@@ -67,6 +67,9 @@ export const STRUCTURAL_PATHS: ReadonlySet<string> = new Set([
   "rulesRun", "rulesKnown",
   // A rule's version and versions (DECISIONS.md 732): numbers, never text.
   "findings[].ruleVersion", "findings[].issueUnder", "findings[].carriedFrom",
+  // AI readiness's codes and ids (DECISIONS.md 742): a figure's value is a number, never text.
+  "readiness.overall", "readiness.pillars[].key", "readiness.pillars[].verdict", "readiness.pillars[].findingIds", "readiness.pillars[].metricIds",
+  "readiness.pillars[].figures[].metricId", "readiness.pillars[].figures[].stat", "readiness.fixIds",
 ]);
 
 /** Every string the digest serves as text: everything outside its structural paths and its marks. */
@@ -161,6 +164,11 @@ export const TEXT_SLOTS: Readonly<Record<string, Slot | "fixed">> = {
   "plan.hoursTotal.note": slotOf((d) => d.plan.hoursTotal, "note"),
   "overall.reason": slotOf((d) => (d.overall.status === "not_measurable" ? d.overall : undefined), "reason"),
   "overall.caveat": slotOf((d) => (d.overall.status === "measured" ? d.overall : undefined), "caveat"),
+  // AI readiness (DECISIONS.md 742).
+  "readiness.opening": slotOf((d) => d.readiness, "opening"),
+  "readiness.pillars[].label": slotOf((d, at) => d.readiness?.pillars[at[0]!], "label"),
+  "readiness.pillars[].question": slotOf((d, at) => d.readiness?.pillars[at[0]!], "question"),
+  "readiness.pillars[].reason": slotOf((d, at) => d.readiness?.pillars[at[0]!], "reason"),
 };
 
 export type DigestText = { path: string; at: number[]; text: string };
@@ -182,7 +190,8 @@ export function marksOf(d: RunDigest, t: DigestText): SentenceOrgWords | null {
   return slot?.get(d, t.at) ?? null;
 }
 
-const METRIC_TEXT = /^metrics\[\]\./;
+/** A metric's texts, and readiness's (DECISIONS.md 742): withheld whole when they can't be marked, never held. */
+const METRIC_TEXT = /^(metrics\[\]|readiness)\./;
 
 /**
  * Every text that lost its marks to a mask (682: they no longer fit its hash)
@@ -210,8 +219,9 @@ function remarked(before: RunDigest, after: RunDigest, raws: string[]): RunDiges
 
 /**
  * Rule 10's marks, enforced (DECISIONS.md 693). A metric's text with no marks
- * is withheld whole, as "(detail withheld)", and counted with the masks; any
- * other text with none is counted as unmarked, and the digest is held.
+ * is withheld whole, as "(detail withheld)", and counted with the masks, as is
+ * one of AI readiness's (742); any other text with none is counted as unmarked,
+ * and the digest is held.
  */
 export function enforceMarks(digest: RunDigest): { digest: RunDigest; withheld: number; dropped: number; unmarked: number } {
   const out = structuredClone(digest);

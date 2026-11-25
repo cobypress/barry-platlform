@@ -388,6 +388,49 @@ export const DigestOverall = z.discriminatedUnion("status", [
   z.object({ status: z.literal("not_measurable"), reason: Text, orgWords: z.object({ reason: SentenceOrgWords.optional() }).optional() }),
 ]);
 
+/**
+ * AI readiness (DECISIONS.md 239 to 242, 742): the six pillars the full report's
+ * slide shows, each decided by code, with the overall verdict where it is clear
+ * and the fixes by finding id. The verdict is a code: the words for it, "Ready",
+ * "Nearly", "Not yet" and "Not measurable", are the reader's to print. A
+ * pillar's reason can quote a finding's title, the org's words marked in
+ * `orgWords.reason` where the title's own marks are; its `figures` are the
+ * numbers the engine put into it, each by the metric and stat it is (a quoted
+ * title's numbers are its finding's). Every finding id is one in `findings`.
+ */
+export const DigestReadinessPillar = z
+  .object({
+    key: z.enum(["data", "knowledge", "platform", "actions", "access", "shape"]),
+    label: Text,
+    question: Text,
+    verdict: z.enum(["ready", "nearly", "not_yet", "not_measurable"]),
+    reason: Text,
+    findingIds: Ids,
+    metricIds: Ids,
+    figures: z.array(z.object({ value: Amount, metricId: Id, stat: Id })).optional(),
+    orgWords: z.object({ label: SentenceOrgWords.optional(), question: SentenceOrgWords.optional(), reason: SentenceOrgWords.optional() }).optional(),
+  })
+  .superRefine((p, ctx) => {
+    for (const key of ["label", "question", "reason"] as const) if (!fits(p[key], p.orgWords?.[key])) ctx.addIssue({ code: "custom", path: ["orgWords", key], message: "Spans must fit their text" });
+  });
+export type DigestReadinessPillar = z.infer<typeof DigestReadinessPillar>;
+
+export const DigestReadiness = z
+  .object({
+    /** Said only when the evidence settles it (DECISIONS.md 241): otherwise null. */
+    overall: z.enum(["ready", "not_yet"]).nullable(),
+    /** The verdict in a sentence, or the pillars' spread, all ours. No figures. */
+    opening: Text,
+    pillars: z.array(DigestReadinessPillar),
+    /** What to fix before an agent goes live, in order: at most five finding ids. */
+    fixIds: Ids.max(5),
+    orgWords: z.object({ opening: SentenceOrgWords.optional() }).optional(),
+  })
+  .superRefine((r, ctx) => {
+    if (!fits(r.opening, r.orgWords?.opening)) ctx.addIssue({ code: "custom", path: ["orgWords", "opening"], message: "Spans must fit the opening" });
+  });
+export type DigestReadiness = z.infer<typeof DigestReadiness>;
+
 export const RunDigest = z.object({
   version: z.literal(DIGEST_VERSION),
   runId: Id,
@@ -430,6 +473,8 @@ export const RunDigest = z.object({
    * checked that is not here has been retired. Absent with rulesRun.
    */
   rulesKnown: Ids.optional(),
+  /** AI readiness (DECISIONS.md 742). Absent on a digest made before it. */
+  readiness: DigestReadiness.optional(),
 });
 export type RunDigest = z.infer<typeof RunDigest>;
 
@@ -438,9 +483,10 @@ export const DIGEST_KEYS: ReadonlySet<string> = new Set([
   "version", "runId", "product", "reviewed", "asOf", "madeAt", "baselineRunId", "overall", "areas", "findings", "metrics", "value", "plan", "withheldNames",
   "status", "score", "grade", "areaDomains", "reason", "domain", "label", "findingIds", "notMeasurableKind", "id", "ruleId", "severity", "confidence",
   "title", "summary", "recommendation", "recommendationType", "kind", "amount", "unit", "period", "assumptions", "effortSize", "notMeasurableReason",
-  "definition", "n", "dateRange", "from", "to", "exclusions", "currency", "total", "byKind", "revenue_recoverable", "conversion_uplift", "licence_waste",
+  "definition", "n", "average", "dateRange", "from", "to", "exclusions", "currency", "total", "byKind", "revenue_recoverable", "conversion_uplift", "licence_waste",
   "time_cost", "exposure", "groups", "lines", "leftOut", "realisation", "counted", "lineIds", "low", "expected", "high", "group", "annual", "added",
   "phases", "later", "quickWins", "quickFixes", "difficulty", "alsoFor", "key", "effortHours", "basis", "partial", "timeBand", "fixComplexity", "hoursTotal", "partialFindingIds", "withoutHoursFindingIds", "notTotalledFindingIds", "note",
   "checkerRead", "readClasses", "readTriggers", "alreadyListed", "orgWords", "orgWordsMarked", "start", "end", "valueReason", "valueAssumptions", "hoursBasis", "fixPrompt", "textSha256",
   "valueUnit", "valuePeriod", "editionNote", "caveat", "rulesRun", "rulesKnown", "ruleVersion", "issueUnder", "carriedFrom",
+  "readiness", "opening", "pillars", "question", "verdict", "metricIds", "figures", "metricId", "stat", "fixIds",
 ]);
