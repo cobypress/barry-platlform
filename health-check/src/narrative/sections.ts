@@ -1,4 +1,4 @@
-import { compareWithBaseline, limitsReadAt, progressDays, progressFigures, progressTitles, storageSentences, worthFigures, type Progress } from "../progress/compare.ts";
+import { compareWithBaseline, limitsReadAt, progressDays, progressFigures, progressTitles, storageSentences, stricterHeading, worthFigures, type Progress } from "../progress/compare.ts";
 import { factsText, type FactsSummary } from "../facts/summary.ts";
 import { currencyStanding } from "../engine/currency.ts";
 import { addedByFinding, buildValueModel, valueCurrency, MONEY_FACTS, worthOf, HEADLINE_KINDS, KIND_LABELS, TEAM_TIME_GROUP, UK_HOURLY_BENCHMARK, WORKING_WEEKS, type TeamTime, type ValueModel } from "../value/model.ts";
@@ -358,6 +358,8 @@ function progressText(p: Progress, currency: string): string {
     list("Can't tell yet", p.unknown, ", because these couldn't be measured this time"),
     list("Checked for the first time", p.newlyMeasured ?? [], ", so not counted as new"),
     list("Passing since we changed the check", p.ruleChanged ?? [], ", so not counted as fixed"),
+    // Open, not new (DECISIONS.md 754): the heading is ours, made by said; the titles are the run's own.
+    p.stricter?.length ? [stricterHeading(p.stricter.length), ...p.stricter.map((c) => c.title)].join("\n") : null,
     storageSentences(p).join("\n"),
   );
 }

@@ -11,7 +11,7 @@ import { writeFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { ALL_MODULES } from "../src/domains/index.ts";
 import type { Rule } from "../src/engine/rule.ts";
-import { loosenedFrom, loosenedOn } from "../src/engine/loosened.ts";
+import { loosenedFrom, loosenedOn, tightenedFrom, tightenedOn } from "../src/engine/loosened.ts";
 
 export const RULE_WHERE_FILE = fileURLToPath(new URL("../fixtures/rule-where.json", import.meta.url));
 /** How the file is made again, from the health-check folder. */
@@ -20,9 +20,11 @@ export const REMAKE = "npm run rule-where";
 /**
  * `loosenedFrom` (DECISIONS.md 732), only for a rule we have loosened: by version, the
  * earlier versions whose issues may no longer be issues under it, and `loosenedOn` the day
- * each such version was first committed (src/engine/loosened.ts).
+ * each such version was first committed (src/engine/loosened.ts). `tightenedFrom` and
+ * `tightenedOn` (DECISIONS.md 754) the same for a rule we have tightened: the earlier
+ * versions under which some of its issues would have passed. A version can be in both.
  */
-export type RuleWhere = Record<string, { version: number; where?: string[]; loosenedFrom?: Record<string, number[]>; loosenedOn?: Record<string, string> }>;
+export type RuleWhere = Record<string, { version: number; where?: string[]; loosenedFrom?: Record<string, number[]>; loosenedOn?: Record<string, string>; tightenedFrom?: Record<string, number[]>; tightenedOn?: Record<string, string> }>;
 
 /** Each rule once, by id in code-point order, so the file is the same bytes wherever it's made. */
 export function ruleWhere(rules: readonly Rule[] = ALL_MODULES.flatMap((m) => m.rules)): RuleWhere {
@@ -30,7 +32,13 @@ export function ruleWhere(rules: readonly Rule[] = ALL_MODULES.flatMap((m) => m.
   for (const rule of [...rules].sort((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0))) {
     if (Object.hasOwn(out, rule.id)) throw new Error(`Two rules have the id ${rule.id}`);
     const loosened = loosenedFrom(rule.id);
-    out[rule.id] = { version: rule.version, ...(rule.where ? { where: [...rule.where] } : {}), ...(loosened ? { loosenedFrom: loosened, loosenedOn: loosenedOn(rule.id)! } : {}) };
+    const tightened = tightenedFrom(rule.id);
+    out[rule.id] = {
+      version: rule.version,
+      ...(rule.where ? { where: [...rule.where] } : {}),
+      ...(loosened ? { loosenedFrom: loosened, loosenedOn: loosenedOn(rule.id)! } : {}),
+      ...(tightened ? { tightenedFrom: tightened, tightenedOn: tightenedOn(rule.id)! } : {}),
+    };
   }
   return out;
 }

@@ -1121,6 +1121,9 @@ const SIGNED_OFF: string[] = [
   'src/money/seat-cost.ts: note',
   'src/money/seat-cost.ts: own',
   'src/money/seat-cost.ts: source',
+  // Issues found by a stricter check (DECISIONS.md 754): the count of rules in the deck's note and the raw notes' heading, typed number.
+  "src/progress/compare.ts: n",
+  "src/progress/compare.ts: n",
   // PMD's six groups in technical health (DECISIONS.md 673).
   // Numbers: counts the rule works out, and a line number.
   "src/domains/technical-health/lint.ts: checked",
