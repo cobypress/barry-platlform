@@ -97,7 +97,7 @@ const winBacks: Rule = {
     const closed = data.deals.filter((d) => d.category === "lost" || d.category === "no_decision");
     const noAccount = closed.filter((d) => !d.AccountId).length;
     const candidates = closed.filter((d) => d.AccountId && d.closedAt >= oldest && d.closedAt < newest && !active.has(d.AccountId));
-    const exclusions = [...data.exclusions, "Accounts with an open deal, or a win since the deal was lost", ...(noAccount ? [`${plural(noAccount, "deal")} with no account`] : [])];
+    const exclusions = [...data.exclusions, "Accounts with an open deal, or a win since the deal was lost", ...(noAccount ? [said`${plural(noAccount, "deal")} with no account`] : [])];
     const evidence: Evidence[] = [{ ...data.evidence[0]!, count: candidates.length, dateRange: { from: oldest.toISOString().slice(0, 10), to: newest.toISOString().slice(0, 10) }, exclusions, note: `Lost or no decision between ${WIN_BACK_MIN_MONTHS} and ${WIN_BACK_MAX_MONTHS} months ago` }];
     const segmentsChecked = [...dealSegments(ctx, closed), { dimension: "outcome", segments: distinct(closed.map((d) => d.category ?? "Unknown")) }];
     if (closed.length === 0) return { outcome: "pass", summary: said`No deals have been lost in the window.`, evidence, segmentExemptReason: "There are no lost deals to segment." };

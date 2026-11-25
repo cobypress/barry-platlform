@@ -76,6 +76,19 @@ const LITERAL_PIECES: string[] = [
   'src/domains/utilisation/investment.ts: describe :: "The seats" | "The unused seats" | "At list price, the seats"',
   'src/domains/value.ts: key :: UpkeepKey',
   'src/domains/value.ts: noun :: "unused report" | "unused custom field"',
+  // Decision 743: the nouns, kinds and read names put into the sentences that reach the digest on branches the synthetic org misses.
+  'src/domains/activity/index.ts: category :: "lost" | "won"',
+  'src/domains/configuration/documented.ts: what :: "Connected apps" | "Connected apps, named credentials and remote site settings" | "Named credentials" | "Remote site settings"',
+  'src/domains/configuration/index.ts: object :: "Account" | "Contact" | "Lead" | "Opportunity"',
+  'src/domains/current-pipeline/index.ts: options.subject :: "account" | "rep"',
+  'src/domains/historic-pipeline/deep-dive.ts: noun :: "closed deals with stage history" | "lost and no decision deals with stage history" | "won deals with stage history" | "won deals"',
+  'src/domains/historic-pipeline/deep-dive.ts: noun :: "lead source" | "type"',
+  'src/domains/historic-pipeline/metrics.ts: kind :: "stages"',
+  'src/domains/historic-pipeline/metrics.ts: outcome :: "lost" | "won"',
+  'src/domains/historic-pipeline/process.ts: noun :: "lost and no decision deals" | "won deals"',
+  'src/domains/security/index.ts: what :: "Permission set assignments" | "Permission set groups" | "Permission sets" | "Profiles" | "Users"',
+  'src/domains/service/operations.ts: what :: "Case history" | "Case milestones" | "Closed cases" | "Open cases"',
+  'src/domains/service/setup.ts: isAre(activeSla.length) :: "are" | "is"',
 ];
 
 const ROOT = join(import.meta.dirname, "../../..");
@@ -109,7 +122,7 @@ function literalAsWritten(e: TS.Expression): boolean {
   if (ts.isParenthesizedExpression(e)) return literalAsWritten(e.expression);
   if (ts.isStringLiteral(e) || ts.isNoSubstitutionTemplateLiteral(e)) return true;
   if (ts.isTaggedTemplateExpression(e) && e.tag.getText() === "said") return true;
-  if (ts.isCallExpression(e) && ["org", "eng", "joinSaid"].includes(e.expression.getText())) return true;
+  if (ts.isCallExpression(e) && ["org", "eng", "joinSaid", "passedOn"].includes(e.expression.getText())) return true;
   return ts.isConditionalExpression(e) && literalAsWritten(e.whenTrue) && literalAsWritten(e.whenFalse);
 }
 
@@ -120,7 +133,7 @@ function allowed(t: TS.Type): boolean {
   if (t.flags & ts.TypeFlags.NumberLike) return true;
   if (t.isStringLiteral()) return true;
   const name = t.aliasSymbol?.name ?? t.getSymbol()?.name;
-  return name === "Said" || name === "OrgWords" || (t.isIntersection() && t.types.some((p) => p.getProperties().some((s) => s.name.startsWith("__@SAID"))));
+  return name === "Said" || name === "OrgWords" || name === "PassedOn" || (t.isIntersection() && t.types.some((p) => p.getProperties().some((s) => s.name.startsWith("__@SAID"))));
 }
 
 const all = pieces();

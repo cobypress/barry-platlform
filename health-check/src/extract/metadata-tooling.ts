@@ -1,3 +1,4 @@
+import { flowWithoutDefinition, ruleWithoutDefinition, tooManyFlows, tooManyRules } from "../salesforce/refusal-words.ts";
 import { isUnavailable } from "../salesforce/client.ts";
 import { redactSecrets } from "../privacy/secrets.ts";
 import { METADATA_READING, validationRuleDetail } from "../handbook/detail.ts";
@@ -136,10 +137,10 @@ export async function readBundleThroughTooling(ctx: ExtractContext): Promise<Met
   // version, or its latest when none is active, so this does the same.
   const definitions = (await tooling(ctx, "SELECT Id, DeveloperName, ActiveVersionId, LatestVersionId, NamespacePrefix FROM FlowDefinition WHERE NamespacePrefix = null")).filter(own);
   const versions = definitions.map((d) => ({ name: String(d.DeveloperName), id: (d.ActiveVersionId ?? d.LatestVersionId) as string | null })).filter((v) => v.id);
-  if (versions.length > MAX_ITEM_READS) throw new ToolingGapError(`There are ${versions.length} flows, more than the ${MAX_ITEM_READS} we read one at a time.`);
+  if (versions.length > MAX_ITEM_READS) throw new ToolingGapError(tooManyFlows(versions.length, MAX_ITEM_READS));
   for (const version of versions.sort((a, b) => a.name.localeCompare(b.name))) {
     const { metadata } = await reader.read("Flow", version.id!);
-    if (!metadata) throw new ToolingGapError(`Flow ${version.name} came back without its definition.`);
+    if (!metadata) throw new ToolingGapError(flowWithoutDefinition(version.name));
     const summary = summariseFlowMetadata(version.name, metadata);
     bundle.flows.push(summary);
     bundle.handbook!.flows.push(flowDetailMetadata(version.name, metadata));
@@ -151,7 +152,7 @@ export async function readBundleThroughTooling(ctx: ExtractContext): Promise<Met
   const rules = await optional(bundle, "Workflow Rules", async () => (await tooling(ctx, "SELECT Id, Name, TableEnumOrId, NamespacePrefix FROM WorkflowRule")).filter(own), "workflowRules");
   if (rules && rules.length + versions.length > MAX_ITEM_READS) {
     bundle.unsearched!.push("Workflow Rules");
-    markUnread(bundle, "workflowRules", `There are ${rules.length} Workflow Rules and ${versions.length} flows, more than the ${MAX_ITEM_READS} we read one at a time.`);
+    markUnread(bundle, "workflowRules", tooManyRules(rules.length, versions.length, MAX_ITEM_READS));
   } else if (rules) {
     const byObject = new Map<string, WorkflowSummary>();
     for (const rule of [...rules].sort((a, b) => String(a.Name).localeCompare(String(b.Name)))) {
@@ -159,7 +160,7 @@ export async function readBundleThroughTooling(ctx: ExtractContext): Promise<Met
       const { metadata } = await reader.read("WorkflowRule", rule.Id);
       if (!metadata) {
         bundle.unsearched!.push("Workflow Rules");
-        markUnread(bundle, "workflowRules", `Workflow Rule ${String(rule.Name)} came back without its definition.`);
+        markUnread(bundle, "workflowRules", ruleWithoutDefinition(String(rule.Name)));
         continue;
       }
       const summary = byObject.get(object) ?? { object, path: `workflows/${object}.workflow`, rules: [] };

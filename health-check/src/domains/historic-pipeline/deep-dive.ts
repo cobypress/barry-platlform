@@ -1,5 +1,5 @@
 import { pct, type RuleContext } from "../../engine/rule.ts";
-import { said } from "../../engine/org-words.ts";
+import { said, type Said } from "../../engine/org-words.ts";
 import { priorWinsExtractor, type PriorWinRow } from "../../extract/prior-wins.ts";
 import type { Sourced } from "../../extract/types.ts";
 import type { DateRange, Metric, MetricSegment, SeriesPoint } from "../../schemas/index.ts";
@@ -22,7 +22,7 @@ const QUARTERS = 8;
 const TOP_ACCOUNTS = [1, 3, 5, 10];
 const MULTI_CURRENCY = "The org is multi-currency, and amounts can't be added until historic rates are supplied.";
 
-const thinReason = (n: number, noun: string, minSample: number): string => `${n} ${noun} is below the calibrated minimum of ${minSample}.`;
+const thinReason = (n: number, noun: "closed deals with stage history" | "won deals" | "lost and no decision deals with stage history" | "won deals with stage history", minSample: number): Said => said`${n} ${noun} is below the calibrated minimum of ${minSample}.`;
 const amountOf = (d: Deal): number => d.Amount ?? 0;
 const total = (deals: Deal[]): number => Math.round(deals.reduce((sum, d) => sum + amountOf(d), 0));
 const tooManyBlank = (deals: Deal[]): boolean => pct(deals.filter((d) => d.Amount === null).length, deals.length) > MAX_MISSING_AMOUNT_PCT;
@@ -169,7 +169,7 @@ function winSources(ctx: Ctx, data: Ready): Metric[] {
   const won = wonIn(ctx, data);
   if (won.length < minSample) return every.map((d) => notMeasurable(d, thinReason(won.length, "won deals", minSample)));
   const blank = won.filter((d) => d.Amount === null).length;
-  if (tooManyBlank(won)) return every.map((d) => notMeasurable(d, `${blank} of ${won.length} won deals have no amount, so shares of won value would mislead.`));
+  if (tooManyBlank(won)) return every.map((d) => notMeasurable(d, said`${blank} of ${won.length} won deals have no amount, so shares of won value would mislead.`));
   const blankNote = blank > 0 ? [said`${blank} won deals with no amount count as zero`] : [];
   const withAccount = won.filter((d) => d.AccountId);
   const noAccount = won.length - withAccount.length;
@@ -208,7 +208,7 @@ function winSources(ctx: Ctx, data: Ready): Metric[] {
   for (const [definition, field, noun] of [[definitions.type, "Type", "type"], [definitions.source, "LeadSource", "lead source"]] as const) {
     const filled = won.filter((d) => d[field]);
     if (filled.length === 0) {
-      metrics.push(notMeasurable(definition, `No won deal has a ${noun}, so wins can't be split by it.`));
+      metrics.push(notMeasurable(definition, said`No won deal has a ${noun}, so wins can't be split by it.`));
       continue;
     }
     const keyOf = (d: Deal): string => d[field] ?? `No ${noun}`;
@@ -261,10 +261,10 @@ function lostFrom(ctx: Ctx, data: Ready): Metric[] {
   ];
   const metrics = [measured({ ...countDefinition, exclusions }, { value: lost.length, n: lost.length, dateRange: ctx.window, segments: countSegments })];
   if (data.multiCurrency) metrics.push(notMeasurable({ ...valueDefinition, exclusions }, MULTI_CURRENCY));
-  else if (tooManyBlank(lost)) metrics.push(notMeasurable({ ...valueDefinition, exclusions }, `${lost.filter((d) => d.Amount === null).length} of ${lost.length} lost deals have no amount, so the value lost would mislead.`));
+  else if (tooManyBlank(lost)) metrics.push(notMeasurable({ ...valueDefinition, exclusions }, said`${lost.filter((d) => d.Amount === null).length} of ${lost.length} lost deals have no amount, so the value lost would mislead.`));
   else {
     const blank = lost.filter((d) => d.Amount === null).length;
-    metrics.push(measured({ ...valueDefinition, exclusions, assumptions: [...valueDefinition.assumptions, ...(blank ? [`${blank} lost deals with no amount count as zero`] : [])] }, { value: total(lost), n: lost.length, dateRange: ctx.window, segments: byStage.map(([key, group]) => ({ dimension: "stage left", key, n: group.length, value: total(group), notMeasurableReason: null })) }));
+    metrics.push(measured({ ...valueDefinition, exclusions, assumptions: [...valueDefinition.assumptions, ...(blank ? [said`${blank} lost deals with no amount count as zero`] : [])] }, { value: total(lost), n: lost.length, dateRange: ctx.window, segments: byStage.map(([key, group]) => ({ dimension: "stage left", key, n: group.length, value: total(group), notMeasurableReason: null })) }));
   }
   return metrics;
 }
@@ -306,7 +306,7 @@ function stageVelocity(ctx: Ctx, data: Ready): Metric[] {
     const definition = base(ctx, data, { id, label, unit: "days", definition: text });
     if (data.unmapped.finalStages.length > 0) return notMeasurable(definition, unmappedReason("stages", data.unmapped.finalStages));
     const deals = closedFromOpen(ctx, data).filter((d) => (outcome === "won" ? d.category === "won" : d.category === "lost" || d.category === "no_decision"));
-    if (deals.length < minSample) return notMeasurable(definition, thinReason(deals.length, `${outcome === "won" ? "won" : "lost and no decision"} deals with stage history`, minSample));
+    if (deals.length < minSample) return notMeasurable(definition, thinReason(deals.length, outcome === "won" ? "won deals with stage history" : "lost and no decision deals with stage history", minSample));
     const timings = new Map(deals.map((d) => [d.Id, daysByStage(d, data)]));
     const totalDays = (d: Deal): number => [...timings.get(d.Id)!.values()].reduce((a, b) => a + b, 0);
     const segments: MetricSegment[] = data.stages.openStages.map((stage) => {

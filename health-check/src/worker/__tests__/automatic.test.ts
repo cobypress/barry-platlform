@@ -101,7 +101,6 @@ describe("the worker's switch", () => {
         return this;
       }
       async close() {}
-      async closeHeavyFirst() {}
     }
     class FakeQueue {
       async add() {}

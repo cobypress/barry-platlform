@@ -1,3 +1,4 @@
+import { withRunOrgWords } from "./org-words.ts";
 import { appendFileSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { createHash, randomUUID } from "node:crypto";
 import { dirname, join, resolve } from "node:path";
@@ -203,7 +204,12 @@ function loadPseudonyms(dir: string): Pseudonymiser {
 }
 
 /** Extract, then analyse. Stops cleanly at the API budget. Call again with `resume` to carry on. */
-export async function runHealthCheck(options: RunOptions): Promise<RunResult> {
+/** A health check, with a store of org-worded sentences of its own, so no other check in the process can reach it (DECISIONS.md 743). */
+export function runHealthCheck(options: RunOptions): Promise<RunResult> {
+  return withRunOrgWords(() => runHealthCheckWithin(options));
+}
+
+async function runHealthCheckWithin(options: RunOptions): Promise<RunResult> {
   const { calibration, provider } = options;
   const log = options.log ?? (() => {});
   const now = options.now ?? new Date();

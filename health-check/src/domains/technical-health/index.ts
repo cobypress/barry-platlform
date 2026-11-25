@@ -10,7 +10,7 @@ import { labelsOf } from "../labels.ts";
 import { labelsExtractor } from "../../extract/labels.ts";
 import { isObjectId, objectResolver } from "../object-names.ts";
 import { WHERE } from "../where.ts";
-import { joinSaid, org, said, type Said } from "../../engine/org-words.ts";
+import { joinSaid, org, passedOn, said, type Said } from "../../engine/org-words.ts";
 import { andList, grouped } from "../../engine/said-forms.ts";
 import { judgedTests, liveCode, loopsOverLimits } from "./code.ts";
 import { LINT_RULES } from "./lint.ts";
@@ -121,7 +121,7 @@ const apexCoverage: Rule = {
       return { outcome: "not_measurable", reason: said`The org stores 0% coverage overall, which means the stored figures were cleared or only some tests have run since, rather than untested code. We don't run tests, because that would change the org.`, evidence: [ctx.ev(orgCoverage.source, { count: 1 })] };
     }
     if (classCoverage.status !== "ok") {
-      return { outcome: "not_measurable", reason: `The org-wide figure is ${percent}%, but coverage by class couldn't be read, so we can't say the whole is healthy: ${classCoverage.reason}`, evidence: [ctx.ev(classCoverage.source, { count: null })] };
+      return { outcome: "not_measurable", reason: said`The org-wide figure is ${percent}%, but coverage by class couldn't be read, so we can't say the whole is healthy: ${passedOn(classCoverage.reason)}`, evidence: [ctx.ev(classCoverage.source, { count: null })] };
     }
     const measured = classCoverage.data.filter((c) => c.covered + c.uncovered >= MIN_CLASS_LINES);
     const weak = measured.filter((c) => (c.covered / (c.covered + c.uncovered)) * 100 < CLASS_COVERAGE_FLOOR);
@@ -377,7 +377,7 @@ const classicLeftovers: Rule = {
       outcome: "issue",
       title: said`Parts of the org still depend on Salesforce Classic`,
       // Salesforce's reason the s-controls weren't read is passed on, so that summary is plain: unknown.
-      summary: scontrols.status !== "ok" ? `${told} S-controls couldn't be read: ${scontrols.reason}` : told,
+      summary: scontrols.status !== "ok" ? said`${told} S-controls couldn't be read: ${passedOn(scontrols.reason)}` : told,
       recommendation: said`Replace JavaScript buttons and s-controls with quick actions, flows or Lightning components, and check whether each Classic-only Visualforce page is still used before moving or retiring it.`,
       recommendationType: "change",
       severity: breaks ? "medium" : "low",

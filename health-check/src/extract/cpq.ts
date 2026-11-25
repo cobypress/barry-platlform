@@ -99,7 +99,7 @@ export const cpqSetupExtractor: Extractor<CpqSetup> = {
       twins =
         quoteLine && opportunityProduct
           ? { status: "ok", data: { quoteLine, opportunityProduct, orderProduct }, source: twinSource, truncated: false }
-          : { status: "unavailable", reason: `${quoteLine ? "OpportunityLineItem" : "SBQQ__QuoteLine__c"} couldn't be described.`, source: twinSource };
+          : { status: "unavailable", reason: quoteLine ? "OpportunityLineItem couldn't be described." : "SBQQ__QuoteLine__c couldn't be described.", source: twinSource };
     } catch (err) {
       twins = unavailable(twinSource, err);
     }

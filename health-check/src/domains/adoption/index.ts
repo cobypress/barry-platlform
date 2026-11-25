@@ -232,7 +232,7 @@ function channelMetric(data: Loaded): Metric {
       assumptions: [
         "The channel is the first that fits: an API session, the Salesforce mobile app, single sign-on, a browser, or other",
         "The mobile app is read from the Application and Platform fields, whose values Salesforce doesn't list",
-        ...(missing.length ? [`These fields couldn't be read, so some logins may be counted as other: ${missing.join(", ")}`] : []),
+        ...(missing.length ? [said`These fields couldn't be read, so some logins may be counted as other: ${joinSaid(missing.map((m) => said`${org(m)}`), ", ")}`] : []),
       ],
     },
   );
@@ -253,7 +253,7 @@ function lightningMetric(ctx: Ctx): Metric {
   const unread = everyone.length - who.length;
   const classic = who.length - on(who);
   const stats = { lightning: on(who), classic, classicShare: pct(classic, who.length) };
-  return measured(DEF.lightning, evidence, pct(on(who), who.length), who.length, profiles.map((g) => groupSegment(g, pct(on(g.users), g.users.length))), unread ? { stats, exclusions: [...EXCLUSIONS, `${plural(unread, "user")} whose setting couldn't be read`] } : { stats });
+  return measured(DEF.lightning, evidence, pct(on(who), who.length), who.length, profiles.map((g) => groupSegment(g, pct(on(g.users), g.users.length))), unread ? { stats, exclusions: [...EXCLUSIONS, said`${plural(unread, "user")} whose setting couldn't be read`] } : { stats });
 }
 
 function reportsMetric(ctx: Ctx): Metric {
