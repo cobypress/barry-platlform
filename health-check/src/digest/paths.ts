@@ -3,7 +3,7 @@ import { said, spansIfCurrent, type MarkedSentence } from "../engine/org-words.t
 import type { BuiltReport } from "../narrative/sections.ts";
 import { extractFigures } from "../numbercheck/extract.ts";
 import { NAMED_PEOPLE_SENTENCE, PATHS_NOT_STATED, type DigestPathInsight, type DigestPaths, type PATH_FIGURES, type SentenceOrgWords } from "../schemas/digest.ts";
-import type { Finding } from "../schemas/index.ts";
+import { checkedByCode, type Finding } from "../schemas/index.ts";
 
 // The digest's `paths` block (DECISIONS.md 758): the path insights the engine
 // raised (703, 712), served for the first time, and nothing else of the paths
@@ -50,6 +50,13 @@ export const saidNumbers = (text: string, orgWords: ReadonlyArray<{ start: numbe
 
 /** The insight's own sentences end here; what follows is a note the engine adds to every pipeline finding. */
 const NOT_A_CAUSE = " not that one is the reason for the other.";
+/** Where the first ending of ours starts, outside every span of the org's words; -1 with none. */
+function endOf(text: string, spans: ReadonlyArray<{ start: number; end: number }>): number {
+  for (let at = text.indexOf(NOT_A_CAUSE); at >= 0; at = text.indexOf(NOT_A_CAUSE, at + 1)) {
+    if (!spans.some((s) => s.start < at + NOT_A_CAUSE.length && s.end > at)) return at;
+  }
+  return -1;
+}
 
 /**
  * Each number in an insight's summary, by what it is, from the finding's facts
@@ -77,7 +84,8 @@ export function figuresOf(f: Finding): Figure[] | undefined {
   // A note after the insight's own sentences (how many record types the deals use, say) can put a count in too.
   const spans = spansIfCurrent(f.summary, f.orgWords?.summary);
   if (!spans) return undefined;
-  const end = f.summary.indexOf(NOT_A_CAUSE);
+  // Found by structure: the ending in our words, never inside a stage the org named the same.
+  const end = endOf(f.summary, spans);
   if (end < 0) return undefined;
   const cut = end + NOT_A_CAUSE.length;
   const own = saidNumbers(f.summary.slice(0, cut), spans.filter((s) => s.end <= cut));
@@ -140,7 +148,8 @@ function made(report: BuiltReport): MadeBlock | null {
       words: {
         stages: stages.map((s) => ({ text: s, marks: stageWords(s) })),
         title: { text: f.title, marks: marked(f.title, f.orgWords?.title) },
-        summary: { text: f.summary, marks: marked(f.summary, f.orgWords?.summary) },
+        // A summary whose numbers can't each be named is never served as if they were: unmarked, so the checked digest withholds it whole (758).
+        summary: { text: f.summary, marks: figures ? marked(f.summary, f.orgWords?.summary) : undefined },
         recommendation: { text: f.recommendation, marks: marked(f.recommendation, f.orgWords?.recommendation) },
       },
     };
@@ -158,6 +167,9 @@ function made(report: BuiltReport): MadeBlock | null {
 
 /** The block before the guard: codes, ids and the texts as the findings have them. Null when the run made no path analysis. */
 export function digestPaths(report: BuiltReport): DigestPaths | null {
+  // Only on a digest code checks (rule 10): no person approves these sentences, which no document shows (703, 708),
+  // so a consultant-led check's digest and an ungated pulse's carry none until the owner decides how one is approved.
+  if (!checkedByCode(report.input.run)) return null;
   const m = made(report);
   if (!m) return null;
   const top = m.insights[0]?.insight;

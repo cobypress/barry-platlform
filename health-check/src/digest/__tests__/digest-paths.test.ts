@@ -93,11 +93,13 @@ const runOn = (sim: Simulator, overrides: Partial<RunOptions> = {}) =>
   runHealthCheck({ provider: syntheticProvider, calibration: loadCalibration(), answers: loadAnswers(), modules: SALES_CLOUD_MODULES, outDir: tempDir(), now: new Date(AS_OF), transport: sim, connectedUser: CONNECTED_USER, log: () => {}, ...overrides });
 
 describe("what each product's digest carries (DECISIONS.md 758)", async () => {
+  // Only a digest code checks carries the block (rule 10): no person approves these sentences, which no document shows.
   const products: Array<[string, Partial<RunOptions>, boolean]> = [
-    ["a consultant-led check", {}, true],
+    ["a consultant-led check, which no code checks", {}, false],
     ["an automatic check", { calibration: automaticCalibration, answers: [], reviewMode: "automatic" }, true],
-    ["a monthly pulse, which runs the whole analysis", { product: "pulse" }, true],
-    ["a set-up review, which reads no deals", { scope: "essentials" }, false],
+    ["a pulse shown through an automatic check's gate, which runs the whole analysis", { calibration: automaticCalibration, answers: [], product: "pulse", gated: true }, true],
+    ["a pulse not gated, which no code checks", { product: "pulse" }, false],
+    ["an automatic set-up review, which reads no deals", { calibration: automaticCalibration, answers: [], reviewMode: "automatic", scope: "essentials" }, false],
   ];
   for (const [name, options, has] of products) {
     test(`${name}: ${has ? "a paths block" : "none"}, and everything else as without the insights`, async () => {
@@ -119,11 +121,11 @@ describe("what each product's digest carries (DECISIONS.md 758)", async () => {
         assert.match(paths.notStated!.reason, /^No skipped stage or move back had enough won and lost deals on both sides/);
         assert.equal(paths.headline, undefined);
       }
-      if (options.reviewMode === "automatic") {
+      if (options.reviewMode === "automatic" || options.gated) {
         const c = check(l);
-        assert.deepEqual({ unmatched: c.unmatched, unmarked: c.unmarked, held: c.held, pathsWithheld: c.pathsWithheld }, { unmatched: 0, unmarked: 0, held: null, pathsWithheld: 0 });
+        assert.deepEqual({ unmatched: c.unmatched, unmarked: c.unmarked, held: c.held, pathsWithheld: c.pathsWithheld }, { unmatched: 0, unmarked: 0, held: null, pathsWithheld: has ? 0 : undefined });
         assertSameAsWithout(c, check(l, l.input, l.pseudonyms, noPaths), name);
-        assertVouched(c, report, l.pseudonyms, name);
+        if (has) assertVouched(c, report, l.pseudonyms, name);
       }
     });
   }
@@ -165,7 +167,7 @@ describe("the documents, raw notes and pulse results never read the block", () =
 
 // ─── Orgs that raise insights, and that fail each bar ────────────────────────
 
-type Case = { name: string; specs: Spec[]; org?: Org; insights?: Array<{ kind: "skipped" | "sent_back"; days?: boolean; confidence?: string }>; notStated?: string; unlock?: string };
+type Case = { name: string; specs: Spec[]; org?: Org; summary?: RegExp; insights?: Array<{ kind: "skipped" | "sent_back"; days?: boolean; confidence?: string }>; notStated?: string; unlock?: string };
 const through = (won = 30, wonDays = 60) => deals(60, USUAL, won, 60, undefined, wonDays);
 const twoTypes = (seg: string): Spec[] => [...deals(60, USUAL, 30, 60, seg), ...deals(30, SKIPS, 25, 60, seg)];
 /** Every ordered pair of six open stages: 30 paths, each taken once. */
@@ -185,6 +187,13 @@ const CASES: Case[] = [
   { name: "a send-back with deals closed out and still open", specs: [...through(45), ...deals(30, REWORK, 12, 60), ...deals(4, ["Prospecting", "Discovery", "Prospecting"], 0, 60).map((d) => ({ ...d, gapDays: 30 })), ...open(1, USUAL)], insights: [{ kind: "sent_back" }] },
   // High by the rule (segments, both sides at twice the minimum), and medium as served: these deals lean on a stage meaning
   // read from Salesforce's flags, and an issue that leans on an assumption is no surer than medium (598).
+  {
+    name: "a send-back with exactly one deal closed out",
+    specs: [...through(45), ...deals(30, REWORK, 12, 60), ...deals(1, ["Prospecting", "Discovery", "Prospecting"], 0, 60).map((d) => ({ ...d, gapDays: 30 }))],
+    insights: [{ kind: "sent_back" }],
+    summary: /, 1 whose last move, back to Prospecting on closing, closed it out is left out\. Of the other 90,/,
+  },
+  { name: "a skip with deals still open", specs: [...through(), ...deals(30, SKIPS, 25, 60), ...open(2, SKIPS), ...open(2, USUAL)], insights: [{ kind: "skipped" }], summary: /, 4 are still open\. Of the other 90, the 30 that skipped/ },
   { name: "several record types, checked inside each", specs: [...twoTypes("Alpha"), ...twoTypes("Beta")], insights: [{ kind: "skipped", confidence: "medium" }] },
   // The rule says the skip first; the send-back's gap is the bigger, at the same confidence, so the engine leads with it.
   { name: "a skip and a send-back at once, in the engine's order", specs: [...deals(120, USUAL, 75, 60), ...deals(30, SKIPS, 25, 60), ...deals(30, REWORK, 6, 60)], insights: [{ kind: "sent_back" }, { kind: "skipped" }] },
@@ -240,6 +249,7 @@ describe("constructed orgs, through the real analysis (DECISIONS.md 758)", () =>
           assert.equal(i.stages.length, want.kind === "sent_back" ? 2 : 1);
           assert.match(i.summary, / not that one is the reason for the other\./);
         });
+        if (c.summary) assert.match(p.insights[0]!.summary, c.summary);
         assert.equal(p.headline!.text, p.insights[0]!.title);
         assert.deepEqual(p.headline!.orgWords, p.insights[0]!.orgWords?.title ? { text: p.insights[0]!.orgWords.title } : undefined);
       } else {
@@ -357,6 +367,31 @@ describe("the block never changes a hold or a count (DECISIONS.md 758, as 742)",
       // As a pulse's and a consultant-led check's digests are made: built, never checked. The name never reaches either.
       assert.ok(!JSON.stringify(buildDigest({ report: buildReport(l.input), pseudonyms: l.pseudonyms, inventory: null, madeAt: MADE_AT }).paths).includes(person.name));
     }
+  });
+
+  test("a stage named like the summary's own ending: the ending found by structure, the figures named, nothing withheld", async () => {
+    const name = "not that one is the reason for the other.";
+    for (const specs of [[...through(), ...deals(30, SKIPS, 25, 60)], [...through(45), ...deals(30, REWORK, 12, 60)]]) {
+      const l = loadRun((await orgWith(specs, { stages: { Discovery: name } })).dir);
+      const c = check(l);
+      assertSameAsWithout(c, check(l, l.input, l.pseudonyms, noPaths), name);
+      const i = c.digest!.paths!.insights[0]!;
+      assert.ok(i.summary.includes(name) && i.figures && i.figures.length >= 4, i.summary);
+      assert.equal(c.pathsWithheld, 0);
+      assertWellFormed(c.digest!, buildReport(l.input));
+    }
+  });
+
+  test("a summary whose numbers can't each be named is withheld whole and counted, never served as traced", async () => {
+    const l = await orgOf(CASES[0]!);
+    // The rule's sentence with a number the facts don't hold: as a reworded or unforeseen sentence would read.
+    const input = { ...l.input, findings: l.input.findings.map((f) => (f.ruleId === PATH_INSIGHTS_RULE && f.status === "issue" ? { ...f, facts: { ...f.facts, deals: 31 } } : f)) };
+    const c = check(l, input);
+    assertSameAsWithout(c, check(l, input, l.pseudonyms, noPaths), "unmatched figures");
+    const i = c.digest!.paths!.insights[0]!;
+    assert.deepEqual([i.summary, i.figures, i.orgWords?.summary], [MASK, undefined, { orgWordsMarked: true, orgWords: [] }]);
+    assert.equal(c.pathsWithheld, 1);
+    assert.notEqual(i.title, MASK);
   });
 
   test("a figure that doesn't trace is withheld with its sentence, the figures go with it, and it is counted apart", async () => {
