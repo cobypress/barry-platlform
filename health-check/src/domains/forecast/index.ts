@@ -11,7 +11,7 @@ import { fiscalStartOf, pushesOf } from "../historic-pipeline/metrics.ts";
 import { localDay, todayIn, zoneNote, zoneOf } from "../time-zone.ts";
 import type { Evidence, Metric } from "../../schemas/index.ts";
 import type { DomainModule } from "../types.ts";
-import { said, type Said } from "../../engine/org-words.ts";
+import { passedOn, said, type Said } from "../../engine/org-words.ts";
 import { grouped } from "../../engine/said-forms.ts";
 
 // Every title, summary, recommendation and reason is written with `said`, so
@@ -40,7 +40,7 @@ const cutOff = (read: number): Said => said`The forecast read stopped at its row
 function forecastInUse(ctx: Ctx): { inUse: true; typeId: string; items: ForecastItemRow[] } | InUse {
   const { types } = ctx.data(quotasExtractor);
   const { items } = ctx.data(forecastExtractor);
-  const off = (reason: string, evidence: Evidence[]): InUse => ({ inUse: false, outcome: "not_measurable", reason: `Forecasting isn't in use, or can't be read, so we don't report a forecast figure. ${reason}`, evidence });
+  const off = (reason: string, evidence: Evidence[]): InUse => ({ inUse: false, outcome: "not_measurable", reason: said`Forecasting isn't in use, or can't be read, so we don't report a forecast figure. ${passedOn(reason)}`, evidence });
   if (types.status !== "ok") return off(types.reason, [ctx.ev(types.source, { count: null })]);
   const type = revenueForecastType(types.data);
   // Only an org whose forecast types were read, with no revenue one active, is said not to use it (DECISIONS.md 627):
@@ -230,7 +230,7 @@ function commitScope(ctx: RuleContext, open: Deal[], isHit: (d: Deal) => boolean
     deals: result.commit.filter((d) => !closed.has(d.Id)),
     isHit,
     evidence: result.evidence,
-    exclusions: [`${plural(left, "deal")} closed since this run's date, whose forecast category then can't be read`],
+    exclusions: [said`${plural(left, "deal")} closed since this run's date, whose forecast category then can't be read`],
     leftOut: said`${left === 1 ? "One deal open at this run's date and closed since is" : said`${left} deals open at this run's date and closed since are`} left out, as we can't read the forecast category ${left === 1 ? "it" : "they"} had then.`,
   };
 }
@@ -306,7 +306,7 @@ function forecastMetrics(ctx: Ctx): Metric[] {
   const holders = new Set(covered.reps.map((r) => r.owner));
   const unread = since.closed.filter((d) => holders.has(d.OwnerId)).length;
   if (unread > 0) {
-    const reason = unread === 1 ? "One deal open at this run's date has closed since, so its forecast category then can't be read." : `${unread} deals open at this run's date have closed since, so their forecast category then can't be read.`;
+    const reason = unread === 1 ? said`One deal open at this run's date has closed since, so its forecast category then can't be read.` : said`${unread} deals open at this run's date have closed since, so their forecast category then can't be read.`;
     return [notMeasurable(reason, [ctx.ev(since.source, { count: unread, note: "Deals open at this run's date, owned by people with a quota, and closed since" })])];
   }
   const committed = new Set(facts.data.filter((f) => f.ForecastCategoryName === COMMIT).map((f) => f.OpportunityId));

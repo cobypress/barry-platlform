@@ -30,6 +30,13 @@ const SIGNED_OFF: string[] = [
   "src/domains/historic-pipeline/potential.ts: `${ctx.window.from} to ${ctx.window.to}`",
   // A list price's plan, figure, billing, link and date, all from our own table in list-prices.ts (DECISIONS.md 663).
   "src/money/seat-cost.ts: `${p.plan} (${p.monthly} ${p.currency} a user a month, ${p.billing.toLowerCase()}; ${p.url}, read on ${p.checked})`",
+  // Decision 743. The drivers' factor labels, our own table, alone and as the note that lists them.
+  "src/domains/historic-pipeline/drivers.ts: FACTOR_NOTE",
+  "src/domains/historic-pipeline/drivers.ts: factor.label",
+  // The latest month end in the stage history, a date the engine works out: digits and dashes.
+  "src/domains/historic-pipeline/metrics.ts: range.to",
+  // A metric's id, the engine's own, for one a rule reads that wasn't calculated.
+  "src/domains/value.ts: id",
 ];
 
 const ROOT = join(import.meta.dirname, "../../..");

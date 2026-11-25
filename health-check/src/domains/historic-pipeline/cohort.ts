@@ -265,9 +265,9 @@ function buildPipeline(ctx: Omit<RuleContext, "metrics">): PipelineData {
   }
 
   const exclusions = [
-    ...(outOfScope ? [`${outOfScope} opportunities on record types outside the calibrated scope`] : []),
-    ...(testOwner ? [`${testOwner} opportunities owned by test users`] : []),
-    ...(excludedStage ? [`${excludedStage} opportunities in stages the calibration excludes`] : []),
+    ...(outOfScope ? [said`${outOfScope} opportunities on record types outside the calibrated scope`] : []),
+    ...(testOwner ? [said`${testOwner} opportunities owned by test users`] : []),
+    ...(excludedStage ? [said`${excludedStage} opportunities in stages the calibration excludes`] : []),
   ];
 
   // Only what an in-scope deal used: a stage that only out-of-scope deals, or

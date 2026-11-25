@@ -1,4 +1,4 @@
-import { orgWordsOf, said, type Said } from "../engine/org-words.ts";
+import { eng, orgWordsOf, said, type Said } from "../engine/org-words.ts";
 import { moneySaid } from "../engine/said-forms.ts";
 import { notSized, type RuleContext } from "../engine/rule.ts";
 import type { Metric, Value } from "../schemas/index.ts";
@@ -10,7 +10,7 @@ import type { Metric, Value } from "../schemas/index.ts";
 
 export const measuredRate = (ctx: Pick<RuleContext, "metrics" | "leanOn">, id: string): Extract<Metric, { status: "measured" }> | { reason: string } => {
   const metric = ctx.metrics.find((m) => m.id === id);
-  if (!metric) return { reason: `${id} wasn't calculated.` };
+  if (!metric) return { reason: said`${eng(id)} wasn't calculated.` };
   if (metric.status !== "measured") return { reason: metric.reason };
   // A figure sized from this rate rests on whatever the rate rested on (DECISIONS.md 598).
   ctx.leanOn?.(id);

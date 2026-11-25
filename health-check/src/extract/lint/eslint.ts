@@ -1,3 +1,4 @@
+import { eslintTimeLimit } from "../../salesforce/refusal-words.ts";
 import { bound, MAX_SOURCE_CHARS, notRun, rulesSeen, type LintFinding, type LintKind, type ToolRun } from "./findings.ts";
 
 // ESLint over a Lightning component's JavaScript (DECISIONS.md 670). In
@@ -145,6 +146,6 @@ export async function lintJavaScript(files: JsFile[], options: EslintOptions = {
     rules: rulesSeen(kept.findings, descriptions),
     outsideRules,
     inlineConfigIgnored,
-    limits: skipped.timeLimit ? [`ESLint reached its time limit of ${Math.round(limit / 1000)} seconds, so ${skipped.timeLimit} of the files weren't checked.`] : [],
+    limits: skipped.timeLimit ? [eslintTimeLimit(Math.round(limit / 1000), skipped.timeLimit)] : [],
   };
 }

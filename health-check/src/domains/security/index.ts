@@ -7,7 +7,7 @@ import { accessExtractor, holdersOf, PRIVILEGED_RULES, privilegedHolding, privil
 import { notSized, plural, segmentRate, type NotMeasurableResult, type Rule, type RuleContext, type RuleResult } from "../../engine/rule.ts";
 import type { DomainModule } from "../types.ts";
 import { WHERE } from "../where.ts";
-import { joinSaid, org, said, type Said } from "../../engine/org-words.ts";
+import { joinSaid, org, passedOn, said, type Said } from "../../engine/org-words.ts";
 
 // Every title, summary, recommendation and reason is written with `said`, and
 // every name the org chose with `org`, so the digest can say which words are the
@@ -47,7 +47,7 @@ const healthScore: Rule = {
     const evidence = [ctx.ev(score.source, { count: 1, note: "Scored by Salesforce against its own baseline, unless the org has imported a custom one" })];
     if (value >= HEALTH_SCORE_TARGET) {
       // A good score can sit on a high risk the weighting hides, so it needs the settings behind it.
-      if (risks.status !== "ok") return { outcome: "not_measurable", reason: `The score is ${value}, but the settings behind it couldn't be read: ${risks.reason}`, evidence };
+      if (risks.status !== "ok") return { outcome: "not_measurable", reason: said`The score is ${value}, but the settings behind it couldn't be read: ${passedOn(risks.reason)}`, evidence };
       return { outcome: "pass", summary: said`The Health Check score is ${value}, at or above our working target of ${HEALTH_SCORE_TARGET}.`, evidence, segmentsChecked: [{ dimension: "setting group", segments: riskGroups(risks.data) }], facts: { score: value } };
     }
     return {
@@ -227,7 +227,7 @@ function accessGap(ctx: RuleContext): NotMeasurableResult | null {
   const access = ctx.data(accessExtractor);
   const users = ctx.data(usersExtractor);
   for (const [what, read] of [["Users", users], ["Permission sets", permissionSets], ["Profiles", access.profiles], ["Permission set assignments", access.assignments], ["Permission set groups", access.groupComponents]] as const) {
-    if (read.status !== "ok") return { outcome: "not_measurable", reason: `${what} couldn't be read: ${read.reason}`, evidence: [ctx.ev(read.source, { count: null })] };
+    if (read.status !== "ok") return { outcome: "not_measurable", reason: said`${what} couldn't be read: ${passedOn(read.reason)}`, evidence: [ctx.ev(read.source, { count: null })] };
   }
   return null;
 }

@@ -7,7 +7,7 @@ import type { DomainModule } from "../types.ts";
 import { meanStat } from "../average.ts";
 import { localDay, zoneOf } from "../time-zone.ts";
 import { missingFieldReason } from "../../extract/fields.ts";
-import { org, said, type Said } from "../../engine/org-words.ts";
+import { org, passedOn, said, type Said } from "../../engine/org-words.ts";
 import { grouped } from "../../engine/said-forms.ts";
 import { ageDays, byOrigin, caseQueues, HOUR, limitsOf, median, MIN_SEGMENT, originOf, ownerType, priorityOf, quantile, queueOwned, round1, yearRange, yearsCases } from "./shared.ts";
 
@@ -40,8 +40,8 @@ const MILESTONE_LIMIT = 10;
 
 type Rows<R> = { rows: R[]; evidence: Evidence[]; truncated: boolean } | { reason: string; evidence: Evidence[] };
 
-function rowsOf<R>(ctx: RuleContext, source: Sourced<R[]>, what: string, note?: string): Rows<R> {
-  if (source.status !== "ok") return { reason: `${what} couldn't be read: ${source.reason}`, evidence: [ctx.ev(source.source, { count: null })] };
+function rowsOf<R>(ctx: RuleContext, source: Sourced<R[]>, what: "Case milestones" | "Case history" | "Open cases" | "Closed cases", note?: string): Rows<R> {
+  if (source.status !== "ok") return { reason: said`${what} couldn't be read: ${passedOn(source.reason)}`, evidence: [ctx.ev(source.source, { count: null })] };
   return { rows: source.data, truncated: source.truncated, evidence: [ctx.ev(source.source, { count: source.data.length, dateRange: yearRange(ctx, SERVICE_MONTHS), ...(note ? { note } : {}), exclusions: source.truncated ? ["Rows past the read limit"] : [] })] };
 }
 
@@ -240,7 +240,7 @@ const milestoneBreaches: Rule = {
   evaluate(ctx) {
     const { milestones } = ctx.data(serviceActivityExtractor);
     const read = rowsOf(ctx, milestones, "Case milestones", "Milestones started in the last year");
-    if ("reason" in read) return nm(`${read.reason} Entitlement management may not be turned on.`, read.evidence);
+    if ("reason" in read) return nm(said`${passedOn(read.reason)} Entitlement management may not be turned on.`, read.evidence);
     if (read.rows.length === 0) return nm(said`No case milestone started in the last year, so response and resolution targets aren't set up as entitlements.`, read.evidence);
     const setup = ctx.data(serviceSetupExtractor);
     const names = new Map(setup.milestoneTypes.status === "ok" ? setup.milestoneTypes.data.map((t) => [t.Id, t.Name]) : []);
@@ -278,14 +278,14 @@ const firstReply: Rule = {
   evaluate(ctx) {
     const data = cases(ctx);
     const { replies } = ctx.data(serviceActivityExtractor);
-    if (replies.status !== "ok") return nm(`Replies on cases couldn't be read: ${replies.reason}. Email-to-Case or Enhanced Email may not be on.`, [ctx.ev(replies.source, { count: null })]);
+    if (replies.status !== "ok") return nm(said`Replies on cases couldn't be read: ${passedOn(replies.reason)}. Email-to-Case or Enhanced Email may not be on.`, [ctx.ev(replies.source, { count: null })]);
     if (data.open.status !== "ok" || data.closedCases.status !== "ok") {
       const bad = data.open.status !== "ok" ? data.open : data.closedCases;
-      return nm(`Cases couldn't be read: ${bad.status === "ok" ? "" : bad.reason}`, [ctx.ev(bad.source, { count: null })]);
+      return nm(said`Cases couldn't be read: ${bad.status === "ok" ? "" : passedOn(bad.reason)}`, [ctx.ev(bad.source, { count: null })]);
     }
     // Which cases came by email is Origin's to say (DECISIONS.md 599).
     const noOrigin = missingFieldReason(data.open, "Case.Origin") ?? missingFieldReason(data.closedCases, "Case.Origin");
-    if (noOrigin) return nm(`${noOrigin} Origin is how we tell which cases came in by email.`, [ctx.ev(data.open.source, { count: data.open.data.length })]);
+    if (noOrigin) return nm(said`${passedOn(noOrigin)} Origin is how we tell which cases came in by email.`, [ctx.ev(data.open.source, { count: data.open.data.length })]);
     const since = monthsBefore(ctx.now, SERVICE_MONTHS);
     const emailCases = yearsCases(data.open.data, data.closedCases.data, since).filter((c) => /^e-?mail$/i.test(c.Origin ?? ""));
     const first = new Map<string, number>();
@@ -552,7 +552,7 @@ function metrics(ctx: Omit<RuleContext, "metrics">): Metric[] {
       series: [],
       stats: Object.fromEntries(channels.map((c) => [`records${c.channel}`, c.count.status === "ok" ? c.count.data : 0])),
       evidence: [ctx.ev(data.origins.source, { count: total }), ...channels.map((c) => ctx.ev(c.count.source, { count: c.count.status === "ok" ? c.count.data : null }))],
-      assumptions: activity.channels.filter((c) => c.count.status !== "ok").map((c) => `${c.channel} records weren't readable, so that channel isn't counted`),
+      assumptions: activity.channels.filter((c) => c.count.status !== "ok").map((c) => said`${org(c.channel)} records weren't readable, so that channel isn't counted`),
     });
   } else out.push({ ...originDef, status: "not_measurable", reason: `Case origins couldn't be read: ${data.origins.reason}`, evidence: [ctx.ev(data.origins.source, { count: null })] });
 
@@ -562,7 +562,7 @@ function metrics(ctx: Omit<RuleContext, "metrics">): Metric[] {
     const declined = rows.filter((w) => w.DeclineDateTime !== null).length;
     const speeds = rows.flatMap((w) => (w.SpeedToAnswer === null ? [] : [w.SpeedToAnswer]));
     out.push({ ...workDef, status: "measured", value: pct(declined, rows.length), n: rows.length, dateRange: yearRange(ctx, SERVICE_MONTHS), segments: [], segmentExemptReason: "Who the work went to isn't shown, so no agent is singled out", series: [], stats: { declined, ...(speeds.length ? { medianSpeedToAnswerSeconds: round1(median(speeds)) } : {}) }, evidence: [ctx.ev(activity.agentWork.source, { count: rows.length })] });
-  } else out.push({ ...workDef, status: "not_measurable", reason: activity.agentWork.status === "ok" ? "Omni-Channel offered no work in the last year." : `Routed work couldn't be read: ${activity.agentWork.reason}. Omni-Channel may not be on.`, evidence: [ctx.ev(activity.agentWork.source, { count: null })] });
+  } else out.push({ ...workDef, status: "not_measurable", reason: activity.agentWork.status === "ok" ? "Omni-Channel offered no work in the last year." : said`Routed work couldn't be read: ${passedOn(activity.agentWork.reason)}. Omni-Channel may not be on.`, evidence: [ctx.ev(activity.agentWork.source, { count: null })] });
   return out;
 }
 

@@ -346,10 +346,11 @@ describe("a blip before the last delivery is read again, never given up (round 4
     assert.equal(w.stored().run.status, "extracting");
     assert.deepEqual(w.flags(), []);
     await w.deliver(3);
-    // Held digest_held, ahead of reads_lost (715's order): field usage's "Field usage on <Object> couldn't be read: <reason>"
-    // isn't known as ours, so its sentences are unmarked and the digest isn't safe to show. Both flags are open.
-    assert.equal(w.deps.store.held.get(RUN_ID), "digest_held");
-    assert.ok(w.flags().includes("reads_lost") && w.flags().includes("digest_held") && !w.flags().includes("run_failed"), w.flags().join());
+    // Held reads_lost alone: field usage's "Field usage on <Object> couldn't be read: <reason>" is said now, the object
+    // marked as the org's and the lost read's sentence known by its words (DECISIONS.md 743), so the digest is safe to
+    // show and only the lost read waits for a person. Before 743 it was held digest_held ahead of reads_lost (715's order).
+    assert.equal(w.deps.store.held.get(RUN_ID), "reads_lost");
+    assert.ok(w.flags().includes("reads_lost") && !w.flags().includes("digest_held") && !w.flags().includes("run_failed"), w.flags().join());
   });
 
   test("P2: one composite step's counts 503 on every delivery: released, that step's checks not measured", async () => {

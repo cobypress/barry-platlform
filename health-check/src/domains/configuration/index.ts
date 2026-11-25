@@ -28,7 +28,7 @@ import { aiSignalsExtractor } from "../../extract/ai.ts";
 import { aiMetrics } from "./ai.ts";
 import { loginActivityExtractor } from "../../extract/adoption.ts";
 import { WHERE } from "../where.ts";
-import { joinSaid, org, said, type Said } from "../../engine/org-words.ts";
+import { joinSaid, org, passedOn, said, type Said } from "../../engine/org-words.ts";
 
 // Every title, summary, recommendation and reason of its own is written with
 // `said`, and every name the org chose with `org`, so the digest can say which
@@ -59,7 +59,7 @@ const customFieldSprawl: Rule = {
     for (const object of CORE_OBJECTS) {
       const summary = schema[object]!;
       if (summary.status !== "ok") {
-        results.push({ outcome: "not_measurable", key: object, reason: `${object} couldn't be described: ${summary.reason}`, evidence: [ctx.ev(summary.source, { count: null })] });
+        results.push({ outcome: "not_measurable", key: object, reason: said`${object} couldn't be described: ${passedOn(summary.reason)}`, evidence: [ctx.ev(summary.source, { count: null })] });
       } else {
         counts.push([object, summary.data.fields.filter(isOwnCustomField).length]);
       }
@@ -112,7 +112,7 @@ const unusedCustomFields: Rule = {
       // Said by its label; the evidence keeps the API name (DECISIONS.md 411).
       const named = labels.object(object);
       if (scan.status !== "ok") {
-        results.push({ outcome: "not_measurable", key: object, reason: `Field usage on ${named} couldn't be read: ${scan.reason}`, evidence: [ctx.ev(scan.source, { count: null })] });
+        results.push({ outcome: "not_measurable", key: object, reason: said`Field usage on ${org(named)} couldn't be read: ${passedOn(scan.reason)}`, evidence: [ctx.ev(scan.source, { count: null })] });
         continue;
       }
       const describe = schema[object]!;

@@ -1,5 +1,5 @@
 import { editionIsWhy } from "../../salesforce/refusal-words.ts";
-import { said } from "../../engine/org-words.ts";
+import { passedOn, said, type Said } from "../../engine/org-words.ts";
 import { apexExtractor, metadataExtractor, type ApexTriggerRow } from "../../extract/automation.ts";
 import { userKinds } from "../user-kinds.ts";
 import { loginActivityExtractor } from "../../extract/adoption.ts";
@@ -100,7 +100,7 @@ function measured(d: (typeof DEFINITIONS)[keyof typeof DEFINITIONS], evidence: E
   return { ...d, status: "measured", evidence, exclusions: extra.exclusions ?? [], assumptions: extra.assumptions ?? [], value, n: value, dateRange: null, segments, segmentExemptReason: segments.length ? null : "There's nothing to list.", series: [], stats: extra.stats ?? {} };
 }
 const notMeasurable = (d: (typeof DEFINITIONS)[keyof typeof DEFINITIONS], evidence: Evidence[], reason: string): Metric => ({ ...d, status: "not_measurable", evidence, exclusions: [], assumptions: [], reason });
-const cantRead = (what: string, s: Sourced<unknown>): string | null => (s.status === "ok" ? null : `${what} couldn't be read: ${s.reason}`);
+const cantRead = (what: "Connected apps, named credentials and remote site settings" | "Connected apps" | "Named credentials" | "Remote site settings", s: Sourced<unknown>): Said | null => (s.status === "ok" ? null : said`${what} couldn't be read: ${passedOn(s.reason)}`);
 /** Label segments for these API names, where the label differs: an object's name alone, a field's as Object.Field. */
 const labelSegments = (pairs: Array<[api: string, label: string]>): MetricSegment[] =>
   [...new Map(pairs.filter(([api, label]) => label && label !== api)).entries()].sort(([a], [b]) => a.localeCompare(b)).map(([api, label]) => seg(LABEL, `${api}${SEP}${label}`, 1));
@@ -246,7 +246,7 @@ function integrations(ctx: Ctx): Metric {
   const parts = [doc.connectedApps, doc.namedCredentials, doc.remoteSites] as const;
   const evidence = [...parts.map((p) => ctx.ev(p.source, { count: p.status === "ok" ? p.data.length : null })), ctx.ev(logins.source, { count: logins.status === "ok" ? logins.data.rowsRead : null })];
   if (parts.every((p) => p.status !== "ok")) return notMeasurable(DEFINITIONS.integrations, evidence, cantRead("Connected apps, named credentials and remote site settings", parts[0])!);
-  const exclusions = [cantRead("Connected apps", doc.connectedApps), cantRead("Named credentials", doc.namedCredentials), cantRead("Remote site settings", doc.remoteSites)].filter((x): x is string => x !== null);
+  const exclusions = [cantRead("Connected apps", doc.connectedApps), cantRead("Named credentials", doc.namedCredentials), cantRead("Remote site settings", doc.remoteSites)].filter((x): x is Said => x !== null) as string[];
   exclusions.push("Installed packages' own connected apps, named credentials and remote sites", "Remote sites are shown by host only");
   const segments: MetricSegment[] = [];
   const own = <T extends { NamespacePrefix?: string | null }>(rows: T[]): T[] => rows.filter((r) => !r.NamespacePrefix);

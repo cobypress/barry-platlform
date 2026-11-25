@@ -20,9 +20,10 @@ import { engineTextKey } from "./engine-texts-key.ts";
  * into what the portal serves (the plan's hours note, DECISIONS.md 673, and the
  * overall score's fallback reason) and marks them as ours only through this list
  * (DECISIONS.md 739): left out, an automatic run with a code checker finding in
- * its plan was held for one sentence of our own.
+ * its plan was held for one sentence of our own. And the extractors', whose own
+ * reasons a rule passes on whole or after a head (DECISIONS.md 743).
  */
-export const ENGINE_TEXT_DIRS = [...CUSTOMER_TEXT_DIRS, "engine", "guards", "digest"];
+export const ENGINE_TEXT_DIRS = [...CUSTOMER_TEXT_DIRS, "engine", "guards", "digest", "extract"];
 
 function* sourceFiles(dir: string): Generator<string> {
   for (const entry of readdirSync(dir, { withFileTypes: true })) {
@@ -33,10 +34,21 @@ function* sourceFiles(dir: string): Generator<string> {
   }
 }
 
-/** Each key, sorted. Only texts with a space: a single word could be a value the org chose. */
-export function scanEngineTexts(srcDir: string): string[] {
-  const keys = new Set<string>();
+/**
+ * The extractors' folder holds queries, permission and edition names, field
+ * lists and shell lines beside the sentences a read's reason is made of, so only
+ * its sentences are keyed (DECISIONS.md 743): a capital first, three words or
+ * more, and a full stop last. Every other folder keys any text with a space.
+ */
+export const SENTENCE_ONLY_DIRS: readonly string[] = ["extract"];
+export const isSentence = (text: string): boolean => /^[A-Z]/.test(text) && text.trim().split(/\s+/).length >= 3 && text.endsWith(".");
+
+/** Each text keyed, by folder, before it is hashed: for a reviewer to read what a folder adds (a test lists the extractors'). */
+export function scanEngineTextsByDir(srcDir: string): Map<string, Set<string>> {
+  const out = new Map<string, Set<string>>();
   for (const dir of ENGINE_TEXT_DIRS) {
+    const texts = new Set<string>();
+    out.set(dir, texts);
     for (const file of sourceFiles(join(srcDir, dir))) {
       const source = ts.createSourceFile(file, readFileSync(file, "utf8"), ts.ScriptTarget.Latest, true);
       // The file's own top-level number constants, such as RECENT_DAYS = 28: a template putting in only these is
@@ -60,17 +72,24 @@ export function scanEngineTexts(srcDir: string): string[] {
         // A template with nothing put in, but never one with substitutions: what is put in could be the org's (DECISIONS.md 693).
         else if (ts.isNoSubstitutionTemplateLiteral(node) && !ts.isTaggedTemplateExpression(node.parent)) text = node.text;
         else if (ts.isTemplateExpression(node) && !ts.isTaggedTemplateExpression(node.parent)) text = constant(node);
-        if (text !== null && /\s/.test(text.trim())) keys.add(engineTextKey(text));
+        if (text !== null && /\s/.test(text.trim()) && (!SENTENCE_ONLY_DIRS.includes(dir) || isSentence(text))) texts.add(text);
         ts.forEachChild(node, visit);
       };
       visit(source);
     }
   }
+  return out;
+}
+
+/** Each key, sorted. Only texts with a space: a single word could be a value the org chose. */
+export function scanEngineTexts(srcDir: string): string[] {
+  const keys = new Set<string>();
+  for (const texts of scanEngineTextsByDir(srcDir).values()) for (const text of texts) keys.add(engineTextKey(text));
   return [...keys].sort();
 }
 
-/** Where a rule or an extractor passes a read's reason on: those folders, and the extractors' own. */
-export const REASON_PREFIX_DIRS = [...ENGINE_TEXT_DIRS, "extract"];
+/** Where a rule or an extractor passes a read's reason on: the same folders, the extractors' among them. */
+export const REASON_PREFIX_DIRS = ENGINE_TEXT_DIRS;
 
 /**
  * The words the engine puts before a reason it passes on (DECISIONS.md 702):

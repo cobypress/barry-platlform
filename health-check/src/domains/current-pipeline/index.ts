@@ -189,7 +189,7 @@ const stuckInStage = shareRule({
       deals,
       isHit: (d) => daysSince(enteredCurrentStage(d)!, ctx.now) > lines.get(d.StageName)!,
       problem: (d) => `In ${d.StageName} for ${daysSince(enteredCurrentStage(d)!, ctx.now)} days, where three quarters of won deals moved on within ${Math.round(lines.get(d.StageName)!)} days`,
-      exclusions: [...(noLine ? [`${plural(noLine, "deal")} in stages with too few won deals to compare`] : []), ...(noEntry ? [`${plural(noEntry, "deal")} whose history doesn't show when they entered this stage`] : [])],
+      exclusions: [...(noLine ? [said`${plural(noLine, "deal")} in stages with too few won deals to compare`] : []), ...(noEntry ? [said`${plural(noEntry, "deal")} whose history doesn't show when they entered this stage`] : [])],
       // Said in the summary too, where "58 of 70" sat beside 76 open deals elsewhere (night 3 reading pass, item 21).
       leftOut: leftOutSentence(noLine, noEntry),
     };
@@ -243,7 +243,7 @@ const repeatedPushes = shareRule({
     const fiscal = fiscalStartOf(ctx);
     const deals = open.filter((d) => d.history.length > 0);
     const noHistory = open.length - deals.length;
-    return { deals, isHit: (d) => pushesOf(d, fiscal).length >= REPEAT_PUSHES, problem: (d) => `Close date moved later ${pushesOf(d, fiscal).length} times`, exclusions: noHistory ? [`${plural(noHistory, "deal")} with no stage history`] : [] };
+    return { deals, isHit: (d) => pushesOf(d, fiscal).length >= REPEAT_PUSHES, problem: (d) => `Close date moved later ${pushesOf(d, fiscal).length} times`, exclusions: noHistory ? [said`${plural(noHistory, "deal")} with no stage history`] : [] };
   },
   issueTitle: said`Close dates are being pushed again and again`,
   sentence: (hits, n, rate) => said`Open deals whose close date has moved later ${REPEAT_PUSHES} or more times: ${hits} of ${n} (${rate}%). A date that keeps moving usually means the deal isn't really on track.`,
@@ -295,7 +295,7 @@ function concentrationRule(options: { id: string; title: string; limit: number; 
         else byKey.set(key, (byKey.get(key) ?? 0) + (deal.Amount ?? 0));
       }
       const total = [...byKey.values()].reduce((a, b) => a + b, 0);
-      const exclusions = [...data.exclusions, ...(blank ? [`${plural(blank, "deal")} with no amount`] : []), ...(unkeyed ? [`${plural(unkeyed, "deal")} with no ${options.subject}`] : [])];
+      const exclusions = [...data.exclusions, ...(blank ? [said`${plural(blank, "deal")} with no amount`] : []), ...(unkeyed ? [said`${plural(unkeyed, "deal")} with no ${options.subject}`] : [])];
       const evidence = [{ ...data.evidence[0]!, count: deals.length, dateRange: { from: ctx.window.to, to: ctx.window.to }, exclusions, note: "Open deals" }];
       if (total === 0) return { outcome: "not_measurable", reason: said`Open deals have no amounts to compare.`, evidence };
       if (byKey.size < options.minKeys) return { outcome: "not_measurable", reason: said`Only ${plural(byKey.size, options.subject)} ${byKey.size === 1 ? "holds" : "hold"} open pipeline, so a share means little.`, evidence };
@@ -467,7 +467,7 @@ function currentMetrics(ctx: Ctx): Metric[] {
   const placed = deals.filter((d) => enteredCurrentStage(d));
   const days = (d: Deal): number => daysSince(enteredCurrentStage(d)!, ctx.now);
   const round = (n: number): number => Math.round(n * 10) / 10;
-  if (placed.length < minSample) metrics.push({ ...definitions.age, ...common, status: "not_measurable", reason: `${placed.length} open deals with stage history is below the calibrated minimum of ${minSample}.` });
+  if (placed.length < minSample) metrics.push({ ...definitions.age, ...common, status: "not_measurable", reason: said`${placed.length} open deals with stage history is below the calibrated minimum of ${minSample}.` });
   else metrics.push({ ...definitions.age, ...common, status: "measured", value: round(median(placed.map(days))), n: placed.length, segments: segment(placed, dims, minSample, (group) => round(median(group.map(days)))), ...rest, stats: meanStat(placed.map(days)) });
   metrics.push(...openStageMetrics(ctx, data, deals, evidence), ...deliveryOutlook(ctx, data, deals, evidence));
   return metrics;

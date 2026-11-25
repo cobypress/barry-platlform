@@ -141,7 +141,7 @@ export function transitionMatrix(m: Extract<Metric, { status: "measured" }>, cal
 function skipped(ctx: Ctx, data: Ready, p: Process): Metric {
   const definition = base(ctx, data, { ...DEF.skipped, assumptions: [expectedNote(p)] });
   const { minSample } = ctx.calibration;
-  if (p.won.length < minSample) return notMeasurable(definition, `${p.won.length} won deals with stage history is below the calibrated minimum of ${minSample}.`);
+  if (p.won.length < minSample) return notMeasurable(definition, said`${p.won.length} won deals with stage history is below the calibrated minimum of ${minSample}.`);
   if (p.expected.length === 0) return notMeasurable(definition, `No open stage was passed through by more than ${USUAL_SHARE}% of won deals, and the calibration marks none as required.`);
   const rate = (group: Deal[]): number => pct(group.filter((d) => skippedOf(p, d).length > 0).length, group.length);
   const byStage: MetricSegment[] = p.expected.map((stage) => ({ dimension: "skipped stage", key: stage, n: p.won.length, value: pct(p.won.filter((d) => !p.paths.get(d.Id)!.includes(stage)).length, p.won.length), notMeasurableReason: null }));
@@ -165,10 +165,10 @@ function backwards(ctx: Ctx, data: Ready, p: Process): Metric {
   });
 }
 
-function commonPath(ctx: Ctx, data: Ready, p: Process, deals: Deal[], d: Definition, noun: string): Metric {
+function commonPath(ctx: Ctx, data: Ready, p: Process, deals: Deal[], d: Definition, noun: "won deals" | "lost and no decision deals"): Metric {
   const definition = base(ctx, data, d);
   const { minSample } = ctx.calibration;
-  if (deals.length < minSample) return notMeasurable(definition, `${deals.length} ${noun} with stage history is below the calibrated minimum of ${minSample}.`);
+  if (deals.length < minSample) return notMeasurable(definition, said`${deals.length} ${noun} with stage history is below the calibrated minimum of ${minSample}.`);
   const counts = new Map<string, number>();
   for (const deal of deals) {
     const key = p.paths.get(deal.Id)!.join(" > ");

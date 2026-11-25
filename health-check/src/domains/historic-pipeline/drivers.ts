@@ -1,4 +1,5 @@
 import { pct, type RuleContext } from "../../engine/rule.ts";
+import { eng, joinSaid, said, type Said } from "../../engine/org-words.ts";
 import type { Finding, Metric, MetricSegment } from "../../schemas/index.ts";
 import { unsplitLostReason, type Deal } from "./cohort.ts";
 import { base, dimensions, fiscalStartOf, groupBy, measured, notMeasurable, pushesOf, quantile, round1 } from "./metrics.ts";
@@ -51,7 +52,7 @@ const FACTOR_NOTE = `The factors: ${FACTORS.map((f) => f.label.toLowerCase()).jo
 const isWon = (d: Deal): boolean => d.category === "won";
 const winRate = (deals: Deal[]): number => pct(deals.filter(isWon).length, deals.length);
 
-type Test = { has: (d: Deal) => boolean } | { reason: string };
+type Test = { has: (d: Deal) => boolean } | { reason: Said };
 
 /**
  * Rule 4 for a gap: the same comparison inside each team, record type, rep and
@@ -102,34 +103,34 @@ export function driverMetrics(ctx: Ctx): Metric[] {
   const tests: Record<FactorKey, Test> = {
     activity: { has: (d) => d.LastActivityDate !== null },
     pushed: { has: (d) => pushesOf(d, fiscal).length >= REPEAT_PUSHES },
-    skipped: p.expected.length ? { has: skippedPast } : { reason: "No open stage was passed through by more than half of won deals, and the calibration marks none as required, so no stage is expected." },
+    skipped: p.expected.length ? { has: skippedPast } : { reason: said`No open stage was passed through by more than half of won deals, and the calibration marks none as required, so no stage is expected.` },
     backwards: { has: (d) => backwardMoves(p.paths.get(d.Id)!, orderOf) > 0 },
-    long: line === null ? { reason: `${won.length} won deals is below the calibrated minimum of ${minSample}, too few to say how long a won deal usually takes.` } : { has: (d) => cycle(d) > line },
+    long: line === null ? { reason: said`${won.length} won deals is below the calibrated minimum of ${minSample}, too few to say how long a won deal usually takes.` } : { has: (d) => cycle(d) > line },
   };
 
   const assumptions = [
-    FACTOR_NOTE,
+    said`${eng(FACTOR_NOTE)}`,
     "Logged activity means the deal has a last activity date: at least one task or event was logged against it",
     ...(p.expected.length ? [expectedNote(p)] : []),
-    ...(line === null ? [] : [`A long cycle is longer than ${line} days from creation to close, the time 75% of won deals closed within`]),
+    ...(line === null ? [] : [said`A long cycle is longer than ${line} days from creation to close, the time 75% of won deals closed within`]),
   ];
-  const exclusions = [...data.exclusions, ...(noDecision ? [`${noDecision} no decision deals, which the win rate leaves out`] : [])];
+  const exclusions = [...data.exclusions, ...(noDecision ? [said`${noDecision} no decision deals, which the win rate leaves out`] : [])];
   const b = { ...base(ctx, data, { ...definition, assumptions }), exclusions };
-  if (deals.length < minSample) return [notMeasurable(b, `${deals.length} won and lost deals with stage history is below the calibrated minimum of ${minSample}.`)];
+  if (deals.length < minSample) return [notMeasurable(b, said`${deals.length} won and lost deals with stage history is below the calibrated minimum of ${minSample}.`)];
 
   const segments: MetricSegment[] = [];
   const stats: Record<string, number> = { deals: deals.length, won: won.length, lost: deals.length - won.length, noDecision, minGap: DRIVER_GAP, ...(line === null ? {} : { cycleLineDays: line }) };
-  const reasons: string[] = [];
+  const reasons: Said[] = [];
   for (const factor of FACTORS) {
     const test = tests[factor.key];
     const yes = "has" in test ? deals.filter(test.has) : [];
     const no = "has" in test ? deals.filter((d) => !test.has(d)) : [];
     const thin = "has" in test ? [yes, no].find((side) => side.length < minSample) : undefined;
-    const reason = "reason" in test ? test.reason : thin ? `${thin.length} deals ${thin === yes ? "with" : "without"} it, below the calibrated minimum of ${minSample} on each side.` : null;
+    const reason = "reason" in test ? test.reason : thin ? said`${thin.length} deals ${thin === yes ? "with" : "without"} it, below the calibrated minimum of ${minSample} on each side.` : null;
     const side = (key: "with" | "without", group: Deal[]): MetricSegment => ({ dimension: factor.label, key, n: group.length, value: reason ? null : winRate(group), notMeasurableReason: reason });
     segments.push(side("with", yes), side("without", no));
     if (reason !== null || !("has" in test)) {
-      reasons.push(`${factor.label}: ${reason}`);
+      reasons.push(said`${eng(factor.label)}: ${reason!}`);
       continue;
     }
     // From the rates as printed, so the gap on the page is the difference of the figures beside it.
@@ -137,7 +138,7 @@ export function driverMetrics(ctx: Ctx): Metric[] {
     const { compared, held } = withinSegments(ctx, deals, test.has, gap);
     Object.assign(stats, { [`${factor.key}Gap`]: Math.abs(gap), [`${factor.key}WithWon`]: yes.filter(isWon).length, [`${factor.key}WithoutWon`]: no.filter(isWon).length, [`${factor.key}Compared`]: compared, [`${factor.key}Held`]: held });
   }
-  if (reasons.length === FACTORS.length) return [notMeasurable(b, `No factor has enough deals on both sides to compare. ${reasons.join(" ")}`)];
+  if (reasons.length === FACTORS.length) return [notMeasurable(b, said`No factor has enough deals on both sides to compare. ${joinSaid(reasons, " ")}`)];
   return [measured(b, { value: winRate(deals), n: deals.length, dateRange: ctx.window, segments, stats })];
 }
 
