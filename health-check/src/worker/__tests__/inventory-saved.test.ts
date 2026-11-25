@@ -38,7 +38,7 @@ function extracts(): Map<string, unknown> {
   ]);
 }
 
-const sectionsOf = (inv: Inventory) => SECTIONS.map((k) => inv[k]);
+const sectionsOf = (inv: Inventory) => SECTIONS.map((k) => inv[k]!);
 /** As the worker saves it: written, read back and checked, with the log kept. */
 function saved(inv: unknown): { inventory: Inventory; logs: string[] } {
   const logs: string[] = [];
@@ -359,7 +359,7 @@ describe("every delivery saves the same inventory (the real run job, the synthet
     const w = await setup();
     assert.equal((await w.deliver()).outcome, "done");
     const first = w.inventory();
-    assert.ok(SECTIONS.every((k) => "rows" in first[k]), "the synthetic org's inventory is whole");
+    assert.ok(SECTIONS.every((k) => "rows" in first[k]!), "the synthetic org's inventory is whole");
     w.answer();
     assert.equal((await w.deliver()).outcome, "done");
     assert.deepEqual(w.inventory(), first);

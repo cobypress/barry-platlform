@@ -1,14 +1,17 @@
 import { redactSecrets } from "../privacy/secrets.ts";
 import { BudgetStopError } from "../salesforce/budget.ts";
 import { classifyError, isUnavailable, runStoppedWords, type OrgLimit, type SalesforceError } from "../salesforce/client.ts";
-import { INVENTORY_VERSION, NAME_MAX, type ConnectedAppRow, type FillRateObject, type Inventory, type LimitRow, type PackageRow, type RiskyPermissionRow } from "../schemas/inventory.ts";
+import { INVENTORY_VERSION, NAME_MAX, type ConnectedAppRow, type FillRateObject, type Inventory, type LimitRow, type PackageRow, type RiskyPermissionHoldersRow, type RiskyPermissionRow } from "../schemas/inventory.ts";
+import type { Calibration } from "../schemas/index.ts";
+import { lapse } from "../domains/logins.ts";
+import { apiOnlyExtractor, apiOnlyOf, type ApiOnlyData } from "./integrations.ts";
 import type { RunScope } from "../schemas/index.ts";
 import { CORE_OBJECTS, recordCountsExtractor, schemaExtractor } from "./configuration.ts";
 import { orgDocumentationExtractor, type ConnectedAppRow as AppSetting } from "./documentation.ts";
-import { accessExtractor, holdersOf, type AccessData, type AccessAssignment } from "./security.ts";
+import { accessExtractor, holding, holdersOf, PRIVILEGED_RULES, privilegedHolding, privilegedPermissionsExtractor, type AccessData, type AccessAssignment, type Holding, type PrivilegedPermission, type PrivilegedPermissions } from "./security.ts";
 import { accessOf, isPartlyHidden, recordTypeUseExtractor } from "./record-types.ts";
-import { licencesExtractor, type PackageLicenseRow } from "./users.ts";
-import { limitsReadingOf, readableReason, readName, readSoql, refusalReason, type ExtractContext, type Extractor, type Sourced, type SourceInfo } from "./types.ts";
+import { licencesExtractor, loginsExtractor, usersExtractor, type LoginSummary, type PackageLicenseRow, type UserRow } from "./users.ts";
+import { daysBefore, limitsReadingOf, readableReason, readName, readSoql, refusalReason, type ExtractContext, type Extractor, type Sourced, type SourceInfo } from "./types.ts";
 
 // The org's inventory (DECISIONS.md 603 to 605): the whole picture of fields,
 // packages, connected apps, risky permissions and limits, kept as data for the
@@ -472,11 +475,112 @@ export type RiskyPermissionsData = {
   notInOrg: string[];
   sets: Sourced<Array<{ kind: RiskyPermissionRow["kind"]; name: string; apiName: string; namespace: string | null; grants: string[]; activeUsers: number | null }>>;
   holdersGap: string | null;
+  /** Each permission's holders, counted while the assignments are held (DECISIONS.md 735). Null when the grants couldn't be read. */
+  holders: HoldersData | null;
 };
+
+export type HoldersData = { rows: RiskyPermissionHoldersRow[]; notes: string[]; dormantDays: number };
+
+/** What the holders are counted from: all of it read by other steps, or by this one, so no call is added. */
+export type HoldersInput = {
+  checked: Array<{ field: string; label: string }>;
+  /** Every profile and set granting any permission checked, as this step read them. */
+  sets: GrantRow[];
+  access: Pick<AccessData, "assignments" | "groupComponents">;
+  /** Null when the users step isn't part of the run. */
+  users: Sourced<UserRow[]> | null;
+  /** The Modify and View All Data checks' own read, or null when they aren't part of the run. */
+  privileged: PrivilegedPermissions | null;
+  apiOnly: ApiOnlyData | null;
+  logins: Sourced<LoginSummary> | null;
+  kinds: Calibration["users"];
+  dormantDays: number;
+  now: Date;
+};
+
+export const USERS_NOT_READ = "Users weren't read in this run, so who is active can't be told.";
+export const FROZEN_NOT_READ = "Whether a user is frozen isn't read, so a frozen user who is still active is counted, as every check counts them.";
+export const MUTES_NOT_READ =
+  "A permission set group can mute a permission one of its sets grants, and mutes aren't read. People who might hold a permission only through a group are counted apart, never as holders.";
+// As the integration checks tell an integration licence.
+const isIntegrationLicence = (u: UserRow): boolean => /\bintegration\b/i.test(u.Profile?.UserLicense?.Name ?? "Unknown");
+/** The label of each permission a check judges, and its field in that check's read. */
+const PRIVILEGED_BY_LABEL = new Map(RISKY_PERMISSIONS.flatMap((p) => (p.field in PRIVILEGED_RULES ? [[p.label, p.field as PrivilegedPermission] as const] : [])));
+
+/**
+ * Each permission checked, and the active people holding it, each counted once.
+ * Modify and View All Data are counted from their checks' own read by the one
+ * count the checks use, so the figure here is the figure in their findings
+ * (DECISIONS.md 735). The rest are counted the same way from this step's read.
+ */
+export function holderCounts(input: HoldersInput): HoldersData {
+  const { assignments, groupComponents } = input.access;
+  const notes: string[] = [FROZEN_NOT_READ];
+  // A group's assignment carries the group's own set, where Salesforce gives one (DECISIONS.md 487).
+  const groupSets = assignments.status === "ok" ? new Set(assignments.data.flatMap((a) => (a.PermissionSetGroupId && a.PermissionSetId ? [a.PermissionSetId] : []))) : null;
+  const groupsOf = new Map<string, Set<string>>();
+  if (assignments.status === "ok") for (const a of assignments.data) if (a.PermissionSetGroupId) (groupsOf.get(a.AssigneeId) ?? groupsOf.set(a.AssigneeId, new Set()).get(a.AssigneeId)!).add(a.PermissionSetGroupId);
+  const inGroup = new Map<string, string[]>();
+  if (groupComponents.status === "ok") for (const c of groupComponents.data) inGroup.set(c.PermissionSetGroupId, [...(inGroup.get(c.PermissionSetGroupId) ?? []), c.PermissionSetId]);
+  const apiOnly = input.apiOnly ? apiOnlyOf(input.apiOnly) : null;
+  const kinds = new Map(input.kinds.map((k) => [k.userId.slice(0, 15), k.kind]));
+  const isIntegration = apiOnly ? (u: UserRow): boolean => kinds.get(u.Id.slice(0, 15)) === "integration" || isIntegrationLicence(u) || apiOnly(u) : null;
+  const cutoff = daysBefore(input.now, input.dormantDays);
+  const logins = input.logins ?? undefined;
+  let unconfirmedAny = false;
+
+  const counted = (permission: string, rule: string | null, h: Holding, setAssignments: ReadonlyArray<{ AssigneeId: string; PermissionSetId: string | null }>): RiskyPermissionHoldersRow => {
+    const viaSet = new Set<string>();
+    const viaGroup = new Set<string>();
+    for (const a of setAssignments) if (a.PermissionSetId !== null && h.added.has(a.PermissionSetId)) (groupSets?.has(a.PermissionSetId) ? viaGroup : viaSet).add(a.AssigneeId);
+    const granting = new Set([...inGroup].filter(([, sets]) => sets.some((id) => h.added.has(id))).map(([group]) => group));
+    const unconfirmed = groupComponents.status === "ok" && groupSets ? h.active.filter((u) => !h.holds(u) && [...(groupsOf.get(u.Id) ?? [])].some((g) => granting.has(g))).length : null;
+    if (unconfirmed) unconfirmedAny = true;
+    return {
+      permission,
+      rule,
+      holders: h.holders.length,
+      byProfile: h.holders.filter(h.fromProfile).length,
+      byPermissionSet: groupSets ? h.holders.filter((u) => viaSet.has(u.Id)).length : null,
+      byGroup: groupSets ? h.holders.filter((u) => viaGroup.has(u.Id)).length : null,
+      integration: isIntegration ? h.holders.filter(isIntegration).length : null,
+      notLoggedIn: h.holders.filter((u) => lapse(u, logins, cutoff) !== null).length,
+      unconfirmedThroughGroups: unconfirmed,
+    };
+  };
+
+  const rows = input.checked.map((c): RiskyPermissionHoldersRow => {
+    const privileged = PRIVILEGED_BY_LABEL.get(c.label);
+    if (privileged && input.privileged) {
+      const rule = PRIVILEGED_RULES[privileged];
+      if (!input.users) return { permission: c.label, rule, unavailable: USERS_NOT_READ };
+      const held = privilegedHolding(input.privileged, input.users, privileged);
+      if (!held.ok) return { permission: c.label, rule, unavailable: held.reason };
+      if (input.privileged.assignments.status !== "ok") throw new Error("unreachable");
+      return counted(c.label, rule, held.holding, input.privileged.assignments.data);
+    }
+    // No check judges it in this run: counted the same way from this step's read.
+    if (!input.users) return { permission: c.label, rule: null, unavailable: USERS_NOT_READ };
+    if (input.users.status !== "ok") return { permission: c.label, rule: null, unavailable: `Users couldn't be read: ${input.users.reason}` };
+    if (assignments.status !== "ok") return { permission: c.label, rule: null, unavailable: `Permission set assignments couldn't be read: ${assignments.reason}` };
+    const granting = input.sets.filter((s) => s[c.field] === true);
+    return counted(c.label, null, holding(granting, assignments.data, input.users.data), assignments.data);
+  });
+
+  const measured = rows.some((r) => "holders" in r);
+  if (measured && assignments.status !== "ok") notes.push(`Which permission sets belong to a permission set group couldn't be read, so holders through a set and through a group aren't told apart: ${assignments.reason}`);
+  if (measured && groupComponents.status !== "ok") notes.push(`What each permission set group holds couldn't be read, so nobody is counted as possibly holding a permission through one: ${groupComponents.reason}`);
+  if (unconfirmedAny) notes.push(MUTES_NOT_READ);
+  if (measured && !input.apiOnly) notes.push("Who is set to API only wasn't read in this run, so integration accounts aren't counted.");
+  else if (measured && !apiOnly) notes.push("Who is set to API only couldn't be read, so integration accounts aren't counted.");
+  else if (measured && input.kinds.length === 0) notes.push("Nobody has told us which of your users are integration accounts, so only those on an integration licence or set to API only are counted as integrations.");
+  if (measured && input.logins?.status !== "ok") notes.push("The login log couldn't be read, so not logging in is told by each user's last-login date alone.");
+  return { rows, notes, dormantDays: input.dormantDays };
+}
 
 export const riskyPermissionsExtractor: Extractor<RiskyPermissionsData> = {
   id: "inventory-risky-permissions",
-  version: 1,
+  version: 2,
   async run(ctx) {
     const source: SourceInfo = { kind: "rest", path: "sobjects/PermissionSet/describe" };
     let fields: Array<{ name: string; label?: string }>;
@@ -484,7 +588,7 @@ export const riskyPermissionsExtractor: Extractor<RiskyPermissionsData> = {
       fields = (await ctx.client.describe<{ fields: Array<{ name: string; label?: string }> }>("PermissionSet")).fields;
     } catch (err) {
       if (!isUnavailable(err)) throw err;
-      return { checked: [], notInOrg: [], sets: { status: "unavailable", reason: refusalReason(err, "PermissionSet"), source }, holdersGap: null };
+      return { checked: [], notInOrg: [], sets: { status: "unavailable", reason: refusalReason(err, "PermissionSet"), source }, holdersGap: null, holders: null };
     }
     const byName = new Map(fields.map((f) => [f.name, f]));
     const byLabel = new Map(fields.filter((f) => f.name.startsWith("Permissions") && f.label).map((f) => [f.label!.toLowerCase(), f]));
@@ -495,9 +599,9 @@ export const riskyPermissionsExtractor: Extractor<RiskyPermissionsData> = {
       if (found) checked.push({ field: found.name, label: p.label });
       else notInOrg.push(p.label);
     }
-    if (checked.length === 0) return { checked, notInOrg, sets: { status: "unavailable", reason: "The org's PermissionSet has none of the permissions we check.", source }, holdersGap: null };
+    if (checked.length === 0) return { checked, notInOrg, sets: { status: "unavailable", reason: "The org's PermissionSet has none of the permissions we check.", source }, holdersGap: null, holders: null };
     const read = await readSoql<GrantRow>(ctx, riskyPermissionsQuery(checked.map((c) => c.field)));
-    if (read.status !== "ok") return { checked, notInOrg, sets: read, holdersGap: null };
+    if (read.status !== "ok") return { checked, notInOrg, sets: read, holdersGap: null, holders: null };
 
     let access: Pick<AccessData, "assignments" | "groupComponents"> | null = earlier(ctx, accessExtractor);
     if (!access) {
@@ -506,7 +610,7 @@ export const riskyPermissionsExtractor: Extractor<RiskyPermissionsData> = {
         groupComponents: await readSoql<{ PermissionSetId: string; PermissionSetGroupId: string }>(ctx, ACCESS_QUERIES.groupComponents),
       };
     }
-    const holders = holdersOf(access as AccessData);
+    const bySet = holdersOf(access as AccessData);
     const gap = access.assignments.status !== "ok" ? access.assignments.reason : access.groupComponents.status !== "ok" ? access.groupComponents.reason : null;
     const rows = read.data.map((s) => ({
       kind: s.IsOwnedByProfile ? ("profile" as const) : ("permission set" as const),
@@ -514,9 +618,22 @@ export const riskyPermissionsExtractor: Extractor<RiskyPermissionsData> = {
       apiName: s.Name,
       namespace: s.NamespacePrefix ?? null,
       grants: checked.filter((c) => s[c.field] === true).map((c) => c.label),
-      activeUsers: holders ? (holders.get(s.Id)?.size ?? 0) : null,
+      activeUsers: bySet ? (bySet.get(s.Id)?.size ?? 0) : null,
     }));
-    return { checked, notInOrg, sets: { ...read, data: rows.filter((r) => r.grants.length > 0) }, holdersGap: gap };
+    // Counted now, while the assignments are held, so the step keeps no person's id.
+    const holders = holderCounts({
+      checked,
+      sets: read.data,
+      access,
+      users: earlier(ctx, usersExtractor),
+      privileged: earlier(ctx, privilegedPermissionsExtractor),
+      apiOnly: earlier(ctx, apiOnlyExtractor),
+      logins: earlier(ctx, loginsExtractor),
+      kinds: ctx.calibration.users,
+      dormantDays: ctx.calibration.dormantDays,
+      now: ctx.now,
+    });
+    return { checked, notInOrg, sets: { ...read, data: rows.filter((r) => r.grants.length > 0) }, holdersGap: gap, holders };
   },
 };
 
@@ -536,6 +653,13 @@ function riskyRows(data: RiskyPermissionsData): Inventory["riskyPermissions"] {
   if (unnamed) notes.push(`${unnamed === 1 ? "One profile or permission set has" : `${unnamed} profiles and permission sets have`} no API name in Salesforce, so ${unnamed === 1 ? "it isn't" : "they aren't"} listed.`);
   notes.push(...names.notes());
   return { rows, notes, checked: data.checked.map((c) => c.label), notInOrg: data.notInOrg };
+}
+
+function holderRows(data: RiskyPermissionsData): NonNullable<Inventory["riskyPermissionHolders"]> {
+  if (data.sets.status !== "ok") return { unavailable: data.sets.reason };
+  // A step's output from before the count was made has none.
+  if (!data.holders) return { unavailable: "Each permission's holders weren't counted in this run." };
+  return { rows: data.holders.rows, notes: data.holders.notes, dormantDays: data.holders.dormantDays };
 }
 
 // ---------------------------------------------------------------------------
@@ -653,5 +777,6 @@ export function buildInventory(extracts: Map<string, unknown>, scope: RunScope, 
     connectedApps: apart("connectedApps", () => (apps ? connectedAppRows(apps) : notRunOf(connectedAppsExtractor))),
     riskyPermissions: apart("riskyPermissions", () => (risky ? riskyRows(risky) : notRunOf(riskyPermissionsExtractor))),
     limits: apart("limits", () => (limits ? limitRows(limits) : notRunOf(limitsExtractor))),
+    riskyPermissionHolders: apart("riskyPermissionHolders", () => (risky ? holderRows(risky) : notRunOf(riskyPermissionsExtractor))),
   };
 }

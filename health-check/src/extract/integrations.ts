@@ -1,4 +1,5 @@
 import type { OrgLimit } from "../salesforce/client.ts";
+import type { UserRow } from "./users.ts";
 import { daysBefore, limitsReadingOf, readSoql, soqlWindow, type Extractor, type Sourced } from "./types.ts";
 
 // What the integrations area reads beyond what security and "Your org,
@@ -7,6 +8,19 @@ import { daysBefore, limitsReadingOf, readSoql, soqlWindow, type Extractor, type
 
 export type ApiOnlySet = { Id: string; IsOwnedByProfile: boolean; Profile: { Name: string } | null };
 export type ApiOnlyData = { sets: Sourced<ApiOnlySet[]>; assignments: Sourced<Array<{ AssigneeId: string; PermissionSetId: string }>> };
+
+/**
+ * Who is API only: on a profile with API Only User, or assigned a set with it.
+ * Null when either read failed. Shared by the integration checks and the
+ * inventory's holders (DECISIONS.md 735).
+ */
+export function apiOnlyOf(data: ApiOnlyData): ((u: UserRow) => boolean) | null {
+  const { sets, assignments } = data;
+  if (sets.status !== "ok" || assignments.status !== "ok") return null;
+  const profiles = new Set(sets.data.flatMap((s) => (s.IsOwnedByProfile && s.Profile ? [s.Profile.Name] : [])));
+  const assigned = new Set(assignments.data.map((a) => a.AssigneeId));
+  return (u: UserRow): boolean => profiles.has(u.Profile?.Name ?? "") || assigned.has(u.Id);
+}
 
 // Profiles and permission sets apart, as for Modify All Data: a profile's grant
 // reaches its users through the profile, a permission set's through assignment.
