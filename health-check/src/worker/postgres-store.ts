@@ -721,6 +721,7 @@ export class PostgresWorkerStore implements WorkerStore {
   #saidNoOrgStagesTable = false;
   #saidNoAnswersTable = false;
   #saidUnknownAnswer = false;
+  #saidNoStageAnswersTable = false;
 
   constructor(pool: SqlPool, options: { log?: (line: string) => void } = {}) {
     this.#pool = pool;
@@ -1413,10 +1414,10 @@ export class PostgresWorkerStore implements WorkerStore {
       return one(await this.#pool.query(CUSTOMER_STAGE_ANSWER_SQL, [orgId15.slice(0, 15)]))?.value ?? null;
     } catch (err) {
       const code = (err as { code?: unknown }).code;
-      if (code !== "42P01") throw new StoreError(`the console's database refused the customer's answer (SQLSTATE ${sqlState(code)})`);
-      if (!this.#saidNoAnswersTable) {
-        this.#saidNoAnswersTable = true;
-        this.#log("The console's database has no HealthCheckCustomerAnswer table yet, so no customer's currency is read. Apply the console's 20261219_health_check_portal_answers.sql migration.");
+      if (code !== "42P01") throw new StoreError(`the console's database refused the customer's answer about its closed stages (SQLSTATE ${sqlState(code)})`);
+      if (!this.#saidNoStageAnswersTable) {
+        this.#saidNoStageAnswersTable = true;
+        this.#log("The console's database has no HealthCheckCustomerAnswer table yet, so no customer's answer about its closed stages is read. Apply the console's 20261219_health_check_portal_answers.sql migration.");
       }
       return null;
     }

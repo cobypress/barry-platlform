@@ -30,12 +30,14 @@ describe("an automatic run of the synthetic org with its closed stages set", asy
   const answer = (value: unknown) => parseStageAnswer(value) as StageAnswer;
   /** The same calibration with every stage stated plainly, as a person's would be: no mark of where it came from. */
   const stated = (c: Calibration): Calibration => ({ ...c, stages: c.stages.map(({ from: _f, ...s }) => s) });
-  const run = async (calibration: Calibration) => loadRun((await runFromRecording({ calibration, reviewMode: "automatic", transport: new AutomaticReplay() })).dir);
+  const run = async (calibration: Calibration, stageNames = false) => loadRun((await runFromRecording({ calibration, reviewMode: "automatic", transport: new AutomaticReplay(), stageNames })).dir);
   const none = await run(calibrate());
   const answered = await run(calibrate({ stageAnswer: answer(ALL) }));
   const plain = await run(stated(calibrate({ stageAnswer: answer(ALL) })));
   const partial = await run(calibrate({ stageAnswer: answer({ "Closed Lost": "lost" }) }));
-  const named = await run(calibrate({ stageNames: true }));
+  const named = await run(calibrate({ stageNames: true }), true);
+  // A calibration that still holds readings from names, analysed with the switch off: set aside, as if never read.
+  const namedOff = await run(calibrate({ stageNames: true }));
   const byId = (r: typeof none, id: string) => r.input.findings.filter((f) => f.ruleId === id);
 
   test("without an answer, the four checks are not measurable with the engine's sentence, as before", () => {
@@ -72,6 +74,26 @@ describe("an automatic run of the synthetic org with its closed stages set", asy
     for (const id of FOUR) assert.ok(byId(named, id).every((f) => f.status !== "not_measurable" && JSON.stringify(f).includes(ASSUMED)), id);
   });
 
+  test("the switch off at analysis: readings from names are set aside, whatever the calibration holds, and the run is the one with none", () => {
+    assert.deepEqual(namedOff.input.findings, none.input.findings);
+    assert.deepEqual(namedOff.input.metrics, none.input.metrics);
+    assert.deepEqual(namedOff.input.scores, none.input.scores);
+  });
+
+  test("the assumption only on figures that split lost from no decision, or are sized by the win rate that does", () => {
+    const has = (x: unknown) => JSON.stringify(x).includes(ASSUMED);
+    assert.deepEqual(named.input.metrics.filter(has).map((m) => m.id).sort(), [
+      "activity.per_lost_deal", "historic.lost_by_stage", "historic.lost_value_by_stage", "historic.no_decision_rate", "historic.quarterly_win_rate",
+      "historic.sales_cycle_lost", "historic.win_rate", "historic.win_rate_by_value", "historic.win_rate_including_no_decision",
+    ]);
+    assert.deepEqual([...new Set(named.input.findings.filter(has).map((f) => f.ruleId))].sort(), [
+      // Readers of the split.
+      "act.deals-without-activity", "act.won-vs-lost-activity", "pipe.segment-divergence", "rev.win-backs",
+      // Sized at the win rate (value.ts atOwnWinRate, historic-pipeline/potential.ts), so their figures move with it.
+      "cur.stale-deals", "dq.open-opps-no-activity", "dq.open-opps-past-close", "dq.opps-inactive-owner", "rev.dormant-accounts", "rev.stalled-deals",
+    ].sort());
+  });
+
   test("released as an automatic run must be: nothing held, unmarked or unmatched, the stage names marked as the org's and nothing else in the sentence", () => {
     for (const r of [answered, named, partial]) {
       const d = checkedDigest({ input: r.input, pseudonyms: r.pseudonyms, inventory: null, madeAt: MADE });
@@ -98,5 +120,76 @@ describe("an automatic run of the synthetic org with its closed stages set", asy
     }
     // Without the answer on either side: as before.
     assert.equal(compareWithBaseline(side(none, "a"), side(none, "b")).newlyMeasured, undefined);
+  });
+
+  test("the first month as the reports and the scan's result show it: segments now measured are first checked, never new, answered or read by names", async () => {
+    const { buildReport } = await import("../../narrative/sections.ts");
+    const { buildPulseResult } = await import("../../pulse/result.ts");
+    const { cpSync, readFileSync, writeFileSync } = await import("node:fs");
+    const { join } = await import("node:path");
+    const { tempDir } = await import("../../testing/harness.ts");
+    const noneDir = (await runFromRecording({ calibration: calibrate(), reviewMode: "automatic", transport: new AutomaticReplay() })).dir;
+    for (const [calibration, stageNames] of [[calibrate({ stageAnswer: answer(ALL) }), false], [calibrate({ stageNames: true }), true]] as const) {
+      const nowDir = (await runFromRecording({ calibration, reviewMode: "automatic", transport: new AutomaticReplay(), stageNames })).dir;
+      const parent = tempDir();
+      const earlier = join(parent, "hc-2026-10-09-earlier");
+      const dir = join(parent, "hc-2026-11-09-now");
+      cpSync(noneDir, earlier, { recursive: true });
+      cpSync(nowDir, dir, { recursive: true });
+      const json = (d: string) => JSON.parse(readFileSync(join(d, "run.json"), "utf8"));
+      writeFileSync(join(earlier, "run.json"), JSON.stringify({ ...json(noneDir), id: "hc-2026-10-09-earlier", asOf: "2026-10-09T12:00:00.000Z" }));
+      writeFileSync(join(dir, "run.json"), JSON.stringify({ ...json(nowDir), baselineRunId: "hc-2026-10-09-earlier" }));
+      const report = buildReport(loadRun(dir).input);
+      const p = report.progress!;
+      assert.deepEqual(p.added, [], JSON.stringify(p.added));
+      assert.ok(p.newlyMeasured!.filter((c) => c.ruleId === "pipe.segment-divergence").flatMap((c) => c.findingIds).length === 3, "all three win-rate segments, the team's and the reps'");
+      const result = buildPulseResult(report) as { counts: { new: number }; newIssues?: unknown[] };
+      assert.equal(result.counts.new, 0);
+      assert.deepEqual(result.newIssues ?? [], []);
+    }
+  });
+});
+
+describe("a value's period marked only where code checks the digest (DECISIONS.md 756)", async () => {
+  const { runHealthCheck } = await import("../../engine/run.ts");
+  const { SALES_CLOUD_MODULES, CPQ_MODULES } = await import("../../domains/index.ts");
+  const { Simulator } = await import("../../testing/simulator.ts");
+  const { AS_OF, CONNECTED_USER } = await import("../../testing/synthetic-org.ts");
+  const { syntheticProvider, loadAnswers } = await import("../../testing/replay.ts");
+  const { analyseExtracts, loadExtracts, tempDir } = await import("../../testing/harness.ts");
+  const first = await runFromRecording();
+  const stages = stagesOf(first.dir);
+  const decided = automaticCalibration(stages, { orgId: first.run.orgId, at: "2026-10-31T09:00:00.000Z", currency: "GBP", stageAnswer: parseStageAnswer(ALL) as StageAnswer });
+  assert.ok(decided.ok);
+  const pulse = async (gated: boolean, transport = new Simulator()) =>
+    loadRun((await runHealthCheck({ provider: syntheticProvider, calibration: decided.calibration, modules: SALES_CLOUD_MODULES, outDir: tempDir(), now: new Date(AS_OF), transport, connectedUser: CONNECTED_USER, log: () => {}, product: "pulse", ...(gated ? { gated: true } : {}) })).dir);
+  const PERIOD = /^in wins the gap may have cost, \d{4}-\d\d-\d\d to \d{4}-\d\d-\d\d$/;
+
+  test("a gated monthly scan on a decided calibration is released: its periods marked as ours, nothing unmarked or held", async () => {
+    for (const transport of [new Simulator(), new Simulator({ readOnly: true }), new Simulator({ organizationType: "Professional Edition" })]) {
+      const r = await pulse(true, transport);
+      const withPeriod = r.input.findings.filter((f) => f.value.kind !== "not_sized" && PERIOD.test(f.value.period));
+      assert.ok(withPeriod.length > 0, "the win-rate segments are sized");
+      for (const f of withPeriod) assert.deepEqual(f.orgWords?.valuePeriod?.spans, []);
+      const d = checkedDigest({ input: r.input, pseudonyms: r.pseudonyms, inventory: null, madeAt: MADE });
+      assert.equal(d.held, null);
+      assert.equal(d.unmarked, 0);
+    }
+  });
+
+  test("a run whose digest nobody checks by code keeps its findings exactly as before: no period mark", async () => {
+    const r = await pulse(false);
+    assert.ok(r.input.findings.some((f) => f.value.kind !== "not_sized" && PERIOD.test(f.value.period)));
+    assert.ok(r.input.findings.every((f) => f.orgWords?.valuePeriod === undefined));
+  });
+
+  test("the CPQ discount's period too", async () => {
+    const cpq = await runFromRecording({ answers: loadAnswers(), modules: [...SALES_CLOUD_MODULES, ...CPQ_MODULES] });
+    for (const markPeriods of [true, false]) {
+      const out = analyseExtracts(loadExtracts(cpq.dir), { modules: [...SALES_CLOUD_MODULES, ...CPQ_MODULES], markPeriods });
+      const f = out.findings.find((x) => x.ruleId === "cpq.discount-leakage")!;
+      assert.match(f.value.kind === "revenue" ? f.value.period : "", /^in discount beyond what peers gave, \d{4}-\d\d-\d\d to \d{4}-\d\d-\d\d, a potential figure$/);
+      assert.deepEqual(f.orgWords?.valuePeriod?.spans, markPeriods ? [] : undefined);
+    }
   });
 });

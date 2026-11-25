@@ -21,14 +21,15 @@ export type StageOutcome = "lost" | "no_decision";
 /** A customer's answer as read: what it says of each stage it names, and how many entries in it weren't an answer at all. */
 export type StageAnswer = { outcomes: ReadonlyMap<string, StageOutcome>; ignored: number };
 
-/** No org has this many stages: an answer naming more is cut here. */
+/** No org has this many stages: an answer naming more is refused whole, so what it sets never depends on its order. */
 const MAX_ENTRIES = 2_000;
 /** A picklist value's API name is at most 255 characters. */
 const MAX_NAME = 255;
 
 /**
  * The stored answer, or "malformed" when it isn't a JSON object (a string
- * holding one, or the object itself). Within an object, only a non-empty name
+ * holding one, or the object itself) or names more entries than any org has
+ * stages. Within an object, only a non-empty name
  * of a stage's length with exactly "lost" or "no_decision" is an answer;
  * anything else in it is counted as ignored and never read further.
  */
@@ -42,10 +43,12 @@ export function parseStageAnswer(value: unknown): StageAnswer | "malformed" {
     }
   }
   if (read === null || typeof read !== "object" || Array.isArray(read)) return "malformed";
+  const entries = Object.entries(read as Record<string, unknown>);
+  if (entries.length > MAX_ENTRIES) return "malformed";
   const outcomes = new Map<string, StageOutcome>();
   let ignored = 0;
-  for (const [name, outcome] of Object.entries(read as Record<string, unknown>)) {
-    if (outcomes.size >= MAX_ENTRIES || name.length === 0 || name.length > MAX_NAME || (outcome !== "lost" && outcome !== "no_decision")) ignored++;
+  for (const [name, outcome] of entries) {
+    if (name.length === 0 || name.length > MAX_NAME || (outcome !== "lost" && outcome !== "no_decision")) ignored++;
     else outcomes.set(name, outcome);
   }
   return { outcomes, ignored };

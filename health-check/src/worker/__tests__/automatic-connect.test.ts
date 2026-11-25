@@ -853,8 +853,10 @@ describe("the customer's closed stages, and the name rule, at connect (DECISIONS
   test("with HC_STAGE_NAMES on and no answer: read from its name, marked so; off: left out, as before", async () => {
     const on = await flow();
     on.deps.stageNames = true;
+    // A name plainly an outcome; "Quokka Lost label" is not (a word beside the outcome), and stays undecided.
+    on.org.stages = [...STAGES, { ...stage("Closed_Lost", 6, { IsClosed: true }), MasterLabel: "Closed Lost" }];
     await on.handle(on.job, once);
-    assert.deepEqual(on.deps.store.runs.get(RUN_ID)!.calibration!.stages.filter((s) => s.from), [{ name: "Quokka Lost", category: "lost", from: "name" }]);
+    assert.deepEqual(on.deps.store.runs.get(RUN_ID)!.calibration!.stages.filter((s) => s.from), [{ name: "Closed_Lost", category: "lost", from: "name" }]);
     noStageNames(on, "");
     const off = await flow();
     await off.handle(off.job, once);

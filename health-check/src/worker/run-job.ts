@@ -520,6 +520,7 @@ async function runLocked(runId: string, deps: WorkerDeps, attempt: Attempt, seen
       // The folder's run.json says how the run is reviewed, so its documents read the true mode (DECISIONS.md 692).
       reviewMode: input.run.reviewMode,
       ...(gatedPulse ? { gated: true } : {}),
+      ...(deps.stageNames === true ? { stageNames: true } : {}),
       baselineRunId: input.run.baselineRunId,
       keepApexSource: apexSummaries,
       // A health check runs PMD and ESLint beside our scan, and only stores what they find; a scan and a pulse don't (DECISIONS.md 670).

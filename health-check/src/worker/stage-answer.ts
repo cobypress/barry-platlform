@@ -1,6 +1,6 @@
 import { ORG_SETTINGS_CALIBRATOR } from "../connect/auto-calibration.ts";
 import { StoreError, type OrgStage } from "../connect/org-stages.ts";
-import { machineSet, withMachineStages } from "../connect/stage-outcomes.ts";
+import { fromName, machineSet, withMachineStages } from "../connect/stage-outcomes.ts";
 import { Calibration } from "../schemas/calibration.ts";
 import { answeredStages } from "./connect-job.ts";
 import type { WorkerDeps } from "./deps.ts";
@@ -49,11 +49,9 @@ export async function setStagesBeforeRun(o: { runId: string; input: RunJobInput;
     log(`Automatic run ${runId}'s saved stages couldn't be read, so its closed stages are left as its calibration has them: ${err instanceof StoreError ? err.message : "an unexpected error"}.`);
     return c;
   }
-  if (!org) {
-    log(`Automatic run ${runId} has no saved stages to check its closed stages against, so they are left as its calibration has them.`);
-    return c;
-  }
-  const set = withMachineStages(c, org, answer, byName);
+  // With no saved stages nothing new can be checked, so nothing is added; with the switch off, readings from names still go (the analysis sets them aside anyway).
+  const set = org ? withMachineStages(c, org, answer, byName) : withoutNames(c, byName);
+  if (!org) log(`Automatic run ${runId} has no saved stages to check its closed stages against, so ${set.changed ? "only the readings from stage names were taken out" : "they are left as its calibration has them"}.`);
   if (!set.changed) return c;
   const parsed = Calibration.safeParse({ ...c, stages: set.stages });
   if (!parsed.success) {
@@ -74,6 +72,12 @@ export async function setStagesBeforeRun(o: { runId: string; input: RunJobInput;
   }
   log(`Automatic run ${runId}'s closed stages were set again before it ran: ${set.answered} from the customer's answer, ${set.byName} from their names${set.ignored > 0 ? `, ${set.ignored} ${set.ignored === 1 ? "entry" : "entries"} in the answer ignored` : ""}; nothing else in its calibration changed.`);
   return parsed.data;
+}
+
+/** The stages without what names read, with the switch off; with it on, as they are. Counts as withMachineStages gives them. */
+function withoutNames(c: Calibration, byName: boolean): ReturnType<typeof withMachineStages> {
+  const stages = byName ? c.stages : c.stages.filter((s) => !fromName(s));
+  return { stages, answered: 0, byName: 0, ignored: 0, changed: stages.length !== c.stages.length };
 }
 
 /** The calibration as the store holds it now; unreadable, a delivery the queue will make again stops before the run starts. */

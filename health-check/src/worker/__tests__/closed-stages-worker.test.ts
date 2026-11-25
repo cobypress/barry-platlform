@@ -171,6 +171,17 @@ describe("at a fresh start of an already calibrated automatic run", () => {
     }
   });
 
+  test("the switch off and no saved stages: readings from names are still taken out, and nothing is added", async () => {
+    const { deps } = await setUp({ stageNames: true });
+    await setStagesBeforeRun({ runId: RUN_ID, input: (await deps.store.loadRunJob(RUN_ID))!, deps, log: () => {} });
+    assert.equal(closedOf(deps.store.runs.get(RUN_ID)!.calibration).length, 3);
+    deps.stageNames = false;
+    deps.store.orgStages.delete(RUN_ID);
+    deps.store.customerStageAnswers.set(ORG15, ALL);
+    await setStagesBeforeRun({ runId: RUN_ID, input: (await deps.store.loadRunJob(RUN_ID))!, deps, log: () => {} });
+    assert.deepEqual(deps.store.runs.get(RUN_ID)!.calibration, await automaticSyntheticCalibration());
+  });
+
   test("the switch turned off after names were read: they are dropped at the next fresh start, back to undecided", async () => {
     const { deps } = await setUp({ stageNames: true });
     await setStagesBeforeRun({ runId: RUN_ID, input: (await deps.store.loadRunJob(RUN_ID))!, deps, log: () => {} });
@@ -223,6 +234,17 @@ describe("the stores and the switch", () => {
     assert.equal(await new PostgresWorkerStore(pool).answerCalibrationStages(RUN_ID, was, now), "updated");
     assert.deepEqual(pool.seen[0]!.values, [RUN_ID, JSON.stringify(now), ORG_SETTINGS_CALIBRATOR, JSON.stringify(was)]);
     assert.equal(await new PostgresWorkerStore(new Pool(() => ({ rows: [], rowCount: 0 }))).answerCalibrationStages(RUN_ID, was, now), "unchanged");
+  });
+
+  test("Postgres: no answers table is said once, naming the stage answer, apart from the currency's line", async () => {
+    const lines: string[] = [];
+    const store = new PostgresWorkerStore(new Pool(() => { throw Object.assign(new Error("x"), { code: "42P01" }); }), { log: (l) => lines.push(l) });
+    await store.customerStageAnswer(ORG_ID);
+    await store.customerStageAnswer(ORG_ID);
+    await store.customerCurrency(ORG_ID);
+    assert.equal(lines.length, 2);
+    assert.match(lines[0]!, /no customer's answer about its closed stages is read/);
+    assert.match(lines[1]!, /no customer's currency is read/);
   });
 
   test("the switch is said at start, on or off", () => {

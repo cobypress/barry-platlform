@@ -14,6 +14,7 @@ import { notMeasurableKind } from "./not-measurable.ts";
 import { INSIGHT_METRICS, INSIGHT_RULES } from "../domains/scoring.ts";
 import { joinSaid, markSentence, orgWordsOf, said, saidMade, textSha256, withOrgWords, type MarkedSentence, type Said } from "./org-words.ts";
 import { passedOnSpans } from "./passed-on.ts";
+import { fromName } from "../connect/stage-outcomes.ts";
 import type { IssueResult, ManualState, RecordList, Rule, RuleContext, RuleResult } from "./rule.ts";
 
 export type AnalysisInput = {
@@ -40,6 +41,12 @@ export type AnalysisInput = {
    * marked on its finding, for the digest (DECISIONS.md 756). Off, findings are as before.
    */
   markPeriods?: boolean;
+  /**
+   * HC_STAGE_NAMES (DECISIONS.md 756): off or absent, a stage the calibration
+   * holds as read from its name is set aside for this analysis and Salesforce's
+   * flags decide, whatever row a run or a copy of it still carries.
+   */
+  stageNames?: boolean;
 };
 
 /** An issue's records, by finding. Worker-only: never part of a finding or anything sent on. */
@@ -366,8 +373,15 @@ export function analyse(input: AnalysisInput): AnalysisOutput {
 /** Set for one analysis whose digest is checked (DECISIONS.md 756): its findings keep a period's marks. Analyses run one at a time, synchronously. */
 let markingPeriods = false;
 
+/** A calibration read from the org's settings without the stages the name rule read (DECISIONS.md 756); any other, or one with none, as it is. */
+function withoutNameReadings(calibration: Calibration): Calibration {
+  if (calibration.source !== "org_settings" || !calibration.stages.some(fromName)) return calibration;
+  return { ...calibration, stages: calibration.stages.filter((s) => !fromName(s)) };
+}
+
 function analyseWithin(input: AnalysisInput): AnalysisOutput {
-  const { modules, extracts, calibration, now, window, answers, pseudonyms, userDirectory, scope = "complete", unanswered = "ask" } = input;
+  const calibration = input.stageNames === true ? input.calibration : withoutNameReadings(input.calibration);
+  const { modules, extracts, now, window, answers, pseudonyms, userDirectory, scope = "complete", unanswered = "ask" } = input;
   const raised = new Map<string, ManualStep>();
   let currentRule: string | null = null;
   // What the rule or metric builder running now has leaned on (DECISIONS.md 598).
