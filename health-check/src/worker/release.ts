@@ -218,3 +218,46 @@ export function decideRelease(input: ReleaseInput): ReleaseDecision {
   // No digest is no_digest, a hold, so one is here.
   return { kind: "release", releases, digest: checked.digest! };
 }
+
+// ─── An automatic customer's monthly pulse (DECISIONS.md 746) ────────────────
+//
+// No person reviews a pulse, and for an automatic customer no consultant is on
+// the account either, so what it shows is released by code under the same
+// checks as the customer's automatic check, as they apply to a pulse:
+// - no_digest, digest_held: what the portal and the connector read of a pulse
+//   is its digest and its result; a digest that can't be vouched for holds it.
+// - reads_lost: an outage leaves a month's reading thin, and its "can't tell"s
+//   would be shown as the org's state.
+// - mostly_unmeasured: a reading mostly unmeasured is hollow, whatever the cause.
+// - score_moved: against the pulse's own baseline (the score it shows "before"),
+//   since a pulse is never "released" and the last released check may be a year old.
+// - section_failed doesn't apply: a pulse's sections are never served or printed.
+// - stopped_budget isn't a hold here: a pulse stopped at its budget saves no
+//   result, so nothing of it is shown, as on every pulse.
+
+/** The holds that apply to an automatic customer's pulse, in HOLD_REASONS' order. */
+export const PULSE_HOLD_REASONS = ["no_digest", "digest_held", "reads_lost", "mostly_unmeasured", "score_moved"] as const satisfies readonly HoldReason[];
+export type PulseHoldReason = (typeof PULSE_HOLD_REASONS)[number];
+
+export type PulseDecision =
+  | { kind: "release"; digest: RunDigest }
+  | { kind: "hold"; reason: PulseHoldReason; counts: FlagCounts; also: Array<{ kind: PulseHoldReason; counts: FlagCounts }>; digest: RunDigest | null };
+
+/** Release or hold an automatic customer's pulse: every check that fails is a flag, the first in order the hold. */
+export function decidePulse(input: { checked: CheckedDigest; findings: Finding[]; score: { now: number | null; before: number | null }; readsLost?: { lost: number } | null }): PulseDecision {
+  const { checked } = input;
+  const failed: Array<{ kind: PulseHoldReason; counts: FlagCounts }> = [];
+  if (!checked.digest) failed.push({ kind: "no_digest", counts: {} });
+  else if (checked.held) failed.push({ kind: "digest_held", counts: { masks: checked.masks, ceiling: HELD_FOR_US_MASKS, unmatched: checked.unmatched, unmarked: checked.unmarked } });
+  if (input.readsLost) failed.push({ kind: "reads_lost", counts: { lost: input.readsLost.lost, notMeasurable: unansweredRules(input.findings), ...(checked.digest ? { unmatched: checked.unmatched, unmarked: checked.unmarked } : {}) } });
+  const unmeasured = unmeasuredRules(input.findings);
+  if (unmeasured.notMeasurable * 2 > unmeasured.rules) failed.push({ kind: "mostly_unmeasured", counts: unmeasured });
+  const { now, before } = input.score;
+  if (now !== null && before !== null && Math.abs(now - before) >= SCORE_MOVE_POINTS) failed.push({ kind: "score_moved", counts: { score: now, previous: before, moved: Math.abs(now - before) } });
+  if (failed.length > 0) {
+    failed.sort((a, b) => PULSE_HOLD_REASONS.indexOf(a.kind) - PULSE_HOLD_REASONS.indexOf(b.kind));
+    const [first, ...also] = failed;
+    return { kind: "hold", reason: first!.kind, counts: first!.counts, also, digest: checked.digest };
+  }
+  return { kind: "release", digest: checked.digest! };
+}

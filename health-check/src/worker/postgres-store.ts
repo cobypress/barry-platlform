@@ -242,6 +242,8 @@ export function calibrationRow(runId: string, c: Calibration): Record<string, un
 export const NAME_CALIBRATION_CURRENCY_SQL =
   `UPDATE "HealthCheckCalibration" SET "currency" = $2, "fields" = ("fields" - 'currencySuggested') || jsonb_build_object('currencyFrom', 'connect_api') ` +
   `WHERE "runId" = $1 AND "source" = 'org_settings' AND "confirmedBy" = $3 AND "currency" = $4 AND jsonb_typeof("fields") = 'object' AND "fields" ->> 'currencyFrom' = $5`;
+/** A held pulse's earlier result taken away (DECISIONS.md 746): the portal lists a pulse once it has one. */
+export const PULSE_RESULT_DELETE_SQL = `DELETE FROM "HealthCheckPulseResult" WHERE "runId" = $1`;
 /** An automatic run's hold (DECISIONS.md 693), read through the row as JSON like its mode. Asked only for an automatic run, so a consultant-led run's reads are unchanged. */
 export const HELD_REASON_SQL = `SELECT to_jsonb("HealthCheckRun") ->> 'heldReason' AS "heldReason" FROM "HealthCheckRun" WHERE "id" = $1`;
 /** A run's org, product, mode and baseline, for a pulse's baseline chain (DECISIONS.md 746); the mode through the row as JSON, as everywhere. */
@@ -816,6 +818,12 @@ export class PostgresWorkerStore implements WorkerStore {
       }
       // Last of all, inside the same transaction: nothing is visible to the customer until all of it commits.
       if (output.automatic) await this.#writeAutomatic(client, runId, output);
+      // An automatic customer's pulse held for a person (746): no result, so the portal never lists it, and its flags.
+      if (output.pulseHold) {
+        await client.query(PULSE_RESULT_DELETE_SQL, [runId]);
+        const h = output.pulseHold;
+        for (const f of [{ kind: h.reason, counts: h.counts }, ...h.also]) await client.query(RAISE_FLAG_SQL, [runId, f.kind, h.at, JSON.stringify(f.counts)]);
+      }
     });
   }
 

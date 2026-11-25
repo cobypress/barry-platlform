@@ -107,6 +107,11 @@ export class MemoryWorkerStore implements WorkerStore {
     if (digest !== undefined) this.#saveDigest(runId, digest);
     this.writes.push({ method: "saveRunOutput", id: runId, detail: progress.status });
     if (automatic) this.#writeAutomatic(run, automatic);
+    // As the Postgres store: a held pulse's earlier result goes, and its flags are raised (746).
+    if (output.pulseHold) {
+      if (this.pulseResults.delete(runId)) this.writes.push({ method: "deletePulseResult", id: runId });
+      for (const f of [{ kind: output.pulseHold.reason, counts: output.pulseHold.counts }, ...output.pulseHold.also]) this.#raiseFlag(runId, f.kind, output.pulseHold.at, f.counts);
+    }
   }
 
   /** The console's HealthCheckRelease rows, by run id. A test may add a person's or an earlier run's. */

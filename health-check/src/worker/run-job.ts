@@ -14,6 +14,7 @@ import { INTERVIEW_VERSION } from "../interviews/questions.ts";
 import { OAuthConnectionProvider, ReconnectionNeeded } from "../salesforce/oauth-provider.ts";
 import { buildScanResult } from "../scan/result.ts";
 import { buildPulseResult } from "../pulse/result.ts";
+import { servedPulseTitle } from "../pulse/served.ts";
 import { buildDigest } from "../digest/build.ts";
 import type { RunDigest } from "../schemas/digest.ts";
 import type { ReportSection, Run } from "../schemas/index.ts";
@@ -26,7 +27,7 @@ import { automaticRefusal } from "./automatic.ts";
 import { recalibrateForRunAgain, type Recalibrated } from "./connect-job.ts";
 import { CalibrationUnsettled, nameCurrencyBeforeRun } from "./name-currency.ts";
 import { checkedDigest } from "../digest/checked.ts";
-import { checkSections, decideRelease, lossesOf, sameAsLast, SERVER_FAULT_CODES, type ReleaseDecision, type RunLosses, type SameAsLast } from "./release.ts";
+import { checkSections, decidePulse, decideRelease, lossesOf, type PulseDecision, sameAsLast, SERVER_FAULT_CODES, type ReleaseDecision, type RunLosses, type SameAsLast } from "./release.ts";
 import { letGoAfterRun, type SeenRun } from "./scan-release.ts";
 import { progressOf, RunClosedError, runOverall, DELIVERY_OUTCOMES, type RunJobInput } from "./types.ts";
 import { withoutComments } from "../survey/questions.ts";
@@ -314,7 +315,9 @@ async function runLocked(runId: string, deps: WorkerDeps, attempt: Attempt, seen
   // nothing is resumed, so a run held for what it read is read again. Only a run the console has set back to
   // extracting, with its hold cleared (both checked above and again below), and only once per "Run again": a retry
   // of the same job finds its own mark and resumes. Any other run, and a consultant-led run's, resumes as before.
-  const again = options.again !== undefined && first.run.reviewMode === "automatic" ? options.again : undefined;
+  // An automatic customer's pulse too (DECISIONS.md 746): one held for a person is read afresh the same way.
+  const againable = first.run.reviewMode === "automatic" || (options.again !== undefined && first.run.product === "pulse" && first.calibration?.source === "org_settings" && (await pulseOfAutomaticCheck(first.run, deps).catch(() => false)));
+  const again = options.again !== undefined && againable ? options.again : undefined;
   if (options.again !== undefined && again === undefined) log(`Run ${runId} isn't automatic, so "Run again" resumes it as any delivery does.`);
   // Presses are ordered by their time: the folder's mark is the latest press that started it afresh. The same press
   // resumes; a newer one starts afresh; an older one (a retry still due after a newer press) is skipped, so two
@@ -416,6 +419,9 @@ async function runLocked(runId: string, deps: WorkerDeps, attempt: Attempt, seen
     }
   }
   const problem = problemWith(input, deps, pulseOfAutomatic);
+  // A pulse whose results an automatic customer reads with no consultant on the account: shown only through the
+  // automatic check's own gate (746). Every other pulse is shown as before.
+  const gatedPulse = input.run.product === "pulse" && (input.run.reviewMode === "automatic" || pulseOfAutomatic);
   if (problem) return fail(problem);
   const name = input.connectionName!;
 
@@ -568,10 +574,12 @@ async function runLocked(runId: string, deps: WorkerDeps, attempt: Attempt, seen
   // What this run lost, stored with its results for the org's next run; null where run.json's cap hides some (DECISIONS.md 723).
   const losses: RunLosses | null = automaticBarometer ? lossesOf(result.run.readsRefused, MAX_REFUSED) : null;
   const readsLost = automaticBarometer && lossLooksLikeOutage(lost) ? { lost: lost.length, ...(await sameAsLastOf(deps, runId, input.run.orgId.slice(0, 15), losses, log)) } : null;
+  const pulseReadsLost = gatedPulse && lossLooksLikeOutage(lost) ? { lost: lost.length } : null;
   if (readsLost) log(`Automatic run ${runId} lost ${lost.length} read${lost.length === 1 ? "" : "s"} to Salesforce not answering (${[...new Set(lost.map((r) => r.step))].join(", ")}), so it isn't released and waits for a person.`);
 
   // An automatic run's release or hold, once decided (DECISIONS.md 693).
   let decision: ReleaseDecision | null = null;
+  let pulseDecision: PulseDecision | null = null;
   try {
     // The engine's intake and the sections the console reviews. Building sections
     // needs no browser. They start as the engine's own text, as `hc render`
@@ -642,7 +650,9 @@ async function runLocked(runId: string, deps: WorkerDeps, attempt: Attempt, seen
     // A pulse's digest, from the report its result is made from, with its results (DECISIONS.md 632). A check's waits for its documents.
     // An automatic run's, checked, masked or held, written with its release (DECISIONS.md 693): its portal has nothing else to show.
     const checkedOne = automatic ? checkedDigest({ input: reportInput, pseudonyms, inventory, madeAt: now().toISOString() }) : null;
-    const digest = input.run.product === "pulse" ? digestOf(runId, () => buildDigest({ report, pseudonyms, inventory, madeAt: now().toISOString() }), log) : (checkedOne?.digest ?? null);
+    // An automatic customer's pulse: its digest checked, marked and masked as an automatic check's, and released or held by the same checks (746).
+    const checkedPulse = gatedPulse ? checkedDigest({ input: reportInput, pseudonyms, inventory, madeAt: now().toISOString() }) : null;
+    const digest = input.run.product === "pulse" ? (checkedPulse ? checkedPulse.digest : digestOf(runId, () => buildDigest({ report, pseudonyms, inventory, madeAt: now().toISOString() }), log)) : (checkedOne?.digest ?? null);
     const sections = outputs.flatMap((o) => o.sections);
     // The engine's own, without any survey metric: those go apart, in a savepoint of their own.
     const metrics = allMetrics(result.output!).filter((m) => !SURVEY_METRIC_IDS.includes(m.id));
@@ -652,6 +662,11 @@ async function runLocked(runId: string, deps: WorkerDeps, attempt: Attempt, seen
     decision = checkedOne
       ? decideRelease({ runId, sections, checked: checkedOne, findings: result.output!.findings, overall, previousScore: await deps.store.lastReleasedScore(runId, input.run.orgId.slice(0, 15), input.run.product), readsLost, now: now().toISOString() })
       : null;
+    if (checkedPulse) {
+      const overallNow = runOverall(report.overall);
+      pulseDecision = decidePulse({ checked: checkedPulse, findings: result.output!.findings, score: { now: overallNow?.score ?? null, before: report.progress?.score.before ?? null }, readsLost: pulseReadsLost });
+      log(pulseDecision.kind === "release" ? `Pulse ${runId} of an automatic check passed every check, so its result is shown.` : `Pulse ${runId} of an automatic check is held for a person, and nothing of it is shown: ${pulseDecision.reason} ${JSON.stringify(pulseDecision.counts)}.`);
+    }
     if (decision) log(decision.kind === "release" ? `Automatic run ${runId} passed every check and is released.` : `Automatic run ${runId} is held for a person: ${decision.reason} ${JSON.stringify(decision.counts)}.`);
     const progress = progressOf(result.run);
     // The flags' time, never before the digest was made: the console reads a flag raised earlier as an earlier attempt's (its decision 713).
@@ -681,6 +696,8 @@ async function runLocked(runId: string, deps: WorkerDeps, attempt: Attempt, seen
       // A pulse's whatever it is: null takes away an earlier delivery's, so a stale digest is never served. An automatic run's likewise.
       ...(input.run.product === "pulse" || decision ? { digest } : {}),
       ...(decision && losses ? { readsLost: losses } : {}),
+      // Held: its flags in the same transaction, and no result, so the portal never lists it (746).
+      ...(pulseDecision?.kind === "hold" ? { pulseHold: { reason: pulseDecision.reason, counts: pulseDecision.counts, also: pulseDecision.also, at: heldAt } } : {}),
       ...(decision ? { automatic: decision.kind === "release" ? { decision: "release" as const, releases: decision.releases } : { decision: "hold" as const, reason: decision.reason, counts: decision.counts, also: decision.also, at: heldAt } } : {}),
     });
   } catch (err) {
@@ -692,7 +709,8 @@ async function runLocked(runId: string, deps: WorkerDeps, attempt: Attempt, seen
     return fail(`The run finished, but its results couldn't be saved: ${reason}`);
   }
   if (input.run.product === "scan") await finishScan(runId, dir, deps, now().toISOString(), log);
-  if (input.run.product === "pulse") await finishPulse(runId, dir, deps, now().toISOString(), log);
+  if (input.run.product === "pulse" && pulseDecision?.kind !== "hold") await finishPulse(runId, dir, deps, now().toISOString(), log, pulseDecision?.digest);
+  if (pulseDecision?.kind === "hold") return { outcome: "done", detail: `Pulse ${runId} is held: ${pulseDecision.reason}` };
   if (decision) return { outcome: "done", detail: decision.kind === "release" ? `Run ${runId} is released` : `Run ${runId} is held: ${decision.reason}` };
   return { outcome: "done", detail: `Run ${runId} is ${result.run.status.replace("_", " ")}` };
 }
@@ -914,17 +932,18 @@ function holdsNul(value: unknown): boolean {
  * customer stays connected. Retention deletes the folder in time (DECISIONS.md
  * 136). A failure here is logged, as a scan's is.
  */
-async function finishPulse(runId: string, dir: string, deps: WorkerDeps, at: string, log: (line: string) => void): Promise<void> {
+async function finishPulse(runId: string, dir: string, deps: WorkerDeps, at: string, log: (line: string) => void, served?: RunDigest): Promise<void> {
   try {
     // loadRun reads the baseline from the folder beside this one, if it's there and readable.
     // The earlier folder's corrections as they stand: a pulse is built once, here, and never printed (DECISIONS.md 528).
-    const { input, baselineRowsUnread } = loadRun(dir, { baselineRows: "live" });
+    const { input, baselineRowsUnread, pseudonyms } = loadRun(dir, { baselineRows: "live" });
     if (baselineRowsUnread) log(`Pulse ${runId}: ${BASELINE_ROWS_UNREAD}`);
     const report = buildReport(input);
     // The baseline is read as its documents showed it, where that can still be carried (DECISIONS.md 522).
     if (report.baselineRefused) log(`Pulse ${runId}: ${baselineRefusedSummary(report.baselineRefused)}`);
     keepRuleChanges(dir, report.progress?.carried);
-    const result = buildPulseResult(report);
+    // An automatic customer's lists only the titles its checked digest serves, as it serves them (746).
+    const result = served ? buildPulseResult(report, servedPulseTitle(served, pseudonyms)) : buildPulseResult(report);
     await deps.store.savePulseResult(runId, result, at);
     log(`Pulse ${runId}'s result is ready${result.baselineRunId ? `, against ${result.baselineRunId}` : ", with no baseline we could read"}.`);
   } catch (err) {

@@ -175,6 +175,13 @@ export type RunOutputRecord = {
    * only the attempt that decided the run's release or hold leaves it.
    */
   readsLost?: RunLosses;
+  /**
+   * An automatic customer's pulse held for a person (DECISIONS.md 746): its flags, the first the reason, raised in
+   * the same transaction, and any earlier result of the run taken away, so the portal (which lists a pulse once it
+   * has a result) never shows it. No "heldReason": the console allows one only on an automatic run, which a pulse
+   * isn't in its records. Left out for every other run.
+   */
+  pulseHold?: { reason: string; counts: Record<string, number>; also: Array<{ kind: string; counts: Record<string, number> }>; at: string };
 };
 
 /**
