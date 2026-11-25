@@ -1,6 +1,6 @@
 import { describe, test } from "node:test";
 import assert from "node:assert/strict";
-import { buildDigest, guardDigest, holdsPersonOrSecret, ID_MAPS, STRUCTURAL_KEYS } from "../build.ts";
+import { buildDigest, guardDigest, holdsPersonOrSecret, ID_MAPS, READINESS_CODE_PATHS, STRUCTURAL_KEYS } from "../build.ts";
 import { GROUPS } from "../../value/model.ts";
 import { holdsNameOrSecret } from "../../narrative/guard.ts";
 import { buildReport } from "../../narrative/sections.ts";
@@ -108,20 +108,22 @@ describe("the run digest holds no name, email, id, token or secret (DECISIONS.md
   });
 });
 
-/** Every string leaf, with the key it sits under (an array's items under the array's key). */
-function leaves(value: unknown, key = "", path: string[] = []): Array<{ key: string; path: string }> {
-  if (typeof value === "string") return [{ key, path: path.join(".") }];
-  if (Array.isArray(value)) return value.flatMap((v, i) => leaves(v, key, [...path, String(i)]));
-  if (value && typeof value === "object") return Object.entries(value).flatMap(([k, v]) => leaves(v, ID_MAPS.has(key) ? key : k, [...path, k]));
+/** Every string leaf, with the key it sits under (an array's items under the array's key), and its path with indices as [] (`at`). */
+function leaves(value: unknown, key = "", path: string[] = [], at = ""): Array<{ key: string; path: string; at: string }> {
+  if (typeof value === "string") return [{ key, path: path.join("."), at }];
+  if (Array.isArray(value)) return value.flatMap((v, i) => leaves(v, key, [...path, String(i)], `${at}[]`));
+  if (value && typeof value === "object") return Object.entries(value).flatMap(([k, v]) => leaves(v, ID_MAPS.has(key) ? key : k, [...path, k], at ? `${at}.${k}` : k));
   return [];
 }
+/** A leaf the guard leaves as it is: under a structural key, or at one of readiness's code paths (DECISIONS.md 742). */
+const structuralLeaf = (l: { key: string; at: string }): boolean => STRUCTURAL_KEYS.has(l.key) || ID_MAPS.has(l.key) || READINESS_CODE_PATHS.has(l.at);
 
-/** The same value with every string outside the structural keys replaced by `text`. */
-function plantEverywhere(value: unknown, text: string, key = ""): unknown {
-  if (STRUCTURAL_KEYS.has(key) || ID_MAPS.has(key)) return value;
+/** The same value with every string outside the structural keys and paths replaced by `text`. */
+function plantEverywhere(value: unknown, text: string, key = "", at = ""): unknown {
+  if (STRUCTURAL_KEYS.has(key) || ID_MAPS.has(key) || READINESS_CODE_PATHS.has(at)) return value;
   if (typeof value === "string") return text;
-  if (Array.isArray(value)) return value.map((v) => plantEverywhere(v, text, key));
-  if (value && typeof value === "object") return Object.fromEntries(Object.entries(value).map(([k, v]) => [k, plantEverywhere(v, text, k)]));
+  if (Array.isArray(value)) return value.map((v) => plantEverywhere(v, text, key, `${at}[]`));
+  if (value && typeof value === "object") return Object.fromEntries(Object.entries(value).map(([k, v]) => [k, plantEverywhere(v, text, k, at ? `${at}.${k}` : k)]));
   return value;
 }
 
@@ -132,16 +134,16 @@ describe("every string the digest can hold goes through the guard (DECISIONS.md 
     const text = `${person.name} holds most of these`;
     const guarded = guardDigest(plantEverywhere(plain, text), pseudonyms);
     const all = leaves(guarded);
-    const textLeaves = all.filter((l) => !STRUCTURAL_KEYS.has(l.key) && !ID_MAPS.has(l.key));
+    const textLeaves = all.filter((l) => !structuralLeaf(l));
     assert.ok(textLeaves.length > 500, `${textLeaves.length} text fields`);
     assert.ok(!JSON.stringify(guarded).includes(person.name));
     // Every text field the digest holds today, among them the reviewer's: a group's label, a value's period and unit, a not-sized reason, a measure's exclusions and assumptions, a phase's title and an area's reason.
     const keys = new Set(textLeaves.map((l) => l.key));
-    for (const key of ["label", "period", "unit", "reason", "exclusions", "assumptions", "title", "summary", "recommendation", "definition", "notMeasurableReason"]) assert.ok(keys.has(key), key);
+    for (const key of ["label", "period", "unit", "reason", "exclusions", "assumptions", "title", "summary", "recommendation", "definition", "notMeasurableReason", "opening", "question"]) assert.ok(keys.has(key), key);
   });
 
   test("the structural keys hold only ids, codes, timestamps and hashes, never a sentence", () => {
-    const structural = leaves(plain).filter((l) => STRUCTURAL_KEYS.has(l.key) || ID_MAPS.has(l.key));
+    const structural = leaves(plain).filter(structuralLeaf);
     const values = structural.map((l) => l.path.split(".").reduce<unknown>((v, k) => (v as Record<string, unknown>)[k], plain) as string);
     for (const v of values) assert.match(v, /^(?:[A-Za-z0-9][A-Za-z0-9_.:-]*|\d{4}-\d{2}-\d{2}T[\d:.]+Z)$/, v);
     // And alsoFor's keys, which are finding ids.

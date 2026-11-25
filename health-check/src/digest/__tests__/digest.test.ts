@@ -103,6 +103,16 @@ function resolve(d: RunDigest, r: BuiltReport, path: Array<string | number>): nu
     if (!same(total.withoutHoursFindingIds, d.findings.filter((f) => f.status === "issue" && !f.effortHours && named.has(f.id)).map((f) => f.id))) return undefined;
     return held.reduce((sum, f) => sum + r.teamFindings.find((x) => x.id === f.id)!.effortHours![field], 0);
   }
+  // AI readiness's figures (DECISIONS.md 742): the built metric's own stat, headline or working line, by the metric and stat the figure names.
+  if (top === "readiness" && i === "pillars" && sub === "figures" && path[5] === "value") {
+    const fig = d.readiness!.pillars[field as number]!.figures![path[4] as number]!;
+    if (!d.readiness!.pillars[field as number]!.metricIds.includes(fig.metricId)) return undefined;
+    const built = r.metrics.find((m) => m.id === fig.metricId);
+    if (built?.status !== "measured") return undefined;
+    if (fig.stat === "value") return built.value;
+    if (fig.stat === "workingLine:ready") return built.segments.find((s) => s.dimension === "working line" && s.key === "Ready up to")?.value ?? undefined;
+    return Object.hasOwn(built.stats, fig.stat) ? built.stats[fig.stat] : undefined;
+  }
   if (top !== "value") return undefined;
   // value.total.low, value.byKind.<kind>.low, value.exposure.low: the report's own, and the sum of the lines named.
   const c = (top === "value" && typeof field === "string" ? field : sub) as "low" | "expected" | "high";

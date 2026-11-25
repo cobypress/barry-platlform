@@ -11,7 +11,45 @@ import { bySeverity, isSetupReview, issuesOf, SEVERITY_ORDER } from "./select.ts
 export type ReadinessVerdict = "ready" | "nearly" | "not_yet" | "not_measurable";
 export const VERDICT_WORDS: Record<ReadinessVerdict, string> = { ready: "Ready", nearly: "Nearly", not_yet: "Not yet", not_measurable: "Not measurable" };
 
-export type Pillar = { key: string; label: string; question: string; verdict: ReadinessVerdict; reason: string; findingIds: string[]; metricIds: string[] };
+export type PillarKey = "data" | "knowledge" | "platform" | "actions" | "access" | "shape";
+/** Each pillar's label and question: the engine's own words, from this table alone, so the digest knows them as ours (DECISIONS.md 742). */
+export const PILLARS: Readonly<Record<PillarKey, { label: string; question: string }>> = {
+  data: { label: "Data", question: "Can an agent trust what it reads?" },
+  knowledge: { label: "Knowledge", question: "Is there knowledge to ground answers in?" },
+  platform: { label: "Platform", question: "Are Einstein, Data Cloud and Agentforce switched on?" },
+  actions: { label: "Actions", question: "Is there automation an agent could call?" },
+  access: { label: "Access", question: "Would an agent inherit safe access?" },
+  shape: { label: "Org shape", question: "Is the logic in tools an agent can work with?" },
+};
+
+/**
+ * A number the engine put into a reason, and the metric and stat it is: a key of
+ * the metric's stats, "value" for its headline, or "workingLine:ready" for the
+ * line kept as the metric's "Ready up to" segment (DECISIONS.md 240, 742).
+ */
+export type ReadinessFigure = { value: number; metricId: string; stat: string };
+
+export type Pillar = {
+  key: PillarKey;
+  label: string;
+  question: string;
+  verdict: ReadinessVerdict;
+  reason: string;
+  findingIds: string[];
+  metricIds: string[];
+  /**
+   * Where the reason's words come from, for the digest's marks (DECISIONS.md 742).
+   * `quoted`: a finding's title sits in it from `at` to the closing full stop, as
+   * its title or with its first letter in lower case, and every other character
+   * is ours. `passedOn`: the reason is that metric's not measurable reason, whole.
+   * Neither: all of it is ours, with only numbers and the engine's own words put
+   * in. Nothing a document prints reads these.
+   */
+  quoted?: { findingId: string; at: number };
+  passedOn?: string;
+  /** Every number the engine put into the reason, in order: never one inside a quoted title, which is its finding's. */
+  figures: ReadinessFigure[];
+};
 export type Readiness = {
   pillars: Pillar[];
   /** Said only when it's clear (DECISIONS.md 241): otherwise null, and the summaries leave it out. */
@@ -19,6 +57,9 @@ export type Readiness = {
   /** The issues to fix before an agent goes live, in order. At most five. */
   fixes: Finding[];
 };
+
+/** A verdict and its reason, with where the reason's words and numbers come from. */
+type Reasoned = { verdict: ReadinessVerdict; reason: string; quoted?: Pillar["quoted"]; passedOn?: string; figures?: ReadinessFigure[] };
 
 export const FIXES = 5;
 
@@ -45,8 +86,13 @@ export function inSentence(title: string): string {
   return `${title.charAt(0).toLowerCase()}${title.slice(1)}`;
 }
 
+/** A reason that ends with a finding's title, as `as` says it, and a full stop: where the title sits, for the digest's marks. */
+function quoting(head: string, f: Finding, as: string): { reason: string; quoted: NonNullable<Pillar["quoted"]> } {
+  return { reason: `${head}${as}.`, quoted: { findingId: f.id, at: head.length } };
+}
+
 /** A verdict from findings alone: high or critical is "not yet", medium is "nearly", and nothing worse than low is "ready". */
-function fromFindings(own: Finding[], noun: string): { verdict: ReadinessVerdict; reason: string } {
+function fromFindings(own: Finding[], noun: string): Reasoned {
   const measured = own.filter((f) => f.status !== "not_measurable");
   if (measured.length === 0) return { verdict: "not_measurable", reason: `None of the checks on ${noun} could be measured.` };
   const issues = issuesOf(own);
@@ -54,8 +100,8 @@ function fromFindings(own: Finding[], noun: string): { verdict: ReadinessVerdict
   const medium = issues.filter((f) => f.severity === "medium");
   const subject = `${noun.charAt(0).toUpperCase()}${noun.slice(1)}`;
   // No counts: the number check traces figures, and a count of issues by severity isn't one the dataset holds.
-  if (serious.length) return { verdict: "not_yet", reason: `${subject} has ${serious.length === 1 ? "a critical or high issue" : "critical or high issues, such as"}: ${inSentence(serious[0]!.title)}.` };
-  if (medium.length) return { verdict: "nearly", reason: `${subject} has nothing critical or high, but ${medium.length === 1 ? "a medium issue" : "medium issues, such as"}: ${inSentence(medium[0]!.title)}.` };
+  if (serious.length) return { verdict: "not_yet", ...quoting(`${subject} has ${serious.length === 1 ? "a critical or high issue" : "critical or high issues, such as"}: `, serious[0]!, inSentence(serious[0]!.title)) };
+  if (medium.length) return { verdict: "nearly", ...quoting(`${subject} has nothing critical or high, but ${medium.length === 1 ? "a medium issue" : "medium issues, such as"}: `, medium[0]!, inSentence(medium[0]!.title)) };
   return { verdict: "ready", reason: `${subject} has nothing above low severity.` };
 }
 
@@ -72,8 +118,8 @@ export function readinessOf(run: Pick<Run, "scope">, findings: Finding[], metric
   const data = findings.filter((f) => DATA_DOMAINS.includes(f.domain));
   pillars.push({
     key: "data",
-    label: "Data",
-    question: "Can an agent trust what it reads?",
+    ...PILLARS.data,
+    figures: [],
     ...(isSetupReview(run) && data.length === 0 ? { verdict: "not_measurable" as const, reason: "A set-up review doesn't read records, so the data itself is part of the full check." } : fromFindings(data, "data quality")),
     findingIds: ids(issuesOf(data)),
     metricIds: [],
@@ -83,18 +129,19 @@ export function readinessOf(run: Pick<Run, "scope">, findings: Finding[], metric
   const knowledgeOn = stat(platform, "knowledge");
   const articles = stat(platform, "articles");
   const stale = byRule(KNOWLEDGE_RULES).filter((f) => f.status === "issue");
-  const knowledge = ((): { verdict: ReadinessVerdict; reason: string } => {
-    if (knowledgeOn === null) return { verdict: "not_measurable", reason: platform?.status === "not_measurable" ? platform.reason : "Whether Salesforce Knowledge is on couldn't be read." };
+  const knowledge = ((): Reasoned => {
+    if (knowledgeOn === null) return platform?.status === "not_measurable" ? { verdict: "not_measurable", reason: platform.reason, passedOn: AI_PLATFORM } : { verdict: "not_measurable", reason: "Whether Salesforce Knowledge is on couldn't be read." };
     if (knowledgeOn === 0) return { verdict: "not_yet", reason: "Salesforce Knowledge isn't switched on, so an agent has no articles to ground its answers in." };
     if (articles === null) return { verdict: "not_measurable", reason: "Salesforce Knowledge is on, but its published articles couldn't be counted." };
     if (articles === 0) return { verdict: "not_yet", reason: "Salesforce Knowledge is on, with no published articles." };
     const capped = stat(platform, "articlesCapped") === 1;
     const count = `${capped ? "at least " : ""}${plural(articles, "published article")}`;
-    if (articles < ARTICLES_READY) return { verdict: "nearly", reason: `Salesforce Knowledge is on, with ${count}: fewer than ${ARTICLES_READY}, our working line for enough to ground most answers.` };
-    if (stale.length) return { verdict: "nearly", reason: `Salesforce Knowledge is on, with ${count}, but ${stale[0]!.title.charAt(0).toLowerCase()}${stale[0]!.title.slice(1)}.` };
-    return { verdict: "ready", reason: `Salesforce Knowledge is on, with ${count}.` };
+    const counted: ReadinessFigure = { value: articles, metricId: AI_PLATFORM, stat: "articles" };
+    if (articles < ARTICLES_READY) return { verdict: "nearly", reason: `Salesforce Knowledge is on, with ${count}: fewer than ${ARTICLES_READY}, our working line for enough to ground most answers.`, figures: [counted, { value: ARTICLES_READY, metricId: AI_PLATFORM, stat: "articlesReady" }] };
+    if (stale.length) return { verdict: "nearly", ...quoting(`Salesforce Knowledge is on, with ${count}, but `, stale[0]!, `${stale[0]!.title.charAt(0).toLowerCase()}${stale[0]!.title.slice(1)}`), figures: [counted] };
+    return { verdict: "ready", reason: `Salesforce Knowledge is on, with ${count}.`, figures: [counted] };
   })();
-  pillars.push({ key: "knowledge", label: "Knowledge", question: "Is there knowledge to ground answers in?", ...knowledge, findingIds: ids(stale), metricIds: [AI_PLATFORM] });
+  pillars.push({ key: "knowledge", ...PILLARS.knowledge, figures: [], ...knowledge, findingIds: ids(stale), metricIds: [AI_PLATFORM] });
 
   // What's switched on.
   const genAi = stat(platform, "generativeAi");
@@ -102,14 +149,15 @@ export function readinessOf(run: Pick<Run, "scope">, findings: Finding[], metric
   const dataCloud = stat(platform, "dataCloud");
   const agents = stat(platform, "agents");
   const extras = [dataCloud === null ? "" : `Data Cloud is ${dataCloud ? "on" : "off"}`, agents === null ? "" : `${plural(agents, "agent")} set up`].filter(Boolean).join(", and ");
-  const switched = ((): { verdict: ReadinessVerdict; reason: string } => {
-    if (genAi === null) return { verdict: "not_measurable", reason: platform?.status === "not_measurable" ? platform.reason : "Whether Einstein generative AI is on couldn't be read." };
+  const switched = ((): Reasoned => {
+    if (genAi === null) return platform?.status === "not_measurable" ? { verdict: "not_measurable", reason: platform.reason, passedOn: AI_PLATFORM } : { verdict: "not_measurable", reason: "Whether Einstein generative AI is on couldn't be read." };
     const tail = extras ? ` ${extras.charAt(0).toUpperCase()}${extras.slice(1)}.` : "";
-    if (genAi === 0) return { verdict: "not_yet", reason: `Einstein generative AI isn't switched on, and Agentforce needs it.${tail}` };
-    if (agentforce === 1) return { verdict: "ready", reason: `Einstein generative AI and Agentforce are both switched on.${tail}` };
-    return { verdict: "nearly", reason: `Einstein generative AI is on, and Agentforce ${agentforce === 0 ? "isn't" : "couldn't be read"}.${tail}` };
+    const figures: ReadinessFigure[] = agents === null ? [] : [{ value: agents, metricId: AI_PLATFORM, stat: "agents" }];
+    if (genAi === 0) return { verdict: "not_yet", reason: `Einstein generative AI isn't switched on, and Agentforce needs it.${tail}`, figures };
+    if (agentforce === 1) return { verdict: "ready", reason: `Einstein generative AI and Agentforce are both switched on.${tail}`, figures };
+    return { verdict: "nearly", reason: `Einstein generative AI is on, and Agentforce ${agentforce === 0 ? "isn't" : "couldn't be read"}.${tail}`, figures };
   })();
-  pillars.push({ key: "platform", label: "Platform", question: "Are Einstein, Data Cloud and Agentforce switched on?", ...switched, findingIds: [], metricIds: [AI_PLATFORM] });
+  pillars.push({ key: "platform", ...PILLARS.platform, figures: [], ...switched, findingIds: [], metricIds: [AI_PLATFORM] });
 
   // Actions an agent could call.
   const actionFindings = byRule(ACTION_RULES);
@@ -118,37 +166,42 @@ export function readinessOf(run: Pick<Run, "scope">, findings: Finding[], metric
   const auto = stat(actions, "autolaunched");
   const described = stat(actions, "described");
   const invocable = stat(actions, "invocable");
-  const act = ((): { verdict: ReadinessVerdict; reason: string } => {
-    if (callable === null || auto === null || described === null || invocable === null) return { verdict: "not_measurable", reason: actions?.status === "not_measurable" ? actions.reason : "The automation an agent could call couldn't be read." };
+  const act = ((): Reasoned => {
+    if (callable === null || auto === null || described === null || invocable === null) return actions?.status === "not_measurable" ? { verdict: "not_measurable", reason: actions.reason, passedOn: AI_ACTIONS } : { verdict: "not_measurable", reason: "The automation an agent could call couldn't be read." };
     if (callable === 0) return { verdict: "not_yet", reason: "There's no active autolaunched flow or invocable Apex method for an agent to call." };
     const what = `${plural(auto, "active autolaunched flow")} (${described} described) and ${plural(invocable, "invocable Apex method")}`;
+    const figures: ReadinessFigure[] = [{ value: auto, metricId: AI_ACTIONS, stat: "autolaunched" }, { value: described, metricId: AI_ACTIONS, stat: "described" }, { value: invocable, metricId: AI_ACTIONS, stat: "invocable" }];
     // The reason is what made it "nearly": too few descriptions, or else the finding that did.
-    if (auto > 0 && described * 2 < auto) return { verdict: "nearly", reason: `${what}. An agent chooses an action by its description, and too few have one.` };
-    if (undocumented.length) return { verdict: "nearly", reason: `${what}. But ${inSentence(undocumented.slice().sort(bySeverity)[0]!.title)}.` };
-    return { verdict: "ready", reason: `${what}.` };
+    if (auto > 0 && described * 2 < auto) return { verdict: "nearly", reason: `${what}. An agent chooses an action by its description, and too few have one.`, figures };
+    const named = undocumented.slice().sort(bySeverity)[0];
+    if (named) return { verdict: "nearly", ...quoting(`${what}. But `, named, inSentence(named.title)), figures };
+    return { verdict: "ready", reason: `${what}.`, figures };
   })();
-  pillars.push({ key: "actions", label: "Actions", question: "Is there automation an agent could call?", ...act, findingIds: ids(undocumented), metricIds: [AI_ACTIONS] });
+  pillars.push({ key: "actions", ...PILLARS.actions, figures: [], ...act, findingIds: ids(undocumented), metricIds: [AI_ACTIONS] });
 
   // Access an agent would inherit.
   const access = findings.filter((f) => ACCESS_DOMAINS.includes(f.domain) || ACCESS_RULES.includes(f.ruleId));
-  pillars.push({ key: "access", label: "Access", question: "Would an agent inherit safe access?", ...fromFindings(access, "security and integration access"), findingIds: ids(issuesOf(access)), metricIds: [] });
+  pillars.push({ key: "access", ...PILLARS.access, figures: [], ...fromFindings(access, "security and integration access"), findingIds: ids(issuesOf(access)), metricIds: [] });
 
   // The shape of the org's logic.
   const shapeFindings = byRule(SHAPE_RULES).filter((f) => f.status === "issue");
   const legacyMetric = metrics.find((m) => m.id === AI_LEGACY_SHARE);
   const share = legacyMetric?.status === "measured" ? legacyMetric.value : null;
   const legacy = stat(legacyMetric, "legacy");
-  const shape = ((): { verdict: ReadinessVerdict; reason: string } => {
-    if (share === null || legacy === null) return { verdict: "not_measurable", reason: legacyMetric?.status === "not_measurable" ? legacyMetric.reason : "How the org's automation is built couldn't be read." };
+  const shape = ((): Reasoned => {
+    if (share === null || legacy === null) return legacyMetric?.status === "not_measurable" ? { verdict: "not_measurable", reason: legacyMetric.reason, passedOn: AI_LEGACY_SHARE } : { verdict: "not_measurable", reason: "How the org's automation is built couldn't be read." };
     const text = `${share}% of active automation is still in Workflow Rules and Process Builder, which an agent can't call and Salesforce is retiring`;
-    if (share > LEGACY_NOT_YET) return { verdict: "not_yet", reason: `${text}.` };
-    if (share > LEGACY_READY) return { verdict: "nearly", reason: `${text}. Our working line is ${LEGACY_READY}%.` };
+    const shared: ReadinessFigure = { value: share, metricId: AI_LEGACY_SHARE, stat: "value" };
+    const line: ReadinessFigure = { value: LEGACY_READY, metricId: AI_LEGACY_SHARE, stat: "workingLine:ready" };
+    if (share > LEGACY_NOT_YET) return { verdict: "not_yet", reason: `${text}.`, figures: [shared] };
+    if (share > LEGACY_READY) return { verdict: "nearly", reason: `${text}. Our working line is ${LEGACY_READY}%.`, figures: [shared, line] };
     // Within the line, a serious finding is what holds it back, so it's named rather than the share.
     const serious = shapeFindings.filter((f) => f.severity === "critical" || f.severity === "high").sort(bySeverity)[0];
-    if (serious) return { verdict: "nearly", reason: `${text}, within our working line of ${LEGACY_READY}%, but ${inSentence(serious.title)}.` };
-    return { verdict: "ready", reason: share === 0 ? "No active automation is left in Workflow Rules or Process Builder." : `${text}, within our working line of ${LEGACY_READY}%.` };
+    if (serious) return { verdict: "nearly", ...quoting(`${text}, within our working line of ${LEGACY_READY}%, but `, serious, inSentence(serious.title)), figures: [shared, line] };
+    if (share === 0) return { verdict: "ready", reason: "No active automation is left in Workflow Rules or Process Builder." };
+    return { verdict: "ready", reason: `${text}, within our working line of ${LEGACY_READY}%.`, figures: [shared, line] };
   })();
-  pillars.push({ key: "shape", label: "Org shape", question: "Is the logic in tools an agent can work with?", ...shape, findingIds: ids(shapeFindings), metricIds: [AI_LEGACY_SHARE] });
+  pillars.push({ key: "shape", ...PILLARS.shape, figures: [], ...shape, findingIds: ids(shapeFindings), metricIds: [AI_LEGACY_SHARE] });
 
   // Clear only with enough measured: two pillars not yet, or nothing worse than one "nearly".
   const measured = pillars.filter((p) => p.verdict !== "not_measurable");

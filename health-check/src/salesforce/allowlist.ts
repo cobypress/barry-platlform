@@ -42,6 +42,11 @@ const GET_ROUTES: ReadonlyArray<{ id: string; pattern: RegExp; requiresSoql?: bo
   // A report's definition: columns, groupings and filters. Only /describe: a GET on
   // the report itself runs it and returns rows, and /instances starts a run.
   { id: "analytics.reportDescribe", pattern: new RegExp(`^/services/data/${VERSION}/analytics/reports/00O[A-Za-z0-9]{12}(?:[A-Za-z0-9]{3})?/describe/?$`) },
+  // The Connect REST API's Organization resource: org-level settings only, no records and no people. Added with
+  // the owner's approval of 25 November 2026 ("Fine with a new read for the currency"), for one purpose: the
+  // currency of an org without multiple currencies, which no SOQL gives (DECISIONS.md 740). This exact path, GET,
+  // no parameters: nothing under it (/connect/organization/...) and no other Connect resource.
+  { id: "connect.organization", pattern: new RegExp(`^/services/data/${VERSION}/connect/organization/?$`) },
 ];
 
 /**
