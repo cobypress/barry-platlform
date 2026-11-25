@@ -10,7 +10,7 @@ import { Run, type BenchmarkRow, type Calibration, type ConnectLink, type Metric
 import { assertChecks, CONSOLE_CHECKS } from "./console-checks.ts";
 import { readLosses, type RunLosses } from "./release.ts";
 import { storedFromRow, waitingRow, type ConsoleSummariesRow, type SummariesToSave } from "../handbook/summary-row.ts";
-import { DISCONNECT_STEP, ORG_AWAITING_CONNECT, RunClosedError, SCAN_REVOKE_NOT_CONFIRMED, type ConnectJobInput, type DocumentsJobInput, type DocumentsJobReads, type DriveShare, type ShareJobInput, type DocumentsMade, type LinkConnected, type LinkState, type PulseRun, type ReleasedRun, type RunJobInput, type RunOutputRecord, type RunProgress, type WorkerStore, type CurrencyWas, type RunDelivery, type AutomaticOutcome, type AutomaticRunState, RUN_FAILED_FLAG, STOPPED_BUDGET_FLAG, DOCUMENTS_HELD_FLAG, type PortalDocumentRow } from "./types.ts";
+import { DISCONNECT_STEP, ORG_AWAITING_CONNECT, RunClosedError, SCAN_REVOKE_NOT_CONFIRMED, type ConnectJobInput, type DocumentsJobInput, type DocumentsJobReads, type DriveShare, type ShareJobInput, type DocumentsMade, type LinkConnected, type LinkState, type PulseRun, type ReleasedRun, type RunJobInput, type RunOutputRecord, type RunProgress, type WorkerStore, type CurrencyWas, type RunLineage, type RunDelivery, type AutomaticOutcome, type AutomaticRunState, RUN_FAILED_FLAG, STOPPED_BUDGET_FLAG, DOCUMENTS_HELD_FLAG, type PortalDocumentRow } from "./types.ts";
 
 // The WorkerStore for tests: the console's tables as plain maps, with the same
 // rules a database store must keep. Writes replace; a run in review or
@@ -200,6 +200,15 @@ export class MemoryWorkerStore implements WorkerStore {
       if (!best || r.startedAt > best.run.startedAt || (r.startedAt === best.run.startedAt && r.id > best.run.id)) best = run;
     }
     return best ? { runId: best.run.id, losses: readLosses(best.readsLost) } : null;
+  }
+
+  /** Set: runLineage throws, as a store fault would. */
+  failLineage = false;
+
+  async runLineage(runId: string): Promise<RunLineage | null> {
+    if (this.failLineage) throw new Error("the store didn't answer");
+    const run = this.runs.get(runId)?.run;
+    return run ? { orgId: run.orgId, product: run.product, reviewMode: run.reviewMode === "automatic" ? "automatic" : "consultant", baselineRunId: run.baselineRunId ?? null } : null;
   }
 
   async automaticRunState(runId: string): Promise<AutomaticRunState | null> {

@@ -42,6 +42,7 @@ import {
   type AutomaticRunState,
   type WorkerStore,
   type CurrencyWas,
+  type RunLineage,
   type PortalDocumentRow,
   type RunDelivery,
   DOCUMENTS_HELD_FLAG,
@@ -243,6 +244,8 @@ export const NAME_CALIBRATION_CURRENCY_SQL =
   `WHERE "runId" = $1 AND "source" = 'org_settings' AND "confirmedBy" = $3 AND "currency" = $4 AND jsonb_typeof("fields") = 'object' AND "fields" ->> 'currencyFrom' = $5`;
 /** An automatic run's hold (DECISIONS.md 693), read through the row as JSON like its mode. Asked only for an automatic run, so a consultant-led run's reads are unchanged. */
 export const HELD_REASON_SQL = `SELECT to_jsonb("HealthCheckRun") ->> 'heldReason' AS "heldReason" FROM "HealthCheckRun" WHERE "id" = $1`;
+/** A run's org, product, mode and baseline, for a pulse's baseline chain (DECISIONS.md 746); the mode through the row as JSON, as everywhere. */
+export const RUN_LINEAGE_SQL = `SELECT "orgId", "product", "baselineRunId", to_jsonb("HealthCheckRun") ->> 'reviewMode' AS "reviewMode" FROM "HealthCheckRun" WHERE "id" = $1`;
 /** A full check's review mode at connect, through the row as JSON (DECISIONS.md 688, 692). */
 export const REVIEW_MODE_SQL = `SELECT to_jsonb("HealthCheckRun") ->> 'reviewMode' AS "reviewMode" FROM "HealthCheckRun" WHERE "id" = $1`;
 /**
@@ -855,6 +858,12 @@ export class PostgresWorkerStore implements WorkerStore {
     const row = one(await this.#pool.query(PREVIOUS_RUN_LOSSES_SQL, [runId, orgId15]));
     if (!row) return null;
     return { runId: String(row.id), losses: readLosses(row.losses) };
+  }
+
+  async runLineage(runId: string): Promise<RunLineage | null> {
+    const row = one(await this.#pool.query(RUN_LINEAGE_SQL, [runId]));
+    if (!row || typeof row.orgId !== "string" || typeof row.product !== "string") return null;
+    return { orgId: row.orgId, product: row.product, reviewMode: row.reviewMode === "automatic" ? "automatic" : "consultant", baselineRunId: typeof row.baselineRunId === "string" ? row.baselineRunId : null };
   }
 
   async automaticRunState(runId: string): Promise<AutomaticRunState | null> {

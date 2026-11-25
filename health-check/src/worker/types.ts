@@ -90,6 +90,9 @@ export type RunJobInput = {
  * reference, who made it, benchmark consent, modules, org) is the console's,
  * and the worker never writes it.
  */
+/** A run as a pulse's baseline chain sees it (DECISIONS.md 746). */
+export type RunLineage = { orgId: string; product: string; reviewMode: "automatic" | "consultant"; baselineRunId: string | null };
+
 /** A saved calibration's currency as a run read it, for nameCalibrationCurrency's guard (DECISIONS.md 745). */
 export type CurrencyWas = { currency: string; currencyFrom: "org" | "customer" };
 
@@ -492,6 +495,12 @@ export interface WorkerStore {
    * that isn't there.
    */
   automaticRunState(runId: string): Promise<AutomaticRunState | null>;
+  /**
+   * What a run is, for a pulse to follow its baselines back (DECISIONS.md
+   * 746): its org, product, review mode and baseline, or null when there is no
+   * such run. One read-only statement; throws on a store fault.
+   */
+  runLineage(runId: string): Promise<RunLineage | null>;
 
   /** With `handbookSummaries` unset or false, nothing reads the summaries' table. */
   loadDocumentsJob(runId: string, reads?: DocumentsJobReads): Promise<DocumentsJobInput | null>;

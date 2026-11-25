@@ -16,7 +16,7 @@ import { buildScanResult } from "../scan/result.ts";
 import { buildPulseResult } from "../pulse/result.ts";
 import { buildDigest } from "../digest/build.ts";
 import type { RunDigest } from "../schemas/digest.ts";
-import type { ReportSection } from "../schemas/index.ts";
+import type { ReportSection, Run } from "../schemas/index.ts";
 import { deleteRunFolder } from "../retention/purge.ts";
 import type { StoredConnection } from "../salesforce/token-store.ts";
 import { safeReason, type Attempt, type JobOutcome, type WorkerDeps } from "./deps.ts";
@@ -72,13 +72,20 @@ export const ORG_SETTINGS_ON_CONSULTANT_RUN = "The calibration was read from the
 const heldFor = (input: RunJobInput): boolean => input.run.reviewMode === "automatic" && typeof input.heldReason === "string";
 const heldOutcome = (runId: string, input: RunJobInput): JobOutcome => ({ outcome: "skipped", detail: `Run ${runId} is held (${input.heldReason}), so it waits for a person and nothing was read` });
 
-function problemWith(input: RunJobInput, deps: WorkerDeps): string | null {
+function problemWith(input: RunJobInput, deps: WorkerDeps, pulseOfAutomatic = false): string | null {
   // First, before anything else is checked or loaded: an automatic run reads nothing it isn't allowed to (DECISIONS.md 688).
   const automatic = automaticRefusal(input.run, deps.automatic);
   if (automatic) return automatic;
   if (!input.calibration) return "The calibration hasn't been confirmed, so the run can't start.";
-  // Only an automatic run may start from a calibration nobody confirmed (DECISIONS.md 692).
-  if (input.calibration.source === "org_settings" && input.run.reviewMode !== "automatic") return ORG_SETTINGS_ON_CONSULTANT_RUN;
+  // Only an automatic run may start from a calibration nobody confirmed (DECISIONS.md 692): a run a person reviews
+  // must rest on a calibration a person confirmed. A monthly pulse of an automatic customer is the one other (746):
+  // no person reviews a pulse, its calibration is its automatic check's copy, and it reads only where the switch
+  // would let that check read.
+  if (input.calibration.source === "org_settings" && input.run.reviewMode !== "automatic") {
+    if (!pulseOfAutomatic) return ORG_SETTINGS_ON_CONSULTANT_RUN;
+    const refused = automaticRefusal({ reviewMode: "automatic", orgId: input.run.orgId }, deps.automatic);
+    if (refused) return refused;
+  }
   if (input.run.connectionKind !== "oauth") return "This run is set to use a CLI login. The worker only reads through a connection a customer's admin authorised.";
   if (!input.connectionName) return "No connection is named for this run. Send the customer a connect link first.";
   const known = knownModuleIds(deps.modules ?? ALL_MODULES);
@@ -114,6 +121,32 @@ async function draftSections(runId: string, dir: string, input: ReportInput, cli
   const outage = rejections.find((r) => r.unavailable);
   if (outage) log(`Claude couldn't be reached while drafting ${runId}, so the sections not yet drafted are the engine's own text: ${outage.reasons.join(" ")}`);
   return report;
+}
+
+/** The most baselines a pulse's chain is followed through: twelve months of pulses, with room to spare. */
+const MAX_PULSE_CHAIN = 40;
+
+/**
+ * Whether a pulse's baselines lead back to an automatic check of the same org
+ * (DECISIONS.md 746): the console makes a pulse from the latest released check
+ * or finished pulse, so the chain is pulses, all of one org, ending at a
+ * Barometer check whose mode is automatic. Anything else (a consultant-led
+ * check, another org, a run that's gone, a loop or a chain too long) is false.
+ * Throws on a store fault.
+ */
+async function pulseOfAutomaticCheck(run: Pick<Run, "id" | "orgId" | "baselineRunId">, deps: WorkerDeps): Promise<boolean> {
+  const org = run.orgId.slice(0, 15);
+  const seen = new Set<string>([run.id]);
+  let next = run.baselineRunId;
+  for (let i = 0; next && i < MAX_PULSE_CHAIN && !seen.has(next); i++) {
+    seen.add(next);
+    const base = await deps.store.runLineage(next);
+    if (!base || base.orgId.slice(0, 15) !== org) return false;
+    if (base.product === "barometer") return base.reviewMode === "automatic";
+    if (base.product !== "pulse") return false;
+    next = base.baselineRunId;
+  }
+  return false;
 }
 
 /** What a run job may ask beyond its run: `again`, a person's "Run again" of an automatic run (DECISIONS.md 698). */
@@ -371,7 +404,18 @@ async function runLocked(runId: string, deps: WorkerDeps, attempt: Attempt, seen
     recalibrated = true;
   }
 
-  const problem = problemWith(input, deps);
+  // A pulse with a calibration no person confirmed: whether its baselines go back to an automatic check of its org (746).
+  let pulseOfAutomatic = false;
+  if (input.run.product === "pulse" && input.calibration?.source === "org_settings" && input.run.reviewMode !== "automatic") {
+    try {
+      pulseOfAutomatic = await pulseOfAutomaticCheck(input.run, deps);
+    } catch (err) {
+      // A store that can't say: tried again while the queue will, then refused as before.
+      if (!attempt.final) throw new Error(safeReason(err));
+      log(`Pulse ${runId}'s baselines couldn't be read, so its calibration from the org's settings is refused as before: ${safeReason(err)}`);
+    }
+  }
+  const problem = problemWith(input, deps, pulseOfAutomatic);
   if (problem) return fail(problem);
   const name = input.connectionName!;
 
