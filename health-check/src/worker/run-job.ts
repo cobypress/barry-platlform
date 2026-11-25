@@ -318,8 +318,10 @@ async function runLocked(runId: string, deps: WorkerDeps, attempt: Attempt, seen
   // An automatic customer's pulse (DECISIONS.md 746): one the customer can already see is never read or decided again,
   // so nothing a delivery or a press does can take a shown month away; one held for a person is read afresh on Run again.
   let gatedFirst = false;
+  // The last delivery that couldn't tell is failed after its claim, so it's heard (a failed pulse reaches its consultant), never left silent.
+  let unknownPulse: string | null = null;
   if (first.run.product === "pulse" && first.calibration?.source === "org_settings") {
-    let shown: boolean;
+    let shown = false;
     try {
       gatedFirst = first.run.reviewMode === "automatic" || (await pulseOfAutomaticCheck(first.run, deps));
       const state = gatedFirst ? await deps.store.pulseState(runId) : null;
@@ -327,7 +329,7 @@ async function runLocked(runId: string, deps: WorkerDeps, attempt: Attempt, seen
     } catch (err) {
       // Can't tell whether the customer sees it: tried again while the queue will, then left as it is.
       if (!attempt.final) throw new Error(safeReason(err));
-      return { outcome: "skipped", detail: `Pulse ${runId}: whether the customer already sees it couldn't be read, so this delivery changed nothing` };
+      unknownPulse = `Pulse ${runId}'s baselines or state couldn't be read, so it wasn't run: ${safeReason(err)}`;
     }
     if (shown) return { outcome: "skipped", detail: `Pulse ${runId} is already shown to the customer, so this delivery read and changed nothing` };
   }
@@ -374,6 +376,8 @@ async function runLocked(runId: string, deps: WorkerDeps, attempt: Attempt, seen
     }
     return { outcome: "failed", detail: reason };
   };
+  // Only "has a result and no open flag", positively known, is a skip; a store that can't say fails the last delivery (746).
+  if (unknownPulse) return fail(unknownPulse);
 
   // Read again now the run is this delivery's, and worked only from this
   // reading: an answer the console saved just before the claim is in it, and
@@ -719,7 +723,7 @@ async function runLocked(runId: string, deps: WorkerDeps, attempt: Attempt, seen
       ...(input.run.product === "pulse" || decision ? { digest } : {}),
       ...(decision && losses ? { readsLost: losses } : {}),
       // Held: its flags in the same transaction, and no result, so the portal never lists it (746).
-      ...(pulseDecision?.kind === "hold" ? { pulseHold: { reason: pulseDecision.reason, counts: pulseDecision.counts, also: pulseDecision.also, at: heldAt, ...keptFor(pulseDecision, dir, runId, log) } } : {}),
+      ...(pulseDecision?.kind === "hold" ? { pulseHold: { reason: pulseDecision.reason, counts: pulseDecision.counts, also: pulseDecision.also, at: heldAt, ...keptFor(pulseDecision, dir, runId, log, now().toISOString()) } } : {}),
       ...(decision ? { automatic: decision.kind === "release" ? { decision: "release" as const, releases: decision.releases } : { decision: "hold" as const, reason: decision.reason, counts: decision.counts, also: decision.also, at: heldAt } } : {}),
     });
   } catch (err) {
@@ -983,11 +987,11 @@ function pulseResultOf(runId: string, dir: string, log: (line: string) => void, 
  * A held pulse's would-be result, kept for a person's Show (746), only when every hold is one a person may Show past:
  * its digest passed the check, so what would be shown is vouched for. Never for no_digest or digest_held.
  */
-export function keptFor(d: Extract<PulseDecision, { kind: "hold" }>, dir: string, runId: string, log: (line: string) => void): { kept?: PulseResult } {
+export function keptFor(d: Extract<PulseDecision, { kind: "hold" }>, dir: string, runId: string, log: (line: string) => void, madeAt: string): { kept?: { madeAt: string; result: PulseResult } } {
   const kinds = [d.reason, ...d.also.map((a) => a.kind)];
   if (!d.digest || !kinds.every((k) => SHOWABLE_PULSE_HOLDS.includes(k))) return {};
   try {
-    return { kept: pulseResultOf(runId, dir, log, d.digest) };
+    return { kept: { madeAt, result: pulseResultOf(runId, dir, log, d.digest) } };
   } catch (err) {
     log(`Pulse ${runId}'s result couldn't be kept for a person to show, so only Run again can follow its hold: ${safeReason(err)}`);
     return {};

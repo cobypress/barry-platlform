@@ -17,7 +17,7 @@ import { SURVEY_METRIC_IDS } from "../survey/summary.ts";
 import { Interview } from "../interviews/questions.ts";
 import { BenchmarkRow, HeadcountBand, Industry } from "../schemas/benchmark.ts";
 import { storedFromRow, waitingRow, type ConsoleSummariesRow, type StoredSummaries } from "../handbook/summary-row.ts";
-import { readLosses, SHOWABLE_PULSE_HOLDS, type RunLosses } from "./release.ts";
+import { PULSE_HOLD_REASONS, readLosses, SHOWABLE_PULSE_HOLDS, type PulseHoldReason, type RunLosses } from "./release.ts";
 import { Calibration, ConnectLink, ManualAnswer, NumberOverride, ReportSection, Run, SectionVersion, type Finding, type ManualStep, type Metric, type Score } from "../schemas/index.ts";
 import {
   DISCONNECT_STEP,
@@ -256,7 +256,8 @@ export const SHOW_PULSE_LOCK_SQL = `SELECT "id" FROM "HealthCheckRun" WHERE "id"
 export const SHOW_PULSE_FACTS_SQL =
   `SELECT r."product", r."budget"::jsonb -> 'heldPulse' AS "kept", EXISTS (SELECT 1 FROM "HealthCheckPulseResult" p WHERE p."runId" = r."id") AS "hasResult", ` +
   `(SELECT to_jsonb(c) ->> 'source' FROM "HealthCheckCalibration" c WHERE c."runId" = r."id") AS "source", ` +
-  `COALESCE((SELECT array_agg(f."kind" ORDER BY f."kind") FROM "HealthCheckRunFlag" f WHERE f."runId" = r."id" AND f."clearedAt" IS NULL), '{}'::text[]) AS "openFlags" FROM "HealthCheckRun" r WHERE r."id" = $1`;
+  `(SELECT d."madeAt" FROM "HealthCheckRunDigest" d WHERE d."runId" = r."id") AS "digestMadeAt", ` +
+  `COALESCE((SELECT json_agg(json_build_object('kind', f."kind", 'counts', f."counts") ORDER BY f."kind") FROM "HealthCheckRunFlag" f WHERE f."runId" = r."id" AND f."clearedAt" IS NULL), '[]'::json) AS "openFlags" FROM "HealthCheckRun" r WHERE r."id" = $1`;
 /** No ON CONFLICT: a result already there rolls the Show back. */
 export const SHOW_PULSE_RESULT_SQL = `INSERT INTO "HealthCheckPulseResult" ("runId", "madeAt", "result") VALUES ($1, $2::timestamp(3), $3::jsonb)`;
 export const SHOW_PULSE_UNKEEP_SQL = `UPDATE "HealthCheckRun" SET "budget" = "budget"::jsonb - 'heldPulse' WHERE "id" = $1`;
@@ -272,12 +273,40 @@ export function pulseShowRefusal(f: { product: string; source: string | null; ke
   if (f.product !== "pulse" || f.source !== "org_settings") return "Only an automatic customer's monthly scan is shown this way.";
   if (f.hasResult) return "This monthly scan is already shown.";
   if (f.openFlags.length === 0) return "This monthly scan isn't held.";
-  if (!f.openFlags.every((k) => (SHOWABLE_PULSE_HOLDS as readonly string[]).includes(k)) || !f.kept) return "This monthly scan's details didn't pass our checks, so it can't be shown: run it again.";
+  if (!f.openFlags.every((k) => (SHOWABLE_PULSE_HOLDS as readonly string[]).includes(k))) return "This monthly scan's details didn't pass our checks, so it can't be shown: run it again.";
+  // Kept once, and dropped by a later save of the run's progress: the content passed, but there's nothing to publish.
+  if (!f.kept) return "Nothing was kept to show for this monthly scan: run it again.";
   return null;
 }
 
-/** A held pulse's earlier result taken away (DECISIONS.md 746): the portal lists a pulse once it has one. */
-export const PULSE_RESULT_DELETE_SQL = `DELETE FROM "HealthCheckPulseResult" WHERE "runId" = $1`;
+/** A held pulse's would-be result as kept (746): with the time the held attempt made it, which the console orders pulses by. */
+export type KeptPulse = { madeAt: string; result: PulseResult };
+/** A kept result read back, or null when it isn't one we wrote whole. */
+export function keptPulseOf(value: unknown): KeptPulse | null {
+  const v = typeof value === "string" ? (() => { try { return JSON.parse(value) as unknown; } catch { return null; } })() : value;
+  if (!v || typeof v !== "object") return null;
+  const { madeAt, result } = v as { madeAt?: unknown; result?: unknown };
+  return typeof madeAt === "string" && !Number.isNaN(Date.parse(madeAt)) && result && typeof result === "object" ? { madeAt, result: result as PulseResult } : null;
+}
+
+/** The order the console's Show names a hold by: the pulse's holds in PULSE_HOLD_REASONS' order. */
+export const firstHold = (kinds: readonly string[]): string => [...kinds].sort((a, b) => PULSE_HOLD_REASONS.indexOf(a as PulseHoldReason) - PULSE_HOLD_REASONS.indexOf(b as PulseHoldReason))[0] ?? "";
+
+/** Counts only, as the console's auditFlags writes them. */
+const numbersOnlyOf = (counts: unknown): Record<string, number> =>
+  counts && typeof counts === "object" && !Array.isArray(counts) ? Object.fromEntries(Object.entries(counts as Record<string, unknown>).filter((e): e is [string, number] => typeof e[1] === "number" && Number.isFinite(e[1]))) : {};
+
+/** A held pulse's Show as "audit_log" keeps it: the console's PersonAudit shape, key for key (its person-store.ts). */
+export function pulseShowAudit(runId: string, by: string, at: string, flags: ReadonlyArray<{ kind: string; counts: unknown }>, digestMadeAt: string | null) {
+  return { action: "show_to_customer" as const, runId, by, at, state: firstHold(flags.map((f) => f.kind)), flags: flags.map((f) => ({ kind: f.kind, counts: numbersOnlyOf(f.counts) })), digestMadeAt };
+}
+
+/**
+ * Whether a held pulse's output may still write its hold (746): never over a result already there. One got there
+ * while this delivery ran, released by another delivery or shown by a person (both lock the run row, as this save
+ * does, so they come strictly before or after it), and it stands: no flags reopened, nothing kept, nothing deleted.
+ */
+export const PULSE_HAS_RESULT_SQL = `SELECT EXISTS (SELECT 1 FROM "HealthCheckPulseResult" p WHERE p."runId" = $1) AS "shown"`;
 /** An automatic run's hold (DECISIONS.md 693), read through the row as JSON like its mode. Asked only for an automatic run, so a consultant-led run's reads are unchanged. */
 export const HELD_REASON_SQL = `SELECT to_jsonb("HealthCheckRun") ->> 'heldReason' AS "heldReason" FROM "HealthCheckRun" WHERE "id" = $1`;
 /** A run's org, product, mode and baseline, for a pulse's baseline chain (DECISIONS.md 746); the mode through the row as JSON, as everywhere. */
@@ -854,11 +883,14 @@ export class PostgresWorkerStore implements WorkerStore {
       if (output.automatic) await this.#writeAutomatic(client, runId, output);
       // An automatic customer's pulse held for a person (746): no result, so the portal never lists it, and its flags.
       if (output.pulseHold) {
-        await client.query(PULSE_RESULT_DELETE_SQL, [runId]);
         const h = output.pulseHold;
-        // A showable hold's would-be result, for a person's Show; after the progress above, which writes "budget" whole.
-        if (h.kept) await client.query(KEEP_PULSE_SQL, [runId, JSON.stringify(h.kept)]);
-        for (const f of [{ kind: h.reason, counts: h.counts }, ...h.also]) await client.query(RAISE_FLAG_SQL, [runId, f.kind, h.at, JSON.stringify(f.counts)]);
+        if (one(await client.query(PULSE_HAS_RESULT_SQL, [runId]))?.shown === true) {
+          this.#log(`Pulse ${runId} was shown or released while this delivery ran, so its hold here was left unwritten and the result stands.`);
+        } else {
+          // A showable hold's would-be result, for a person's Show; after the progress above, which writes "budget" whole.
+          if (h.kept) await client.query(KEEP_PULSE_SQL, [runId, JSON.stringify(h.kept)]);
+          for (const f of [{ kind: h.reason, counts: h.counts }, ...h.also]) await client.query(RAISE_FLAG_SQL, [runId, f.kind, h.at, JSON.stringify(f.counts)]);
+        }
       }
     });
   }
@@ -920,14 +952,21 @@ export class PostgresWorkerStore implements WorkerStore {
     return this.#transaction(async (client) => {
       if ((await client.query(SHOW_PULSE_LOCK_SQL, [runId])).rows.length === 0) return { ok: false as const, why: "There's no such run." };
       const row = one(await client.query(SHOW_PULSE_FACTS_SQL, [runId]));
-      const facts = row ? { product: String(row.product), source: typeof row.source === "string" ? row.source : null, kept: row.kept !== null && row.kept !== undefined, hasResult: row.hasResult === true, openFlags: Array.isArray(row.openFlags) ? row.openFlags.map(String) : [] } : null;
+      const flagsOf = (v: unknown): Array<{ kind: string; counts: unknown }> => {
+        const list = typeof v === "string" ? (JSON.parse(v) as unknown) : v;
+        return Array.isArray(list) ? list.filter((f): f is { kind: string; counts: unknown } => !!f && typeof (f as { kind?: unknown }).kind === "string") : [];
+      };
+      const flags = row ? flagsOf(row.openFlags) : [];
+      const kept = row ? keptPulseOf(row.kept) : null;
+      const facts = row ? { product: String(row.product), source: typeof row.source === "string" ? row.source : null, kept: kept !== null, hasResult: row.hasResult === true, openFlags: flags.map((f) => f.kind) } : null;
       const why = pulseShowRefusal(facts);
       if (why) return { ok: false as const, why };
-      const kept = typeof row!.kept === "string" ? JSON.parse(row!.kept) : row!.kept;
-      await client.query(SHOW_PULSE_RESULT_SQL, [runId, at, JSON.stringify(kept)]);
+      // The held attempt's own time, so a month shown late never reads as the latest.
+      await client.query(SHOW_PULSE_RESULT_SQL, [runId, kept!.madeAt, JSON.stringify(kept!.result)]);
       await client.query(SHOW_PULSE_UNKEEP_SQL, [runId]);
       const cleared = (await client.query(SHOW_PULSE_CLEAR_FLAGS_SQL, [runId, by, at, facts!.openFlags])).rows.map((r: Record<string, unknown>) => String(r.kind)).sort();
-      await client.query(SHOW_PULSE_AUDIT_SQL, [PERSON_AUDIT_SOURCE, "show_to_customer", runId, JSON.stringify({ action: "show_to_customer", runId, by, at, state: facts!.openFlags[0], product: "pulse", flags: facts!.openFlags }), at]);
+      const digestMadeAt = row!.digestMadeAt instanceof Date ? row!.digestMadeAt.toISOString() : typeof row!.digestMadeAt === "string" ? new Date(`${row!.digestMadeAt}${/Z|[+-]\d\d:?\d\d$/.test(row!.digestMadeAt) ? "" : "Z"}`).toISOString() : null;
+      await client.query(SHOW_PULSE_AUDIT_SQL, [PERSON_AUDIT_SOURCE, "show_to_customer", runId, JSON.stringify(pulseShowAudit(runId, by, at, flags, digestMadeAt)), at]);
       return { ok: true as const, flagsCleared: cleared };
     });
   }

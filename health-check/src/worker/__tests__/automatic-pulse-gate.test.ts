@@ -18,6 +18,7 @@ import { ORG_ID } from "../../testing/synthetic-org.ts";
 import type { CheckedDigest } from "../../digest/checked.ts";
 import { decidePulse, PULSE_HOLD_REASONS, SCORE_MOVE_POINTS } from "../release.ts";
 import { createJobHandler } from "../worker.ts";
+import { progressOf as progressOfRun } from "../types.ts";
 import { baseDeps, consoleRun, runInput, syntheticConnection } from "./helpers.ts";
 
 // An automatic customer's pulse goes through the automatic check's own gate
@@ -162,16 +163,17 @@ describe("an automatic customer's pulse, held: nothing customer-visible, its fla
     assert.equal(c.deps.store.flagsOf(PULSE).length, 0);
   });
 
-  test("Postgres: a held pulse's save deletes its result and raises each flag, in the save's one transaction", async () => {
-    const { PostgresWorkerStore, PULSE_RESULT_DELETE_SQL, RAISE_FLAG_SQL } = await import("../postgres-store.ts");
+  test("Postgres: a held pulse's save looks for a result first and, with none, raises each flag, in the save's one transaction", async () => {
+    const { PostgresWorkerStore, PULSE_HAS_RESULT_SQL, RAISE_FLAG_SQL } = await import("../postgres-store.ts");
     const c = await customer({ age: higherThen });
     const record = { ...c.stored.output!, progress: { ...c.stored.run, status: "in_review" }, runDir: c.dir, overall: null, pulseHold: { reason: "score_moved", counts: { moved: 20 }, also: [{ kind: "mostly_unmeasured", counts: { rules: 3, notMeasurable: 2 } }], at: "2026-11-01T00:00:00.000Z" } };
     const sent: string[] = [];
     const client = { query: async (text: string) => (sent.push(text), { rows: [{ id: PULSE, status: "analysing", reviewMode: null, heldReason: null }], rowCount: 1 }), release: () => {} };
     const pool = { query: client.query, connect: async () => client } as never;
     await new PostgresWorkerStore(pool).saveRunOutput(PULSE, record as never).catch(() => {});
-    const i = sent.indexOf(PULSE_RESULT_DELETE_SQL);
-    assert.ok(i > 0, "the result is deleted");
+    const i = sent.indexOf(PULSE_HAS_RESULT_SQL);
+    assert.ok(i > 0, "a result is looked for");
+    assert.ok(!sent.some((t) => /^DELETE FROM "HealthCheckPulseResult"/.test(t)), "a held output never deletes a result");
     assert.equal(sent.slice(i).filter((t) => t === RAISE_FLAG_SQL).length, 2);
     assert.ok(sent.indexOf("BEGIN") < i && sent.lastIndexOf("COMMIT") > i, "inside the transaction");
   });
@@ -282,10 +284,14 @@ describe("a person's Show of a held pulse, and the next month (746, round 4)", (
     assert.equal(c.deps.store.pulseResults.get(PULSE), undefined);
     const shown = await showHeldPulse(c.deps.store, PULSE, "staff@example.com", "2026-11-02T09:00:00.000Z");
     assert.deepEqual(shown, { ok: true, flagsCleared: ["score_moved"] });
-    assert.deepEqual(c.deps.store.pulseResults.get(PULSE)!.result, kept, "exactly what was kept, its titles already as served");
+    assert.deepEqual(c.deps.store.pulseResults.get(PULSE)!.result, kept.result, "exactly what was kept, its titles already as served");
+    assert.equal(c.deps.store.pulseResults.get(PULSE)!.madeAt, kept.madeAt, "with the held attempt's own time");
     assert.equal(c.deps.store.keptPulses.get(PULSE), undefined);
     assert.equal(c.deps.store.flags.get(`${PULSE}|score_moved`)!.clearedBy, "staff@example.com");
-    assert.deepEqual(c.deps.store.audit.at(-1), { action: "show_to_customer", runId: PULSE, by: "staff@example.com", at: "2026-11-02T09:00:00.000Z", state: "score_moved", product: "pulse", flags: ["score_moved"] });
+    // The console's own PersonAudit shape (person-store.ts), key for key: flags as auditFlags writes them, and digestMadeAt.
+    const flagCounts = c.deps.store.flags.get(`${PULSE}|score_moved`)!.counts;
+    assert.deepEqual(c.deps.store.audit.at(-1), { action: "show_to_customer", runId: PULSE, by: "staff@example.com", at: "2026-11-02T09:00:00.000Z", state: "score_moved", flags: [{ kind: "score_moved", counts: flagCounts }], digestMadeAt: c.deps.store.digests.get(PULSE)!.madeAt });
+    assert.deepEqual(Object.keys(c.deps.store.audit.at(-1)!), ["action", "runId", "by", "at", "state", "flags", "digestMadeAt"]);
     // A second Show changes nothing.
     assert.equal((await showHeldPulse(c.deps.store, PULSE, "staff@example.com", "2026-11-02T09:01:00.000Z")).ok, false);
     // Next month, makePulse bases it on the latest pulse with a result: month 1.
@@ -305,8 +311,8 @@ describe("a person's Show of a held pulse, and the next month (746, round 4)", (
     // A held pulse, its folder real, so a result could be made from it.
     const c = await customer({ age: higherThen });
     const servedDigest = c.deps.store.digests.get(PULSE)!.digest;
-    assert.ok(keptFor(hold("score_moved", ["mostly_unmeasured"], servedDigest), c.dir, PULSE, () => {}).kept, "a showable hold keeps its result");
-    for (const d of [hold("digest_held", [], servedDigest), hold("no_digest", [], null), hold("digest_held", ["score_moved"], servedDigest), hold("score_moved", ["no_digest"], servedDigest), hold("score_moved", [], null)]) assert.deepEqual(keptFor(d, c.dir, PULSE, () => {}), {});
+    assert.ok(keptFor(hold("score_moved", ["mostly_unmeasured"], servedDigest), c.dir, PULSE, () => {}, "2026-11-01T00:00:00.000Z").kept, "a showable hold keeps its result");
+    for (const d of [hold("digest_held", [], servedDigest), hold("no_digest", [], null), hold("digest_held", ["score_moved"], servedDigest), hold("score_moved", ["no_digest"], servedDigest), hold("score_moved", [], null)]) assert.deepEqual(keptFor(d, c.dir, PULSE, () => {}, "2026-11-01T00:00:00.000Z"), {});
     // Its digest failed now: its flag open, nothing kept. Show is refused and changes nothing.
     c.deps.store.keptPulses.delete(PULSE);
     c.deps.store.flags.set(`${PULSE}|digest_held`, { runId: PULSE, kind: "digest_held", raisedAt: "2026-11-01T00:00:00.000Z", counts: { unmarked: 1 }, postedAt: null, clearedBy: null, clearedAt: null });
@@ -316,7 +322,7 @@ describe("a person's Show of a held pulse, and the next month (746, round 4)", (
     assert.equal(c.deps.store.pulseResults.get(PULSE), undefined);
     assert.ok(c.deps.store.flagsOf(PULSE).every((k) => c.deps.store.flags.get(`${PULSE}|${k}`)!.clearedAt === null), "nothing cleared");
     // Even with a result kept, an open digest_held flag refuses it.
-    c.deps.store.keptPulses.set(PULSE, { version: 1 } as never);
+    c.deps.store.keptPulses.set(PULSE, { madeAt: "2026-11-01T00:00:00.000Z", result: { version: 1 } } as never);
     assert.equal((await showHeldPulse(c.deps.store, PULSE, "staff@example.com", "2026-11-02T09:00:00.000Z")).ok, false);
   });
 
@@ -361,9 +367,10 @@ describe("a person's Show of a held pulse, and the next month (746, round 4)", (
 
   test("Postgres: Show is one transaction, locked, refused by the same rule, and writes the result, the kept copy's removal, the flags and the audit row in order", async () => {
     const pg = await import("../postgres-store.ts");
-    const kept = { version: 1, runId: PULSE };
+    const kept = { madeAt: "2026-10-31T12:00:00.000Z", result: { version: 1, runId: PULSE } };
     const sent: Array<{ text: string; values: unknown[] }> = [];
-    const facts = { product: "pulse", kept, hasResult: false, source: "org_settings", openFlags: ["score_moved"] };
+    const open = [{ kind: "score_moved", counts: { score: 40, previous: 80, moved: 40 } }];
+    const facts: Record<string, unknown> = { product: "pulse", kept, hasResult: false, source: "org_settings", digestMadeAt: "2026-10-31T12:00:00.000Z", openFlags: open };
     const answer = (text: string) => {
       if (text === pg.SHOW_PULSE_LOCK_SQL) return [{ id: PULSE }];
       if (text === pg.SHOW_PULSE_FACTS_SQL) return [facts];
@@ -374,11 +381,12 @@ describe("a person's Show of a held pulse, and the next month (746, round 4)", (
     const store = new pg.PostgresWorkerStore({ query: client.query, connect: async () => client } as never);
     assert.deepEqual(await store.showHeldPulse(PULSE, "staff@example.com", "2026-11-02T09:00:00.000Z"), { ok: true, flagsCleared: ["score_moved"] });
     assert.deepEqual(sent.map((s) => s.text), ["BEGIN", pg.SHOW_PULSE_LOCK_SQL, pg.SHOW_PULSE_FACTS_SQL, pg.SHOW_PULSE_RESULT_SQL, pg.SHOW_PULSE_UNKEEP_SQL, pg.SHOW_PULSE_CLEAR_FLAGS_SQL, pg.SHOW_PULSE_AUDIT_SQL, "COMMIT"]);
-    assert.equal(sent[3]!.values[2], JSON.stringify(kept));
+    assert.deepEqual(sent[3]!.values, [PULSE, kept.madeAt, JSON.stringify(kept.result)]);
+    assert.deepEqual(JSON.parse(String(sent[6]!.values[3])), { action: "show_to_customer", runId: PULSE, by: "staff@example.com", at: "2026-11-02T09:00:00.000Z", state: "score_moved", flags: open, digestMadeAt: "2026-10-31T12:00:00.000Z" });
     assert.equal(sent[6]!.values[0], pg.PERSON_AUDIT_SOURCE);
     // The same rule refuses: an unsafe hold open, or nothing kept.
-    for (const bad of [{ openFlags: ["digest_held", "score_moved"] }, { kept: null }, { hasResult: true }, { source: "confirmed" }]) {
-      Object.assign(facts, { product: "pulse", kept, hasResult: false, source: "org_settings", openFlags: ["score_moved"] }, bad);
+    for (const bad of [{ openFlags: [{ kind: "digest_held", counts: {} }, ...open] }, { kept: null }, { kept: kept.result }, { hasResult: true }, { source: "confirmed" }]) {
+      Object.assign(facts, { product: "pulse", kept, hasResult: false, source: "org_settings", openFlags: open }, bad);
       sent.length = 0;
       const r = await store.showHeldPulse(PULSE, "staff@example.com", "2026-11-02T09:00:00.000Z");
       assert.equal(r.ok, false, JSON.stringify(bad));
@@ -386,5 +394,59 @@ describe("a person's Show of a held pulse, and the next month (746, round 4)", (
     }
     assert.match(pg.KEEP_PULSE_SQL, /"budget"/);
     assert.match(pg.PULSE_STATE_SQL, /HealthCheckPulseResult/);
+  });
+});
+
+describe("Show, follow-up round (746)", () => {
+  const P2 = "hc-2026-11-30-00000004";
+
+  test("a month shown after the next was released keeps its own time, earlier than the next month's", async () => {
+    const { showHeldPulse } = await import("../pulse-show.ts");
+    const c = await customer({ age: higherThen });
+    heldNothingShown(c, "score_moved");
+    const heldAt = c.deps.store.keptPulses.get(PULSE)!.madeAt;
+    // Month 2, made from the check as makePulse does while month 1 is hidden, released at T2.
+    const T2 = "2026-11-30T09:00:00.000Z";
+    c.deps.now = () => new Date(T2);
+    c.deps.dataTransport = new Simulator();
+    // Its baseline back as it was, so month 2 is released.
+    const { input } = loadRun(c.baselineDir);
+    writeFileSync(join(c.baselineDir, "scores.json"), JSON.stringify((input.scores ?? []).map((s) => (s.status === "measured" ? { ...s, score: Math.max(0, s.score - 40) } : s))));
+    c.deps.store.addRun(runInput({ run: consoleRun({ id: P2, product: "pulse", baselineRunId: BASELINE }), calibration: await automaticSyntheticCalibration() }));
+    await c.handle({ kind: "run", runId: P2 }, last);
+    assert.equal(c.deps.store.pulseResults.get(P2)!.madeAt, T2);
+    // Month 1 shown later, at T3.
+    const T3 = "2026-12-01T09:00:00.000Z";
+    assert.equal((await showHeldPulse(c.deps.store, PULSE, "staff@example.com", T3)).ok, true);
+    const month1 = c.deps.store.pulseResults.get(PULSE)!.madeAt;
+    assert.equal(month1, heldAt);
+    assert.ok(month1 < T2 && T2 < T3, `${month1} < ${T2}`);
+  });
+
+  test("a kept copy dropped by a later save: Show says nothing was kept, in its own words", async () => {
+    const { showHeldPulse } = await import("../pulse-show.ts");
+    const c = await customer({ age: higherThen });
+    c.deps.store.keptPulses.delete(PULSE);
+    const r = await showHeldPulse(c.deps.store, PULSE, "staff@example.com", "2026-11-02T09:00:00.000Z");
+    assert.deepEqual(r, { ok: false, why: "Nothing was kept to show for this monthly scan: run it again." });
+  });
+
+  test("a held output landing after a person's Show (a duplicate delivery) leaves the shown result, the cleared flags and nothing kept", async () => {
+    const { showHeldPulse } = await import("../pulse-show.ts");
+    const c = await customer({ age: higherThen });
+    const record = { ...c.stored.output!, progress: progressOfRun(c.stored.run), runDir: c.dir, overall: null, pulseHold: { reason: "score_moved", counts: { moved: 40 }, also: [], at: "2026-11-02T10:00:00.000Z", kept: c.deps.store.keptPulses.get(PULSE)! } };
+    assert.equal((await showHeldPulse(c.deps.store, PULSE, "staff@example.com", "2026-11-02T09:00:00.000Z")).ok, true);
+    const shown = structuredClone(c.deps.store.pulseResults.get(PULSE));
+    await c.deps.store.saveRunOutput(PULSE, record as never);
+    assert.deepEqual(c.deps.store.pulseResults.get(PULSE), shown);
+    assert.equal(c.deps.store.flags.get(`${PULSE}|score_moved`)!.clearedBy, "staff@example.com", "not reopened");
+    assert.equal(c.deps.store.keptPulses.get(PULSE), undefined);
+    // Postgres: the save finds the result and writes no flag and no kept copy.
+    const pg = await import("../postgres-store.ts");
+    const sent: string[] = [];
+    const client = { query: async (text: string) => (sent.push(text), { rows: text === pg.PULSE_HAS_RESULT_SQL ? [{ shown: true }] : [{ id: PULSE, status: "analysing" }], rowCount: 1 }), release: () => {} };
+    await new pg.PostgresWorkerStore({ query: client.query, connect: async () => client } as never).saveRunOutput(PULSE, record as never).catch(() => {});
+    assert.ok(sent.includes(pg.PULSE_HAS_RESULT_SQL));
+    assert.ok(!sent.includes(pg.RAISE_FLAG_SQL) && !sent.includes(pg.KEEP_PULSE_SQL));
   });
 });

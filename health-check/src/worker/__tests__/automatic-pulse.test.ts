@@ -93,7 +93,7 @@ describe("an automatic customer's monthly pulse (746)", () => {
     assert.notEqual(out.detail, ORG_SETTINGS_ON_CONSULTANT_RUN);
   });
 
-  test("a store that can't say: tried again while the queue will, then left as it is with nothing read", async () => {
+  test("a store that can't say: tried again while the queue will, then the last delivery fails, heard, with nothing read", async () => {
     const sim = new Simulator();
     const deps = baseDeps({ dataTransport: sim, automatic: ON });
     await deps.tokens.save(syntheticConnection());
@@ -102,8 +102,10 @@ describe("an automatic customer's monthly pulse (746)", () => {
     deps.store.failLineage = true;
     await assert.rejects(createJobHandler(deps)({ kind: "run", runId: PULSE }, { final: false }));
     const out = await createJobHandler(deps)({ kind: "run", runId: PULSE }, last);
-    // Round 4: it can't be told whether the customer already sees it, so the last delivery changes nothing (746).
-    assert.equal(out.outcome, "skipped");
+    // Whether the customer already sees it can't be told: the last delivery fails, so its consultant hears (746), and nothing is read.
+    assert.equal(out.outcome, "failed");
+    assert.match(out.detail, /baselines or state couldn't be read, so it wasn't run/);
+    assert.equal(deps.store.runs.get(PULSE)!.run.status, "failed");
     assert.equal(sim.requests.length, 0);
   });
 });

@@ -184,7 +184,7 @@ export type RunOutputRecord = {
    * has a result) never shows it. No "heldReason": the console allows one only on an automatic run, which a pulse
    * isn't in its records. Left out for every other run.
    */
-  pulseHold?: { reason: string; counts: Record<string, number>; also: Array<{ kind: string; counts: Record<string, number> }>; at: string; kept?: PulseResult };
+  pulseHold?: { reason: string; counts: Record<string, number>; also: Array<{ kind: string; counts: Record<string, number> }>; at: string; kept?: { madeAt: string; result: PulseResult } };
 };
 
 /**
