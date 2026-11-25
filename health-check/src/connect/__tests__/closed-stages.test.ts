@@ -96,7 +96,10 @@ describe("the name rule's word list", () => {
       assert.equal(outcomeFromName("", w.replace(/ /g, "_")), "no_decision", `${w} as an API name`);
       assert.equal(outcomeFromName(`never ${w}`, ""), null, `never ${w}`);
     }
-    for (const w of STAGE_NAME_WORDS.stop) {
+    // Written here, not read from the module, so a word dropped from its list fails.
+    const STOPS = ["won", "win", "open", "reopen", "reopened", "dead", "cancelled", "canceled", "withdrawn", "duplicate", "error", "timing", "converted", "recovered", "recovery", "found", "review", "risk", "mitigated", "prevention", "billing", "revenue", "cart", "harmless", "maker", "momentum", "upsell", "off"];
+    assert.deepEqual([...STAGE_NAME_WORDS.stop].sort(), [...STOPS].sort());
+    for (const w of STOPS) {
       assert.equal(outcomeFromName(w, ""), null, w);
       assert.equal(outcomeFromName(`Lost ${w}`, ""), null, `lost ${w}`);
       assert.equal(outcomeFromName(`${w} - On Hold`, ""), null, `${w} on hold`);
