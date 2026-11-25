@@ -1,5 +1,5 @@
 import type { OrgLimit } from "../salesforce/client.ts";
-import { daysBefore, readSoql, soqlWindow, type Extractor, type Sourced } from "./types.ts";
+import { daysBefore, limitsReadingOf, readSoql, soqlWindow, type Extractor, type Sourced } from "./types.ts";
 
 // What the integrations area reads beyond what security and "Your org,
 // documented" already hold: who is API-only, the org's API and async Apex use,
@@ -27,9 +27,9 @@ export const apiLimitsExtractor: Extractor<Sourced<Record<string, OrgLimit>>> = 
   version: 1,
   run(ctx) {
     const source = { kind: "rest", path: `/services/data/v${ctx.client.apiVersion}/limits` } as const;
-    const limits = ctx.client.limitsAtConnect;
+    // The run's first reading, before its own calls (DECISIONS.md 726).
+    const { reported: limits, unread } = limitsReadingOf(ctx);
     // Refused at connect, it says why in our words (DECISIONS.md 702).
-    const unread = ctx.client.limitsUnread;
     if (unread) return Promise.resolve({ status: "unavailable", reason: unread, source });
     if (Object.keys(limits).length === 0) return Promise.resolve({ status: "unavailable", reason: "The org reported none of the daily limits we read.", source });
     return Promise.resolve({ status: "ok", data: limits, source, truncated: false });

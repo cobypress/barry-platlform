@@ -474,10 +474,11 @@ describe("every overridable figure of the synthetic run, put back (decision 514,
 // with a figure of 1 beside "one" in its finding's wording (dq.duplicate-accounts,
 // sec.modify-all-data, bp.ownership-skew, act.rep-activity-spread, int.api-usage)
 // or int.api-usage's 1,000 requests, which the 5% test reads as "one" in thousands.
-const CARRIED_PAIRS = 598;
-// Three of the 49 were among those pairs, now refused: int.api-usage's "220,000 of 1" and "220,000 of 1,000",
-// and sec.modify-all-data's "3 of 1".
-const IMPOSSIBLE_PAIRS = 46;
+// Decision 726 took 6 more out: int.api-usage's DailyApiRequestsMax of 100,000, which its 96% may print rounded in thousands.
+const CARRIED_PAIRS = 592;
+// Three of the 49 were among those pairs, now refused: int.api-usage's "220,000 of 1" and "220,000 of 1,000" (240,000 since decision 726),
+// and sec.modify-all-data's "3 of 1". Decision 726's refusal of int.api-usage's DailyApiRequestsMax took one more out.
+const IMPOSSIBLE_PAIRS = 45;
 
 const byId = (id: string): Finding => output!.findings.find((f) => f.id === id)!;
 

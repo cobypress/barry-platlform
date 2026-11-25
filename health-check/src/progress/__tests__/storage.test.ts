@@ -20,6 +20,7 @@ import { buildMicrositePages } from "../../microsite/pages.ts";
 import { buildPulseResult } from "../../pulse/result.ts";
 import { checkNumbers, scopeDataset } from "../../numbercheck/index.ts";
 import { limitsReadAt, progressFigures, PROGRESS_LISTED, STORAGE_READ_ALIKE, STORAGE_RULE, storageSentences } from "../compare.ts";
+import { stampLimitsReading } from "../../testing/recheck.ts";
 import type { Finding, NumberOverride, Run } from "../../schemas/index.ts";
 
 // Storage growth on a re-check (DECISIONS.md 500): the synthetic org's storage
@@ -324,6 +325,7 @@ describe("storage on a re-check made on disk", () => {
     const edit = (folder: string, finishedAt: string, used: number): void => {
       const runPath = join(folder, "run.json");
       writeFileSync(runPath, JSON.stringify(stamped(JSON.parse(readFileSync(runPath, "utf8")) as Run, finishedAt)));
+      stampLimitsReading(folder, finishedAt);
       const findingsPath = join(folder, "findings.json");
       const findings = JSON.parse(readFileSync(findingsPath, "utf8")) as Finding[];
       writeFileSync(findingsPath, JSON.stringify(findings.map((f) => (f.ruleId === STORAGE_RULE ? { ...f, facts: { ...f.facts, DataStorageMBUsed: used } } : f))));

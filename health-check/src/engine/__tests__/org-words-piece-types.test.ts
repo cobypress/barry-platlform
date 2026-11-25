@@ -62,9 +62,8 @@ const LITERAL_PIECES: string[] = [
   "src/domains/cpq/setup.ts: w :: \"opportunity product\" | \"order product\"",
   "src/domains/current-pipeline/index.ts: options.subject :: \"rep\" | \"account\"",
   "src/domains/historic-pipeline/cohort.ts: s.category :: \"open\" | \"won\" | \"lost\" | \"no_decision\" | \"excluded\"",
-  "src/domains/integrations/index.ts: label :: \"API requests\" | \"asynchronous Apex runs\"",
-  "src/domains/integrations/index.ts: label :: \"API requests\" | \"asynchronous Apex runs\"",
-  "src/domains/integrations/index.ts: r.label :: \"API requests\" | \"asynchronous Apex runs\"",
+  "src/domains/integrations/index.ts: label :: \"API requests\" | \"background jobs\"",
+  "src/domains/integrations/index.ts: r.first :: \"API requests\" | \"background (asynchronous Apex) jobs\"",
   "src/domains/technical-health/index.ts: first ? r.opening : r.label :: \"data storage\" | \"Data storage\" | \"file storage\" | \"File storage\"",
   "src/domains/technical-health/index.ts: k :: \"Apex classes\" | \"Apex triggers\" | \"Active flows\"",
   // Value reasons and assumptions (DECISIONS.md 663): a fixed sentence and our licence's name, a peer kind, and the

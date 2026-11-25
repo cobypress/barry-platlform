@@ -1113,8 +1113,9 @@ export const ASYNC_JOBS = [
   asyncJob(9, "Queueable", "Failed", "LeadRouter", 20),
 ];
 
-// Trap: async Apex nearly used up for the day, while API requests are fine.
-export const ASYNC_APEX_LIMIT = { Max: 250_000, Remaining: 30_000 };
+// Trap: async Apex nearly used up for the day (96%, past the 95% a single reading
+// needs, DECISIONS.md 726), while API requests are fine. Medium: some is left.
+export const ASYNC_APEX_LIMIT = { Max: 250_000, Remaining: 10_000 };
 
 export const SHARING_DEFAULTS = { DefaultAccountAccess: "Read", DefaultContactAccess: "ControlledByParent", DefaultOpportunityAccess: "Edit", DefaultLeadAccess: "ReadEditTransfer" };
 

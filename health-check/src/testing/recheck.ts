@@ -1,7 +1,8 @@
-import { cpSync, readFileSync, writeFileSync } from "node:fs";
+import { cpSync, existsSync, readFileSync, writeFileSync } from "node:fs";
 import { basename, join } from "node:path";
 import type { Finding, NumberOverride, Run } from "../schemas/index.ts";
 import { STORAGE_RULE } from "../progress/compare.ts";
+import { LIMITS_AT_START_FILE } from "../extract/types.ts";
 
 // A re-check of the synthetic org, with its earlier health check in the folder
 // beside it, for what the earlier run's corrections move on the progress page
@@ -25,6 +26,12 @@ const readJson = <T>(dir: string, file: string): T => JSON.parse(readFileSync(jo
 const writeJson = (dir: string, file: string, value: unknown): void => writeFileSync(join(dir, file), JSON.stringify(value));
 const stamped = (run: Run, at: string): Run["steps"] => run.steps.map((s) => (s.id === "api-limits" ? { ...s, finishedAt: at } : s));
 
+/** Dates a planted folder's kept /limits reading, which a re-check's storage comparison goes by (DECISIONS.md 726), as its step is dated. */
+export function stampLimitsReading(dir: string, at: string): void {
+  const path = join(dir, LIMITS_AT_START_FILE);
+  if (existsSync(path)) writeJson(dir, LIMITS_AT_START_FILE, { ...readJson<Record<string, unknown>>(dir, LIMITS_AT_START_FILE), readAt: at });
+}
+
 export type EarlierRows = {
   /** Each carried alone and together by applyOverrides on the earlier run. */
   storage: NumberOverride;
@@ -45,6 +52,7 @@ export function plantEarlier(recorded: string, earlier: string): { earlierId: st
   cpSync(recorded, earlier, { recursive: true });
   const run = readJson<Run>(recorded, "run.json");
   writeJson(earlier, "run.json", { ...run, id: earlierId, asOf: EARLIER_AS_OF, baselineRunId: null, steps: stamped(run, EARLIER_AS_OF) });
+  stampLimitsReading(earlier, EARLIER_AS_OF);
   const findings = readJson<Finding[]>(recorded, "findings.json");
   const titled = findings.find((f) => f.ruleId === TITLED_RULE && f.status === "passed");
   const storage = findings.find((f) => f.ruleId === STORAGE_RULE)!;
@@ -76,6 +84,7 @@ export function plantRecheck(recorded: string, dir: string): { earlier: string; 
   cpSync(recorded, dir, { recursive: true });
   const run = readJson<Run>(recorded, "run.json");
   writeJson(dir, "run.json", { ...run, baselineRunId: earlierId, asOf: RECHECK_AS_OF, steps: stamped(run, RECHECK_AS_OF) });
+  stampLimitsReading(dir, RECHECK_AS_OF);
   const findings = readJson<Finding[]>(recorded, "findings.json");
   writeJson(
     dir,

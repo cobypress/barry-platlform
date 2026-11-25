@@ -1,5 +1,6 @@
 import { existsSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import { FACTS_FILE } from "../extract/facts.ts";
+import { keptLimitsReadAt, LIMITS_AT_START_FILE } from "../extract/types.ts";
 import { STAGE_MEANINGS_FILE } from "../domains/historic-pipeline/cohort.ts";
 import { RULES_FILE, RulesRun } from "../engine/rules-run.ts";
 import { FactsFile, summariseFacts } from "../facts/summary.ts";
@@ -167,6 +168,10 @@ export function loadRun(dir: string, options: { baseline?: boolean; baselineRows
     // A folder analysed before decision 718 has none, and its digest then lists none.
     rules: rules ? RulesRun.parse(rules) : null,
   };
+  // The kept /limits reading's time, for a re-check's storage comparison (DECISIONS.md 726). A folder without one goes by the step, as before.
+  const limitsAt = readOptional<unknown>(join(dir, LIMITS_AT_START_FILE));
+  const keptAt = limitsAt === null ? null : keptLimitsReadAt(limitsAt, input.run.startedAt);
+  if (keptAt) input.limitsReadAt = keptAt;
   let baselineRowsUnread = false;
   let baselineGone = false;
   if (options.baseline !== false) {

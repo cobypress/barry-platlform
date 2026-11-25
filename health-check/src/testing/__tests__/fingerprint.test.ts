@@ -22,13 +22,16 @@ import { DURATION_MEDIANS } from "../../domains/average.ts";
 // the day the stage history starts (5 November 2024, not 31 October), and 703's variant table counts no closing-out
 // moves (none of the synthetic org's 45 came within a day of its close). Both rows are stored, not served. The
 // generated org's files didn't move. The earlier hashes below are each decision's own, taken from this run.
+// Decision 726 moved both runs' findings.json and raw-notes.md: int.api-usage, version 3, raises a daily allowance only
+// from 95% used, and the async Apex trap moved from 88% to 96% so it still fires, medium as before. metrics.json and
+// scores.json didn't move. Each earlier decision's findings.json hash below was taken again from this run.
 const GOLDEN: Record<string, Record<string, string>> = {
-  recorded: { "findings.json": "8951407b09b9b867", "metrics.json": "2a25c522746883d7", "scores.json": "17cdb1708449d000", "manual-steps.json": "c4daf1ca86584a33", "action-lists.json": "7018f033c3c80e0a", "raw-notes.md": "c63bb1d219be1e80", "handbook.json": "64dcafcf493eef42" },
-  generated: { "findings.json": "1bb01eb1eb00ba7b", "metrics.json": "cb39d3fda2a6435e", "scores.json": "616e42570f940402", "manual-steps.json": "15ae87c4fd76d7b6", "action-lists.json": "8eeb97766d119778", "raw-notes.md": "5c5a4dff7664b82e", "handbook.json": "23c075e2337e23a8" },
+  recorded: { "findings.json": "5030e28f0b262677", "metrics.json": "2a25c522746883d7", "scores.json": "17cdb1708449d000", "manual-steps.json": "c4daf1ca86584a33", "action-lists.json": "7018f033c3c80e0a", "raw-notes.md": "7de1b0095cde85c2", "handbook.json": "64dcafcf493eef42" },
+  generated: { "findings.json": "269e760d438adb2e", "metrics.json": "cb39d3fda2a6435e", "scores.json": "616e42570f940402", "manual-steps.json": "15ae87c4fd76d7b6", "action-lists.json": "8eeb97766d119778", "raw-notes.md": "afae0c5294cbc1be", "handbook.json": "23c075e2337e23a8" },
 };
 
 // findings.json before decision 714 put a difficulty on each issue: that key is all that moved it, and nothing else moved.
-const BEFORE_714: Record<string, string> = { recorded: "6e70cb0739b40551", generated: "998e50194fd092df" };
+const BEFORE_714: Record<string, string> = { recorded: "27b379b80e5b3a77", generated: "998e50194fd092df" };
 
 // Before decision 709 kept each duration's average beside its median: with the stat taken out, metrics.json hashes as
 // it did. findings.json and scores.json never moved; raw-notes.md gains the stat in each measure's detail line.
@@ -41,29 +44,29 @@ const BEFORE_709: Record<string, { "metrics.json": string }> = {
 // with those taken out, and the stage read's evidence naming the query as it was, findings.json and metrics.json hash
 // as they did. raw-notes.md gains their sections and the counts they add to. Nothing else moved.
 const BEFORE_706: Record<string, { "findings.json": string; "metrics.json": string }> = {
-  recorded: { "findings.json": "32e84d18880742a8", "metrics.json": "db261fadeba13015" },
-  generated: { "findings.json": "e7d065627ba11e7e", "metrics.json": "110987cf0075336e" },
+  recorded: { "findings.json": "8f182601bd09585d", "metrics.json": "db261fadeba13015" },
+  generated: { "findings.json": "7219673a53b25b6f", "metrics.json": "110987cf0075336e" },
 };
 
 // Before decision 703 added the path insights' findings and the variant table's metric: with those taken out,
 // findings.json and metrics.json hash as they did. raw-notes.md gains their sections and the two counts they add to.
 const BEFORE_703: Record<string, { "findings.json": string; "metrics.json": string }> = {
-  recorded: { "findings.json": "299bb781fb00d50f", "metrics.json": "10d5f5733555b541" },
-  generated: { "findings.json": "2614371e4eb185ea", "metrics.json": "2233e1f04464f5ae" },
+  recorded: { "findings.json": "8bda59fad6800f42", "metrics.json": "10d5f5733555b541" },
+  generated: { "findings.json": "459bd0053c635176", "metrics.json": "2233e1f04464f5ae" },
 };
 
 // findings.json before decisions 628 and 636 added each issue's hours to fix, time band, fix complexity and fix prompt.
 // Those two keys are all that moved it: with them taken out it hashes as it did.
-const BEFORE_628: Record<string, string> = { recorded: "cab19e73c30f30a2", generated: "c71a5352db967288" };
+const BEFORE_628: Record<string, string> = { recorded: "5a946242d665630e", generated: "d97796974efa6886" };
 
 // findings.json before decision 655 marked the org's words in each finding's sentences: the key it added is all that moved it.
-const BEFORE_655: Record<string, string> = { recorded: "7f675e15a778749f", generated: "02b51c667053a565" };
+const BEFORE_655: Record<string, string> = { recorded: "77daed943bd0f4b8", generated: "0c13fef3ebab5768" };
 
 // findings.json before decision 663 marked the value's reason and assumptions and the hours' basis: those three keys of the marks are all that moved it.
-const BEFORE_663: Record<string, string> = { recorded: "e8cb5cc01d67f9f7", generated: "bd808a0082daa8c2" };
+const BEFORE_663: Record<string, string> = { recorded: "2d43460bf6b58861", generated: "dee99efc933c915a" };
 
 // findings.json before decision 672 marked the org's words in each issue's fix prompt: that key of the marks is all that moved it.
-const BEFORE_672: Record<string, string> = { recorded: "09e6cd7d83776ef5", generated: "d6914065746b54e2" };
+const BEFORE_672: Record<string, string> = { recorded: "3a27b9476912cb8a", generated: "a25da837793b67c1" };
 
 const recordedDir = async () => (await runFromRecording({ answers: loadAnswers(), modules: ALL_MODULES })).dir;
 const generatedDir = async () =>

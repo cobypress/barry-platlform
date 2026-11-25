@@ -544,7 +544,9 @@ describe("every overridable figure of the synthetic run, each alone (decision 51
       // bp.ownership-skew's pairs and act.rep-activity-spread's low; changed with no text to unsure for int.api-usage's
       // DailyApiRequestsShare ("which one reading can't size"), and adp.low-engagement-group's groups of 2 ("count them twice").
       // int.api-usage's DailyApiRequestsUsed of 1,000 is near "one" in thousands, so changed with no text to rounded.
-      assert.deepEqual(counts, { "rewritten in one place": 169, "changed with no text": 71, "refused, repeated": 43, "refused, shared": 51, "refused, rounded": 7, "refused, unsure": 2 });
+      // Decision 726 put int.api-usage's async Apex at 96%, which may be its DailyApiRequestsMax of 100,000 rounded in
+      // thousands, so that one goes from changed with no text to rounded.
+      assert.deepEqual(counts, { "rewritten in one place": 169, "changed with no text": 70, "refused, repeated": 43, "refused, shared": 51, "refused, rounded": 8, "refused, unsure": 2 });
     });
   }
 });

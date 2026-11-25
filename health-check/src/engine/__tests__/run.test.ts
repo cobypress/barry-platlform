@@ -188,7 +188,8 @@ describe("budget and resume (rule 9)", () => {
     const out = tempDir();
     const stopped = await simulatorRun(new Simulator({ used: 49_990 }), out);
     const resumed = await simulatorRun(new Simulator({ used: 1000 }), out, { resume: stopped.run.id, answers: loadAnswers() });
-    const straight = await simulatorRun(new Simulator(), tempDir(), { answers: loadAnswers() });
+    // The same org at the start: a resumed run keeps the limits as its first sitting read them (DECISIONS.md 726).
+    const straight = await simulatorRun(new Simulator({ used: 49_990 }), tempDir(), { answers: loadAnswers(), stopAtShare: 0.9 });
     assert.equal(readFileSync(join(resumed.dir, "findings.json"), "utf8"), readFileSync(join(straight.dir, "findings.json"), "utf8"));
     assert.equal(readFileSync(join(resumed.dir, "metrics.json"), "utf8"), readFileSync(join(straight.dir, "metrics.json"), "utf8"));
   });

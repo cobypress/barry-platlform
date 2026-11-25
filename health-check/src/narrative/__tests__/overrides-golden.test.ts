@@ -374,7 +374,8 @@ describe("refusalLines (decision 532, item 1)", () => {
 
   test("the listed lines are the old function's, by the character, for every refusal of the synthetic run and the hand cases, alone and together", () => {
     // Decision 709 added eight averages to the run's measures; one is refused, 58.5 being "60" rounded in the sales cycle's assumption.
-    assert.deepEqual([runFigures.length, runRefusals.length, handRefusals.length, allHandRefusals.length], [611, 238, 60, 63]);
+    // Decision 726: int.api-usage's DailyApiRequestsMax of 100,000 is refused, its async Apex now printed as 96%, which may be it rounded in thousands.
+    assert.deepEqual([runFigures.length, runRefusals.length, handRefusals.length, allHandRefusals.length], [611, 239, 60, 63]);
     for (const r of [...runRefusals, ...handRefusals]) {
       assert.deepEqual(refusalLines([r]), oldLines([r]));
       assert.equal(refusalLines([r])[1], oldLines([r])[1]);
@@ -460,9 +461,10 @@ describe("no verdict depends on the order of a finding's facts or a measure's st
 // refusals among themselves: the order the console may see from Postgres.
 // Measured again when decision 709 added a stat to eight measures: the stats
 // shuffle differently, so the measures' counts and the reordering moved; what
-// the console can correct (consoleOnly) didn't.
+// the console can correct (consoleOnly) didn't. Measured again when decision 726
+// refused one more of int.api-usage's figures: 532's reordering moved by 2.
 const NAMED_OTHERWISE: Record<number, { finding: number; measure: number; consoleOnly: number; reordered: number }> = {
-  532: { finding: 6, measure: 2, consoleOnly: 6, reordered: 72 },
+  532: { finding: 6, measure: 2, consoleOnly: 6, reordered: 74 },
   533: { finding: 5, measure: 2, consoleOnly: 5, reordered: 87 },
   534: { finding: 3, measure: 4, consoleOnly: 3, reordered: 81 },
 };

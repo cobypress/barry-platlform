@@ -86,6 +86,9 @@ export const BENCHMARK_METRICS: BenchmarkMetric[] = [
   { key: "bp.users_without_role_rate", unit: "percent", source: { from: "fact", ruleId: "bp.users-without-role", fact: "rate" } },
   { key: "utl.unused_reports_rate", unit: "percent", source: { from: "fact", ruleId: "utl.unused-reports", fact: "share" } },
   { key: "sec.health_check_score", unit: "score", source: { from: "fact", ruleId: "sec.health-check-score", fact: "score" } },
+  // Storage is a level, so its share compares across orgs; a daily allowance's one reading doesn't (DECISIONS.md 726).
+  { key: "tech.data_storage_used_share", unit: "percent", source: { from: "fact", ruleId: "tech.storage-use", fact: "DataStorageMBShare" } },
+  { key: "tech.file_storage_used_share", unit: "percent", source: { from: "fact", ruleId: "tech.storage-use", fact: "FileStorageMBShare" } },
   // Every PMD rule's counts, whether or not it fired, and what PMD read, as the
   // owner asked: kept to benchmark on, though most are never shown (DECISIONS.md 673).
   ...Object.keys(PMD_RULES).flatMap((rule) =>

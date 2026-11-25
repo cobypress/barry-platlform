@@ -8,7 +8,7 @@ import { orgDocumentationExtractor, type ConnectedAppRow as AppSetting } from ".
 import { accessExtractor, holdersOf, type AccessData, type AccessAssignment } from "./security.ts";
 import { accessOf, isPartlyHidden, recordTypeUseExtractor } from "./record-types.ts";
 import { licencesExtractor, type PackageLicenseRow } from "./users.ts";
-import { readableReason, readName, readSoql, refusalReason, type ExtractContext, type Extractor, type Sourced, type SourceInfo } from "./types.ts";
+import { limitsReadingOf, readableReason, readName, readSoql, refusalReason, type ExtractContext, type Extractor, type Sourced, type SourceInfo } from "./types.ts";
 
 // The org's inventory (DECISIONS.md 603 to 605): the whole picture of fields,
 // packages, connected apps, risky permissions and limits, kept as data for the
@@ -544,9 +544,9 @@ export const limitsExtractor: Extractor<Sourced<Record<string, OrgLimit>>> = {
   version: 1,
   run(ctx) {
     const source = { kind: "rest", path: `/services/data/v${ctx.client.apiVersion}/limits` } as const;
-    const limits = ctx.client.allLimitsAtConnect;
+    // The run's first reading, before its own calls (DECISIONS.md 726).
+    const { all: limits, unread } = limitsReadingOf(ctx);
     // Refused at connect, it says why in our words (DECISIONS.md 702).
-    const unread = ctx.client.limitsUnread;
     if (unread) return Promise.resolve({ status: "unavailable", reason: unread, source });
     if (Object.keys(limits).length === 0) return Promise.resolve({ status: "unavailable", reason: "The org reported no limits.", source });
     return Promise.resolve({ status: "ok", data: limits, source, truncated: false });
