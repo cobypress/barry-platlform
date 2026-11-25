@@ -264,6 +264,16 @@ export const SHOW_PULSE_UNKEEP_SQL = `UPDATE "HealthCheckRun" SET "budget" = "bu
 /** As the console's CLEAR_FLAGS_SQL and AUDIT_SQL (person-postgres.ts), word for word. */
 export const SHOW_PULSE_CLEAR_FLAGS_SQL = `UPDATE "HealthCheckRunFlag" SET "clearedBy" = $2, "clearedAt" = $3::timestamp(3) WHERE "runId" = $1 AND "kind" = ANY($4::text[]) AND "clearedAt" IS NULL RETURNING "kind"`;
 export const SHOW_PULSE_AUDIT_SQL = `INSERT INTO "audit_log" ("source", "action", "status", "correlation_id", "payload", "created_at") VALUES ($1, $2, 'ok', $3, $4::jsonb, $5::timestamp(3))`;
+/** A pulse's result, replaced on a second delivery. */
+export const PULSE_RESULT_UPSERT_SQL = `INSERT INTO "HealthCheckPulseResult" ("runId", "madeAt", "result") VALUES ($1, $2::timestamp(3), $3::jsonb) ON CONFLICT ("runId") DO UPDATE SET "madeAt" = EXCLUDED."madeAt", "result" = EXCLUDED."result"`;
+/**
+ * Who cleared a flag when code, not a person, settled it (746): an automatic customer's pulse released after an
+ * earlier hold. Not an address, so never read as a person (the console's person actions take theirs from a verified
+ * token), and in the console's own style for its code's acts ("Barometer Ongoing").
+ */
+export const CODE_CLEARED_BY = "Barometer worker";
+/** A released pulse's open hold flags, cleared by code at the release (the console's CLEAR_FLAGS_SQL, its kinds the pulse's holds). */
+export const RELEASED_PULSE_CLEAR_FLAGS_SQL = `UPDATE "HealthCheckRunFlag" SET "clearedBy" = $2, "clearedAt" = $3::timestamp(3) WHERE "runId" = $1 AND "kind" = ANY($4::text[]) AND "clearedAt" IS NULL RETURNING "kind"`;
 /** The console's audit source for a person's actions on an automatic run (its person-store.ts AUDIT_SOURCE). */
 export const PERSON_AUDIT_SOURCE = "health-check";
 
@@ -1531,12 +1541,19 @@ export class PostgresWorkerStore implements WorkerStore {
     );
   }
 
-  async savePulseResult(runId: string, result: PulseResult, madeAt: string): Promise<void> {
-    // blackcloud-next's HealthCheckPulseResult ("runId" PK, "madeAt", "result" JSONB), as its scan result is.
-    await this.#pool.query(
-      `INSERT INTO "HealthCheckPulseResult" ("runId", "madeAt", "result") VALUES ($1, $2::timestamp(3), $3::jsonb) ON CONFLICT ("runId") DO UPDATE SET "madeAt" = EXCLUDED."madeAt", "result" = EXCLUDED."result"`,
-      [runId, madeAt, JSON.stringify(result)],
-    );
+  async savePulseResult(runId: string, result: PulseResult, madeAt: string, options: { gated?: boolean } = {}): Promise<void> {
+    if (!options.gated) {
+      // blackcloud-next's HealthCheckPulseResult ("runId" PK, "madeAt", "result" JSONB), as its scan result is.
+      await this.#pool.query(PULSE_RESULT_UPSERT_SQL, [runId, madeAt, JSON.stringify(result)]);
+      return;
+    }
+    // An automatic customer's pulse released by code (746): the run row locked first, so this and a person's Show come one after the other.
+    await this.#transaction(async (client) => {
+      await client.query(SHOW_PULSE_LOCK_SQL, [runId]);
+      await client.query(PULSE_RESULT_UPSERT_SQL, [runId, madeAt, JSON.stringify(result)]);
+      await client.query(RELEASED_PULSE_CLEAR_FLAGS_SQL, [runId, CODE_CLEARED_BY, madeAt, [...PULSE_HOLD_REASONS]]);
+      await client.query(SHOW_PULSE_UNKEEP_SQL, [runId]);
+    });
   }
 
   async listPulseRuns(): Promise<PulseRun[]> {

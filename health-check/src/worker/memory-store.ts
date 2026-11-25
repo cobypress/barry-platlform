@@ -8,8 +8,8 @@ import { ORG_SETTINGS_CALIBRATOR } from "../connect/auto-calibration.ts";
 import { unstorableAt } from "./inventory.ts";
 import { Run, type BenchmarkRow, type Calibration, type ConnectLink, type Metric, type Release, type ReportSection } from "../schemas/index.ts";
 import { assertChecks, CONSOLE_CHECKS } from "./console-checks.ts";
-import { readLosses, type RunLosses } from "./release.ts";
-import { pulseShowAudit, pulseShowRefusal, type KeptPulse } from "./postgres-store.ts";
+import { PULSE_HOLD_REASONS, readLosses, type RunLosses } from "./release.ts";
+import { CODE_CLEARED_BY, pulseShowAudit, pulseShowRefusal, type KeptPulse } from "./postgres-store.ts";
 import { storedFromRow, waitingRow, type ConsoleSummariesRow, type SummariesToSave } from "../handbook/summary-row.ts";
 import { DISCONNECT_STEP, ORG_AWAITING_CONNECT, RunClosedError, SCAN_REVOKE_NOT_CONFIRMED, type ConnectJobInput, type DocumentsJobInput, type DocumentsJobReads, type DriveShare, type ShareJobInput, type DocumentsMade, type LinkConnected, type LinkState, type PulseRun, type ReleasedRun, type RunJobInput, type RunOutputRecord, type RunProgress, type WorkerStore, type CurrencyWas, type RunLineage, type PulseState, type RunDelivery, type AutomaticOutcome, type AutomaticRunState, RUN_FAILED_FLAG, STOPPED_BUDGET_FLAG, DOCUMENTS_HELD_FLAG, type PortalDocumentRow } from "./types.ts";
 
@@ -564,9 +564,17 @@ export class MemoryWorkerStore implements WorkerStore {
   /** The pulses' results, keyed by run id. */
   readonly pulseResults = new Map<string, { result: PulseResult; madeAt: string }>();
 
-  async savePulseResult(runId: string, result: PulseResult, madeAt: string): Promise<void> {
+  async savePulseResult(runId: string, result: PulseResult, madeAt: string, options: { gated?: boolean } = {}): Promise<void> {
     this.pulseResults.set(runId, { result: structuredClone(result), madeAt });
     this.writes.push({ method: "savePulseResult", id: runId });
+    if (!options.gated) return;
+    // As the Postgres store's one transaction: the pulse's open hold flags cleared by code, and any kept copy dropped (746).
+    for (const f of this.flags.values()) {
+      if (f.runId !== runId || f.clearedAt !== null || !(PULSE_HOLD_REASONS as readonly string[]).includes(f.kind)) continue;
+      Object.assign(f, { clearedBy: CODE_CLEARED_BY, clearedAt: madeAt });
+      assertChecks(f, CONSOLE_CHECKS.flagCleared);
+    }
+    this.keptPulses.delete(runId);
   }
 
   async listPulseRuns(): Promise<PulseRun[]> {

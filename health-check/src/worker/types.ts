@@ -612,7 +612,13 @@ export interface WorkerStore {
   saveScanResult(runId: string, result: ScanResult, madeAt: string): Promise<void>;
 
   /** A monthly pulse's result (the console's HealthCheckPulseResult): one row a run, replaced on a second delivery. */
-  savePulseResult(runId: string, result: PulseResult, madeAt: string): Promise<void>;
+  /**
+   * `gated`: an automatic customer's pulse released by code (DECISIONS.md 746). Then, in one transaction under the
+   * run row's lock (as a person's Show and a held output's save take it), the result is written, every open hold flag
+   * of the pulse is cleared by CODE_CLEARED_BY at `madeAt`, and any kept copy is dropped: a pulse once held and now
+   * released never waits in Needs a person with nothing to press. Left out, the one statement as before.
+   */
+  savePulseResult(runId: string, result: PulseResult, madeAt: string, options?: { gated?: boolean }): Promise<void>;
   /** Every pulse run, with when it finished. A pulse is never released, so retention counts from this. */
   listPulseRuns(): Promise<PulseRun[]>;
 

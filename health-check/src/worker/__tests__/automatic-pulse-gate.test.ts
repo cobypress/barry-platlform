@@ -450,3 +450,66 @@ describe("Show, follow-up round (746)", () => {
     assert.ok(!sent.includes(pg.RAISE_FLAG_SQL) && !sent.includes(pg.KEEP_PULSE_SQL));
   });
 });
+
+describe("a gated pulse released after a hold clears its hold (746, console follow-up)", () => {
+  const openFlags = (c: Customer) => [...c.deps.store.flags.values()].filter((f) => f.runId === PULSE && f.clearedAt === null);
+
+  test("held, then released by a later delivery: its hold flags cleared by code at the release, the kept copy gone, one result", async () => {
+    const { CODE_CLEARED_BY } = await import("../postgres-store.ts");
+    const c = await customer({ age: higherThen });
+    heldNothingShown(c, "score_moved");
+    assert.ok(c.deps.store.keptPulses.get(PULSE));
+    // The cause gone (its baseline as it was), and the pulse delivered again (a duplicate, or a Run again that releases it).
+    const { input } = loadRun(c.baselineDir);
+    writeFileSync(join(c.baselineDir, "scores.json"), JSON.stringify((input.scores ?? []).map((s) => (s.status === "measured" ? { ...s, score: Math.max(0, s.score - 40) } : s))));
+    const T = "2026-11-03T09:00:00.000Z";
+    c.deps.now = () => new Date(T);
+    c.deps.dataTransport = new Simulator();
+    const out = await c.handle({ kind: "run", runId: PULSE }, last);
+    assert.equal(out.outcome, "done", out.detail);
+    assert.ok(c.deps.store.pulseResults.get(PULSE), "released");
+    assert.equal(openFlags(c).length, 0, "nothing left in Needs a person");
+    const flag = c.deps.store.flags.get(`${PULSE}|score_moved`)!;
+    assert.deepEqual([flag.clearedBy, flag.clearedAt], [CODE_CLEARED_BY, T]);
+    assert.equal(c.deps.store.keptPulses.get(PULSE), undefined);
+    assert.equal(c.deps.store.writes.filter((w) => w.method === "savePulseResult" && w.id === PULSE).length, 1);
+  });
+
+  test("a release and a person's Show, in either order: one result and no open flags", async () => {
+    const { showHeldPulse } = await import("../pulse-show.ts");
+    const { CODE_CLEARED_BY } = await import("../postgres-store.ts");
+    // Show first, then the release lands: the shown result is replaced by the released one; the person's clearing stands.
+    const a = await customer({ age: higherThen });
+    const kept = a.deps.store.keptPulses.get(PULSE)!;
+    assert.equal((await showHeldPulse(a.deps.store, PULSE, "staff@example.com", "2026-11-02T09:00:00.000Z")).ok, true);
+    await a.deps.store.savePulseResult(PULSE, kept.result, "2026-11-02T09:00:01.000Z", { gated: true });
+    assert.ok(a.deps.store.pulseResults.get(PULSE));
+    assert.equal(openFlags(a).length, 0);
+    assert.equal(a.deps.store.flags.get(`${PULSE}|score_moved`)!.clearedBy, "staff@example.com");
+    // The release first: the Show that loses finds the result and is refused; the flags were cleared by code.
+    const b = await customer({ age: higherThen });
+    await b.deps.store.savePulseResult(PULSE, b.deps.store.keptPulses.get(PULSE)!.result, "2026-11-02T09:00:00.000Z", { gated: true });
+    assert.equal(b.deps.store.keptPulses.get(PULSE), undefined, "the kept copy dropped with the release");
+    const shown = await showHeldPulse(b.deps.store, PULSE, "staff@example.com", "2026-11-02T09:00:01.000Z");
+    assert.deepEqual(shown, { ok: false, why: "This monthly scan is already shown." });
+    assert.ok(b.deps.store.pulseResults.get(PULSE));
+    assert.equal(openFlags(b).length, 0);
+    assert.equal(b.deps.store.flags.get(`${PULSE}|score_moved`)!.clearedBy, CODE_CLEARED_BY);
+  });
+
+  test("Postgres: a gated release locks the run first and clears and unkeeps in the same transaction; any other pulse's is the one statement as before", async () => {
+    const pg = await import("../postgres-store.ts");
+    const sent: Array<{ text: string; values: unknown[] }> = [];
+    const client = { query: async (text: string, values: unknown[] = []) => (sent.push({ text, values }), { rows: [], rowCount: 1 }), release: () => {} };
+    const store = new pg.PostgresWorkerStore({ query: client.query, connect: async () => client } as never);
+    const result = { version: 1, runId: PULSE } as never;
+    await store.savePulseResult(PULSE, result, "2026-11-03T09:00:00.000Z", { gated: true });
+    assert.deepEqual(sent.map((s) => s.text), ["BEGIN", pg.SHOW_PULSE_LOCK_SQL, pg.PULSE_RESULT_UPSERT_SQL, pg.RELEASED_PULSE_CLEAR_FLAGS_SQL, pg.SHOW_PULSE_UNKEEP_SQL, "COMMIT"]);
+    assert.deepEqual(sent[3]!.values, [PULSE, pg.CODE_CLEARED_BY, "2026-11-03T09:00:00.000Z", ["no_digest", "digest_held", "reads_lost", "mostly_unmeasured", "score_moved"]]);
+    // The lock is the one a person's Show takes, so the two come one after the other.
+    assert.equal(pg.SHOW_PULSE_LOCK_SQL, `SELECT "id" FROM "HealthCheckRun" WHERE "id" = $1 FOR UPDATE`);
+    sent.length = 0;
+    await store.savePulseResult(PULSE, result, "2026-11-03T09:00:00.000Z");
+    assert.deepEqual(sent.map((s) => s.text), [pg.PULSE_RESULT_UPSERT_SQL]);
+  });
+});
