@@ -169,6 +169,9 @@ describe("our own calls never make the finding", () => {
     const kept = JSON.parse(readFileSync(join(run.dir, LIMITS_AT_START_FILE), "utf8"));
     assert.deepEqual(kept.reported.DailyApiRequests, { Max: 100_000, Remaining: 99_000 });
     assert.equal(kept.unread, null);
+    // Its own time, which a re-check's storage comparison is dated by.
+    assert.ok(Number.isFinite(Date.parse(kept.readAt)), "the reading's time is kept");
+    assert.equal(loadRun(run.dir).input.limitsReadAt, kept.readAt);
     assert.equal(parseLimitsReading({ all: {}, reported: { X: { Max: "1" } }, unread: null }), null);
     assert.equal(parseLimitsReading(null), null);
   });
