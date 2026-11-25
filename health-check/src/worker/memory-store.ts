@@ -262,6 +262,8 @@ export class MemoryWorkerStore implements WorkerStore {
     const steps = run.run.steps.filter((s) => s.id !== "worker");
     steps.push({ id: "worker", version: 1, status: "failed", calls: 0, finishedAt: at, error: reason });
     run.run = Run.parse({ ...run.run, status: "failed", steps });
+    // As RUN_FAILED_SQL: a failed attempt leaves no losses (DECISIONS.md 723).
+    delete run.readsLost;
     this.writes.push({ method: "recordRunFailure", id: runId, detail: reason });
     // An automatic run that fails is a person's to look at (DECISIONS.md 693). Counts only: the reason is in the step.
     if (run.run.reviewMode === "automatic") this.#raiseFlag(runId, RUN_FAILED_FLAG, at, {});

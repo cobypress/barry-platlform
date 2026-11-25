@@ -316,6 +316,11 @@ export const PREVIOUS_RUN_LOSSES_SQL =
  * nothing too. Written after the progress, which rewrites the budget whole, so any later progress save takes it away.
  */
 export const RUN_LOSSES_SQL = `UPDATE "HealthCheckRun" SET "budget" = jsonb_set("budget", '{readsLost}', $2::jsonb, true) WHERE "id" = $1`;
+/**
+ * A run recorded failed. Its stored losses go with it (DECISIONS.md 723): a Run again that fails before its first
+ * progress save would otherwise leave an earlier attempt's losses for the org's next run to compare with.
+ */
+export const RUN_FAILED_SQL = `UPDATE "HealthCheckRun" SET "status" = 'failed', "budget" = "budget" - 'readsLost' WHERE "id" = $1`;
 export const AUTOMATIC_STATE_SQL =
   `SELECT r."status", r."queuedAt" IS NOT NULL AS "queued", to_jsonb(r) ->> 'heldReason' AS "heldReason", ` +
   `EXISTS (SELECT 1 FROM "HealthCheckCalibration" c WHERE c."runId" = r."id") AS "calibrated" FROM "HealthCheckRun" r WHERE r."id" = $1`;
@@ -1069,7 +1074,7 @@ export class PostgresWorkerStore implements WorkerStore {
   recordRunFailure(runId: string, reason: string, at: string): Promise<void> {
     return this.#transaction(async (client) => {
       await this.#openRun(client, runId);
-      await client.query(`UPDATE "HealthCheckRun" SET "status" = 'failed' WHERE "id" = $1`, [runId]);
+      await client.query(RUN_FAILED_SQL, [runId]);
       await client.query(`DELETE FROM "HealthCheckRunStep" WHERE "runId" = $1 AND "id" = 'worker'`, [runId]);
       await this.#insert(client, "HealthCheckRunStep", RUN_STEP, { runId, id: "worker", version: 1, status: "failed", calls: 0, finishedAt: at, error: reason });
       // An automatic run that fails is a person's to look at (DECISIONS.md 693), in its own savepoint:

@@ -4,7 +4,7 @@ import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { createJobHandler } from "../worker.ts";
 import { lossesOf, readLosses, sameAsLast, type RunLosses } from "../release.ts";
-import { PREVIOUS_RUN_LOSSES_SQL, PostgresWorkerStore, RUN_LOSSES_SQL, type SqlClient, type SqlPool, type SqlResult } from "../postgres-store.ts";
+import { PREVIOUS_RUN_LOSSES_SQL, PostgresWorkerStore, RUN_FAILED_SQL, RUN_LOSSES_SQL, type SqlClient, type SqlPool, type SqlResult } from "../postgres-store.ts";
 import { progressOf, type RunOutputRecord } from "../types.ts";
 import { baseDeps, consoleRun, RUN_ID, runInput, syntheticConnection } from "./helpers.ts";
 import { AutomaticReplay, automaticSyntheticCalibration } from "../../testing/automatic.ts";
@@ -215,6 +215,34 @@ describe("a reads_lost hold says whether the org's previous run lost the same re
     assert.equal(Object.hasOwn(w.counts(RUN_ID)!, "sameAsLast"), false);
   });
 
+  test("a Run again that fails before its first progress save leaves no losses: the org's next run doesn't compare with that attempt", async () => {
+    const w = await world();
+    w.add(RUN_ID);
+    w.add(LATER);
+    await w.deliver(RUN_ID, TWO_STEPS);
+    assert.deepEqual(w.stored(RUN_ID).readsLost, { steps: ["activity", "forecast-quotas"], server: false });
+    const pressed = w.runAgain(RUN_ID);
+    // The connection can't be loaded on the Run again's last delivery: failed before the engine saved anything.
+    const load = w.deps.tokens.load.bind(w.deps.tokens);
+    w.deps.tokens.load = async () => {
+      throw new Error("token store down");
+    };
+    await w.deliver(RUN_ID, TWO_STEPS, pressed);
+    w.deps.tokens.load = load;
+    assert.equal(w.stored(RUN_ID).run.status, "failed");
+    assert.equal(w.stored(RUN_ID).readsLost, undefined);
+    await w.deliver(LATER, TWO_STEPS);
+    assert.equal(Object.hasOwn(w.counts(LATER)!, "sameAsLast"), false, JSON.stringify(w.counts(LATER)));
+  });
+
+  test("a progress save takes the stored losses away, as the Postgres store's budget rewrite does", async () => {
+    const w = await world();
+    w.add(RUN_ID);
+    w.stored(RUN_ID).readsLost = { steps: ["activity"], server: false };
+    await w.deps.store.saveRunProgress(RUN_ID, progressOf(w.stored(RUN_ID).run), "/tmp/x");
+    assert.equal(w.stored(RUN_ID).readsLost, undefined);
+  });
+
   test("the previous run can't be read: the hold goes on without it, and says so in the log", async () => {
     const w = await world();
     w.add(RUN_ID);
@@ -260,18 +288,19 @@ describe("sameAsLast and the stored losses, rule by rule", () => {
 });
 
 class FakePool implements SqlPool {
-  readonly statements: Array<{ text: string; values: unknown[] }> = [];
+  /** `client`: sent on the transaction's own connection, not the pool. */
+  readonly statements: Array<{ text: string; values: unknown[]; client: boolean }> = [];
   readonly answer: (text: string) => SqlResult | undefined;
   constructor(answer: (text: string) => SqlResult | undefined = () => undefined) {
     this.answer = answer;
   }
-  async query(text: string, values: unknown[] = []): Promise<SqlResult> {
-    this.statements.push({ text, values });
+  async query(text: string, values: unknown[] = [], client = false): Promise<SqlResult> {
+    this.statements.push({ text, values, client });
     if (text.includes("FOR UPDATE")) return { rows: [{ status: "analysing" }], rowCount: 1 };
     return this.answer(text) ?? { rows: [], rowCount: 1 };
   }
   async connect(): Promise<SqlClient & { release(): void }> {
-    return { query: (t, v) => this.query(t, v), release: () => {} };
+    return { query: (t, v) => this.query(t, v, true), release: () => {} };
   }
 }
 
@@ -318,6 +347,13 @@ describe("the Postgres store's side (DECISIONS.md 723)", () => {
     const steps = texts.findLastIndex((t) => t.startsWith('INSERT INTO "HealthCheckRunStep"'));
     assert.ok(texts[0] === "BEGIN" && progress > 0 && steps > progress && at === steps + 1 && texts.at(-1) === "COMMIT", texts.join("\n"));
     assert.deepEqual(pool.statements[at]!.values, [RUN_ID, '{"steps":["activity"],"server":false}']);
+    // On the transaction's connection, between its BEGIN and COMMIT, never on the pool.
+    assert.ok(pool.statements.slice(0, at + 1).every((x) => x.client) && pool.statements[at]!.client, JSON.stringify(pool.statements.map((x) => [x.text.slice(0, 30), x.client])));
+    // A failure record takes the losses away with the status, in the same statement.
+    const failed = new FakePool();
+    await new PostgresWorkerStore(failed).recordRunFailure(RUN_ID, "broken", AS_OF);
+    assert.ok(failed.statements.some((x) => x.text === RUN_FAILED_SQL && x.client));
+    assert.match(RUN_FAILED_SQL, /SET "status" = 'failed', "budget" = "budget" - 'readsLost' WHERE "id" = \$1$/);
     const none = new FakePool();
     await new PostgresWorkerStore(none).saveRunOutput(RUN_ID, record());
     assert.ok(!none.statements.some((s) => s.text === RUN_LOSSES_SQL));
