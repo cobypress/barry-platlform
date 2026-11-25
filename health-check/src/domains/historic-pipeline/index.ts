@@ -10,7 +10,7 @@ import { deepDiveMetrics } from "./deep-dive.ts";
 import { PROCESS_RULES, processMetrics } from "./process.ts";
 import { driverMetrics } from "./drivers.ts";
 import { priorWinsExtractor } from "../../extract/prior-wins.ts";
-import { joinSaid, org, said, type Said } from "../../engine/org-words.ts";
+import { eng, joinSaid, org, said, type Said } from "../../engine/org-words.ts";
 import { andList, moneySaid } from "../../engine/said-forms.ts";
 import { dimensionWords } from "./process.ts";
 import { pathMetrics } from "./paths/variants.ts";
@@ -140,7 +140,7 @@ function divergenceValue(ctx: RuleContext, metric: Extract<Metric, { status: "me
     kind: "revenue",
     amount: Math.round((amount * points) / 100),
     unit: ctx.calibration.currency,
-    period: `in wins the gap may have cost, ${ctx.window.from} to ${ctx.window.to}`,
+    period: said`in wins the gap may have cost, ${eng(ctx.window.from)} to ${eng(ctx.window.to)}`,
     assumptions: [said`${deals.length} won and lost deals in this segment, with a total Amount of ${moneySaid(amount, ctx.calibration.currency)}`, said`The gap of ${Math.round(points * 10) / 10} points to your overall win rate of ${metric.value}%`, said`Assumes these deals could win as often as the rest. Deal mix or territory may explain part of the gap, so treat this as a ceiling`],
   };
 }

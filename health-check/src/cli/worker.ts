@@ -10,6 +10,7 @@ import { defaultLintTempBase, findPmd, PMD_TIME_LIMIT_MS, PMD_VERSION, sweepLint
 import { GoogleDrive } from "../worker/drive.ts";
 import { readWorkerEnv, WORKER_ENV } from "../worker/env.ts";
 import { automaticStartLine } from "../worker/automatic.ts";
+import { stageNamesStartLine } from "../worker/stage-answer.ts";
 import { PostgresWorkerStore, type SqlPool } from "../worker/postgres-store.ts";
 import { retentionSweep, SWEEP_INTERVAL_MS } from "../worker/retention.ts";
 import { createJobHandler } from "../worker/worker.ts";
@@ -122,6 +123,7 @@ export async function workerCommand(
     apexSummaries: config.apexSummaries,
     automatic: config.automatic,
     portalDocuments: config.portalDocuments,
+    stageNames: config.stageNames,
     codeLint: "found" in pmd ? { pmd: pmd.found } : { pmd: null, pmdMissing: pmd.missing },
     queueRun: runQueuer(queue),
     narrative,
@@ -160,6 +162,8 @@ export async function workerCommand(
         ? "The portal's documents are on: a released automatic run's three PDFs are made when asked, sealed into the console's database and put nowhere else."
         : `The portal's documents are switched on, but ${config.portalDocuments.keyProblem ?? "the key can't be used"}, so every request for them is refused.`,
   );
+  // The stage-name rule (DECISIONS.md 756), said at every start so turning it on or off shows in the log.
+  log(stageNamesStartLine(config.stageNames));
   // Said at every start, so a deploy that installs it shows in the log.
   if (lintSwept) log(`Deleted ${lintSwept} temporary ${lintSwept === 1 ? "folder" : "folders"} of Apex code that a PMD run cut short had left.`);
   log("found" in pmd ? `PMD ${PMD_VERSION} checks each health check's Apex code, and its findings are stored beside our own scan's.` : `${pmd.missing} Each health check says PMD didn't run.`);

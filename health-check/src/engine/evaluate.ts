@@ -14,6 +14,7 @@ import { notMeasurableKind } from "./not-measurable.ts";
 import { INSIGHT_METRICS, INSIGHT_RULES } from "../domains/scoring.ts";
 import { joinSaid, markSentence, orgWordsOf, said, saidMade, textSha256, withOrgWords, type MarkedSentence, type Said } from "./org-words.ts";
 import { passedOnSpans } from "./passed-on.ts";
+import { fromName } from "../connect/stage-outcomes.ts";
 import type { IssueResult, ManualState, RecordList, Rule, RuleContext, RuleResult } from "./rule.ts";
 
 export type AnalysisInput = {
@@ -34,6 +35,18 @@ export type AnalysisInput = {
    * never waits and the rules that needed it say not measurable (DECISIONS.md 693).
    */
   unanswered?: "ask" | "skip";
+  /**
+   * Whether this run's digest is checked by code (an automatic run, or a pulse
+   * shown through an automatic check's gate): a value's period said made is then
+   * marked on its finding, for the digest (DECISIONS.md 756). Off, findings are as before.
+   */
+  markPeriods?: boolean;
+  /**
+   * HC_STAGE_NAMES (DECISIONS.md 756): off or absent, a stage the calibration
+   * holds as read from its name is set aside for this analysis and Salesforce's
+   * flags decide, whatever row a run or a copy of it still carries.
+   */
+  stageNames?: boolean;
 };
 
 /** An issue's records, by finding. Worker-only: never part of a finding or anything sent on. */
@@ -213,7 +226,7 @@ function orgWordsFor(rule: Rule, before: Finding, after: Finding): { orgWords?: 
  * a reader never takes one unmarked assumption among marked ones for the
  * engine's. The two fixed reasons the engine gives itself are its own words.
  */
-function valueOrgWords(was: Finding["value"], now: Finding["value"]): Pick<NonNullable<Finding["orgWords"]>, "valueReason" | "valueAssumptions"> {
+function valueOrgWords(was: Finding["value"], now: Finding["value"]): Pick<NonNullable<Finding["orgWords"]>, "valueReason" | "valueAssumptions" | "valuePeriod"> {
   if (was.kind === "not_sized") {
     if (now.kind !== "not_sized" || now.reason !== was.reason) return {};
     const own = was.reason === NOT_SIZED.reason || was.reason === GUARD_UNSIZED;
@@ -221,9 +234,14 @@ function valueOrgWords(was: Finding["value"], now: Finding["value"]): Pick<NonNu
     const marked = markSentence(was.reason, own ? [] : saidMade(was.reason) ? orgWordsOf(was.reason) : passedOnSpans(was.reason));
     return marked ? { valueReason: marked } : {};
   }
-  if (now.kind === "not_sized" || now.assumptions.length !== was.assumptions.length || now.assumptions.some((a, i) => a !== was.assumptions[i])) return {};
+  if (now.kind === "not_sized") return {};
+  // A period said made, on a run whose digest is checked (DECISIONS.md 756): marked by itself, since it isn't one of the assumptions.
+  const spans = markingPeriods && now.period === was.period && saidMade(was.period) ? orgWordsOf(was.period) : null;
+  const period = spans ? markSentence(was.period, spans) : null;
+  const withPeriod = period ? { valuePeriod: period } : {};
+  if (now.assumptions.length !== was.assumptions.length || now.assumptions.some((a, i) => a !== was.assumptions[i])) return withPeriod;
   const marks = was.assumptions.map((a) => markSentence(a)).filter((m): m is MarkedSentence => m !== null);
-  return marks.length > 0 && marks.length === was.assumptions.length ? { valueAssumptions: marks } : {};
+  return marks.length > 0 && marks.length === was.assumptions.length ? { valueAssumptions: marks, ...withPeriod } : withPeriod;
 }
 
 function engineEvidence(ruleId: string, note: string, now: Date): Evidence {
@@ -343,11 +361,27 @@ function metricWithoutCurrency(metric: Metric, reason: Said): Metric {
 
 export function analyse(input: AnalysisInput): AnalysisOutput {
   // Each analysis has its own ledger of the sentences said made (DECISIONS.md 655).
-  return withOrgWords(() => analyseWithin(input));
+  const outer = markingPeriods;
+  markingPeriods = input.markPeriods === true;
+  try {
+    return withOrgWords(() => analyseWithin(input));
+  } finally {
+    markingPeriods = outer;
+  }
+}
+
+/** Set for one analysis whose digest is checked (DECISIONS.md 756): its findings keep a period's marks. Analyses run one at a time, synchronously. */
+let markingPeriods = false;
+
+/** A calibration read from the org's settings without the stages the name rule read (DECISIONS.md 756); any other, or one with none, as it is. */
+function withoutNameReadings(calibration: Calibration): Calibration {
+  if (calibration.source !== "org_settings" || !calibration.stages.some(fromName)) return calibration;
+  return { ...calibration, stages: calibration.stages.filter((s) => !fromName(s)) };
 }
 
 function analyseWithin(input: AnalysisInput): AnalysisOutput {
-  const { modules, extracts, calibration, now, window, answers, pseudonyms, userDirectory, scope = "complete", unanswered = "ask" } = input;
+  const calibration = input.stageNames === true ? input.calibration : withoutNameReadings(input.calibration);
+  const { modules, extracts, now, window, answers, pseudonyms, userDirectory, scope = "complete", unanswered = "ask" } = input;
   const raised = new Map<string, ManualStep>();
   let currentRule: string | null = null;
   // What the rule or metric builder running now has leaned on (DECISIONS.md 598).
@@ -430,23 +464,39 @@ function analyseWithin(input: AnalysisInput): AnalysisOutput {
     assume: (note) => {
       assumed.add(note);
     },
+    assumeOn: (metricIds, note) => {
+      if (!inBuilder) return void assumed.add(note);
+      for (const id of metricIds) onMetric.set(id, [...(onMetric.get(id) ?? []), note]);
+    },
     leanOn: (metricId) => {
       for (const note of leanedOn.get(metricId) ?? []) assumed.add(note);
     },
   };
   const leanedOn = new Map<string, string[]>();
+  // Notes said on named metrics of the builder running now (DECISIONS.md 756).
+  let onMetric = new Map<string, string[]>();
+  let inBuilder = false;
 
   const metrics = modules
     .flatMap((m) => (m.metrics ?? []).flatMap((build) => {
       assumed = new Set();
+      onMetric = new Map();
+      inBuilder = true;
       currencyRead = false;
-      const made = build(base);
+      let made: Metric[];
+      try {
+        made = build(base);
+      } finally {
+        inBuilder = false;
+      }
       // No currency: nothing in money is measured, for the plain reason (DECISIONS.md 700).
       const built = mode === "none" ? made.map((metric) => (metric.unit === "currency" || currencyRead ? metricWithoutCurrency(metric, noCurrency()) : metric)) : made;
       const builderNotes = [...assumed];
-      for (const metric of built) if (metric.status === "measured" && builderNotes.length > 0) leanedOn.set(metric.id, builderNotes);
+      // And the notes said on one metric alone (DECISIONS.md 756), after the builder's, as each was said.
+      const ownNotes = (metric: Metric): string[] => [...builderNotes, ...(onMetric.get(metric.id) ?? []).filter((n) => !builderNotes.includes(n))];
+      for (const metric of built) if (metric.status === "measured" && ownNotes(metric).length > 0) leanedOn.set(metric.id, ownNotes(metric));
       // A measured figure in money, its currency not known by name, says so among its assumptions (DECISIONS.md 700). It isn't leaned on: nothing is guessed.
-      const notesOf = (metric: Metric): string[] => (mode === "plain" && metric.unit === "currency" ? [...builderNotes, notNamed()] : builderNotes);
+      const notesOf = (metric: Metric): string[] => (mode === "plain" && metric.unit === "currency" ? [...ownNotes(metric), notNamed()] : ownNotes(metric));
       // A measured figure that leaned on an assumption says so among its own.
       return built.map((metric) => {
         const notes = metric.status === "measured" ? notesOf(metric) : [];

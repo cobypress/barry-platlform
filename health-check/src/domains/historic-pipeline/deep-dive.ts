@@ -121,7 +121,7 @@ function quarterlyTrends(ctx: Ctx, data: Ready): Metric[] {
     build(winRate, (q) => {
       const decided = data.deals.filter((d) => (d.category === "won" || d.category === "lost") && inQuarter(d.closedDay, q));
       return decided.length < minSample ? thin(decided.length, "won and lost deals") : { value: pct(decided.filter((d) => d.category === "won").length, decided.length), n: decided.length, reason: null };
-    }, unmapped ?? unsplitLostReason(data)),
+    }, unmapped ?? unsplitLostReason(data, ctx, [winRate.id])),
     build(size, (q) => {
       const amounts = won(q).filter((d) => (d.Amount ?? 0) > 0).map(amountOf);
       return amounts.length < minSample ? thin(amounts.length, "won deals with an amount") : { value: Math.round(median(amounts)), n: amounts.length, reason: null };
@@ -242,7 +242,7 @@ function lostFrom(ctx: Ctx, data: Ready): Metric[] {
   const valueDefinition = base(ctx, data, { id: "historic.lost_value_by_stage", label: "Lost value by the stage it left", unit: "currency", definition: "Amount of lost and no decision deals closed in the window, by the last open stage they were in." });
   if (data.unmapped.finalStages.length > 0) return [countDefinition, valueDefinition].map((d) => notMeasurable(d, unmappedReason("stages", data.unmapped.finalStages)));
   // Split by how they closed, lost or no decision (DECISIONS.md 600).
-  const unsplit = unsplitLostReason(data);
+  const unsplit = unsplitLostReason(data, ctx, [countDefinition.id, valueDefinition.id]);
   if (unsplit) return [countDefinition, valueDefinition].map((d) => notMeasurable(d, unsplit));
   const all = data.deals.filter((d) => (d.category === "lost" || d.category === "no_decision") && closedInWindow(d, ctx.window));
   const lost = all.filter((d) => stageLeftFrom(d, data) !== null);

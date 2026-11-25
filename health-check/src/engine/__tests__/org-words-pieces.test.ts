@@ -460,6 +460,9 @@ const SIGNED_OFF: string[] = [
   // Sentences said made: a said or joinSaid result held in a variable, a helper or option returning one, plural over literal nouns, or a said form (each typed Said).
   "src/domains/historic-pipeline/cohort.ts: andList(items)",
   "src/domains/historic-pipeline/cohort.ts: andList(items)",
+  // The name rule's assumption, one form each for one stage and several (DECISIONS.md 756).
+  "src/domains/historic-pipeline/cohort.ts: andList(items)",
+  "src/domains/historic-pipeline/cohort.ts: andList(items)",
   "src/domains/historic-pipeline/cohort.ts: stageList(stages)",
   "src/domains/historic-pipeline/cohort.ts: stageList(stages)",
   "src/domains/historic-pipeline/cohort.ts: stageList(stages)",

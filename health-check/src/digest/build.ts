@@ -208,6 +208,11 @@ function orgWordsOf(f: Finding): Pick<DigestFinding, "orgWords"> {
     const each = v.assumptions.map((a, i) => spansIfCurrent(a, held[i])).filter((s): s is OrgSpan[] => s !== null);
     if (held.length === v.assumptions.length && each.length === v.assumptions.length) out.valueAssumptions = each.map((s) => ({ orgWordsMarked: true, orgWords: s }));
   }
+  // A period said made, kept on the finding only where code checks the digest (DECISIONS.md 756).
+  if (v.kind !== "not_sized" && marks?.valuePeriod) {
+    const spans = spansIfCurrent(v.period, marks.valuePeriod);
+    if (spans) out.valuePeriod = { orgWordsMarked: true, orgWords: spans };
+  }
   if (f.effortHours) {
     const spans = spansIfCurrent(f.effortHours.basis, marks?.hoursBasis);
     if (spans) out.hoursBasis = { orgWordsMarked: true, orgWords: spans };

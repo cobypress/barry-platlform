@@ -32,7 +32,7 @@ import { renderRawNotes } from "../notes/raw-notes.ts";
 import { ACTION_LISTS_FILE, buildActionLists } from "../actions/lists.ts";
 import { Pseudonymiser, UNKNOWN_USER, type PseudonymEntry } from "../privacy/pseudonymiser.ts";
 import { registerSharedNames } from "../privacy/names.ts";
-import { Run, type Calibration, type ManualAnswer, type OrgProfile, type RefusedRead, type RunScope, type RunStep, type SkippedRead } from "../schemas/index.ts";
+import { checkedByCode, Run, type Calibration, type ManualAnswer, type OrgProfile, type RefusedRead, type RunScope, type RunStep, type SkippedRead } from "../schemas/index.ts";
 import { ApiBudget, BudgetStopError } from "../salesforce/budget.ts";
 import { classifyError, lastDelivery, readGate, runStoppedWords, SalesforceClient, SalesforceError } from "../salesforce/client.ts";
 import type { ConnectionProvider } from "../salesforce/connection.ts";
@@ -76,6 +76,13 @@ export type RunOptions = {
   product?: "barometer" | "scan" | "pulse";
   /** How the run is reviewed, written to run.json for its documents to read. Consultant-led unless said (DECISIONS.md 692). */
   reviewMode?: "consultant" | "automatic";
+  /**
+   * A pulse shown through an automatic check's gate (DECISIONS.md 746): its digest is checked by code, as an
+   * automatic run's is, so its findings keep what their periods' marks need (756). Nothing else reads it.
+   */
+  gated?: boolean;
+  /** HC_STAGE_NAMES on (DECISIONS.md 756): a stage the calibration holds as read from its name is used. Off or absent, it is set aside and the flags decide. */
+  stageNames?: boolean;
   /** The run this one re-checks: its first health check, whose findings the report compares against. */
   baselineRunId?: string | null;
   /**
@@ -256,6 +263,7 @@ async function runHealthCheckWithin(options: RunOptions): Promise<RunResult> {
       id: runId,
       product: options.product ?? "barometer",
       reviewMode: options.reviewMode ?? "consultant",
+      ...(options.gated === true ? { gated: true } : {}),
       customerRef: options.customerRef ?? null,
       orgId: client.orgId,
       isSandbox: false,
@@ -463,7 +471,7 @@ async function runHealthCheckWithin(options: RunOptions): Promise<RunResult> {
   run.customerRef ??= org.data?.[0]?.Name?.trim() || null;
   run.status = "analysing";
   await saveRun();
-  const output = analyseRun(dir, run, calibration, modules, extracts, options.answers ?? [], options.knownModules ?? ALL_MODULES);
+  const output = analyseRun(dir, run, calibration, modules, extracts, options.answers ?? [], options.knownModules ?? ALL_MODULES, options.gated === true, options.stageNames === true);
   // Each issue's records by name, for the action lists. Beside the pseudonym map, not in checkpoints/.
   writeJson(join(dir, ACTION_LISTS_FILE), buildActionLists(output.records, extracts, client.instanceUrl));
   run.status = output.manualSteps.some((s) => s.status === "pending") ? "awaiting_manual" : "in_review";
@@ -503,7 +511,7 @@ export function keepSkipped(run: Run, skipped: SkippedRead[], log: (message: str
   }
 }
 
-function analyseRun(dir: string, run: Run, calibration: Calibration, modules: DomainModule[], extracts: Map<string, unknown>, answers: ManualAnswer[], known: DomainModule[]): AnalysisOutput {
+function analyseRun(dir: string, run: Run, calibration: Calibration, modules: DomainModule[], extracts: Map<string, unknown>, answers: ManualAnswer[], known: DomainModule[], gated = false, stageNames = false): AnalysisOutput {
   const pseudonyms = loadPseudonyms(dir);
   const users = extracts.get(usersExtractor.id) as { status: string; data?: UserRow[] } | undefined;
   const directory = new Map((users?.data ?? []).map((u) => [u.Id, { name: u.Name, aliases: [u.Username, u.Email] }]));
@@ -543,6 +551,9 @@ function analyseRun(dir: string, run: Run, calibration: Calibration, modules: Do
     scope: run.scope,
     // An automatic run never waits for a person: what nobody answered is skipped, and the rules that needed it say not measurable (DECISIONS.md 693).
     unanswered: run.reviewMode === "automatic" ? "skip" : "ask",
+    // Only where code checks the digest: every other run's findings are as before (DECISIONS.md 756).
+    markPeriods: checkedByCode(run) || gated,
+    stageNames,
   });
   writeJson(join(dir, "pseudonym-map.json"), pseudonyms.entries());
   // Which rules this analysis ran, and which the engine knows, for the digest (DECISIONS.md 718).

@@ -305,7 +305,7 @@ const lossReasonMissing: Rule = {
       return { outcome: "not_measurable", reason: said`The calibration doesn't name a loss reason field that exists on Opportunity, so we can't tell a blank reason from a missing field.`, evidence: data.evidence };
     }
     // Lost only, with no decision left out (DECISIONS.md 600).
-    const unsplit = unsplitLostReason(data);
+    const unsplit = unsplitLostReason(data, ctx);
     if (unsplit) return { outcome: "not_measurable", reason: unsplit, evidence: data.evidence };
     const lost = data.deals.filter((d) => d.category === "lost" && d.CloseDate >= ctx.window.from);
     if (lost.length === 0) return { outcome: "pass", summary: said`No deals were lost in the window.`, evidence: data.evidence, segmentExemptReason: "There are no lost deals to segment." };

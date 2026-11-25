@@ -191,6 +191,11 @@ describe("every producer of a digest text is one an automatic run knows (DECISIO
     "src/extract/metadata-parse.ts: bundle.unread![kind]!",
     // A code checker's not-run reason: kept in the evidence's note alone (lint.ts `cannot`), never a digest text.
     "src/extract/lint/findings.ts: reason",
+    // A value's period (watched since DECISIONS.md 756): value.ts hands on the literal each caller writes in its own object
+    // ("one-off, if these leads are worked" and the like), read there by the engine-text scan.
+    "src/domains/value.ts: options.period",
+    // Not a text: a comparison's Period of days and deals, under a field of the same name.
+    "src/domains/historic-pipeline/paths/insights.ts: period",
   ];
   const producers = textProducers();
 
