@@ -182,7 +182,10 @@ function addFinding(set: FigureSet, f: Finding, currency: string | undefined, na
     ...c.text(f.notMeasurableReason, current(f.notMeasurableReason, m?.notMeasurableReason)),
     ...[f.effort.note, ...f.dependencies].flatMap((text) => c.text(text)),
   ];
-  for (const guard of f.guards) c.text(guard.detail);
+  // A guard's detail and an evidence note carry no marks, and quote what the org named freely: a report's
+  // path ("reports/Pipeline/Top 10 Deals.report"), a file, a component. The digest serves neither, so none
+  // of their figures is one the digest may trace to (DECISIONS.md 764); the documents read them as before.
+  for (const guard of f.guards) c.text(guard.detail, null, true);
   for (const subject of f.subjects) {
     c.label(subject.label);
     c.words(subject.label);
@@ -206,8 +209,8 @@ function addFinding(set: FigureSet, f: Finding, currency: string | undefined, na
     c.number(e.count);
     c.date(e.dateRange?.from);
     c.date(e.dateRange?.to);
-    c.text(e.note);
-    for (const exclusion of e.exclusions) c.text(exclusion);
+    c.text(e.note, null, true);
+    for (const exclusion of e.exclusions) c.text(exclusion, null, true);
   }
 }
 

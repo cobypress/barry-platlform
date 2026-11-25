@@ -173,6 +173,42 @@ describe("digits in a stage's name, through the real analysis (paths-orgs.ts)", 
   });
 });
 
+describe("a guard's detail and an evidence note: never a source the digest traces to", () => {
+  // The guard's own shape on the synthetic run is "Used in 1 report: reports/Marketing/Report_8.report.":
+  // a report's path is the org's, named freely, and no subject or segment need name it.
+  const PL = 987654;
+  const host = base.findings.find((f) => f.ruleId === "cfg.unused-custom-fields")!;
+  const plant = `It took ${PL} steps.`;
+  const planted = (place: "guard" | "note" | "exclusion"): ReportInput => ({
+    ...base,
+    findings: base.findings.map((f) => {
+      const text = `Used in 1 report: reports/Pipeline/Top ${PL} Deals.report.`;
+      if (f.id === host.id && place === "guard") return { ...f, guards: [...f.guards, { ...f.guards[0]!, detail: text }] };
+      if (f.id === host.id) return { ...f, evidence: f.evidence.map((e, i) => (i === 0 ? (place === "note" ? { ...e, note: text } : { ...e, exclusions: [...e.exclusions, text] }) : e)) };
+      if (f.id === B.id) return withOurWords(f, plant);
+      return f;
+    }),
+  });
+  for (const place of ["guard", "note", "exclusion"] as const) {
+    test(`a report's path in a ${place} doesn't make a planted ${PL} in our words trace`, () => {
+      const c = check(planted(place), plantedOnly(PL, B.id));
+      assert.ok(!servedSummary(c, B.id)?.includes(plant));
+      assert.ok(c.masks > 0 || c.unmatched > 0 || c.held !== null);
+    });
+  }
+
+  test("every figure read from any guard's detail, evidence note or exclusion is the org's in the set", () => {
+    const set = buildDataset({ findings: base.findings, metrics: [] });
+    const texts = base.findings.flatMap((f) => [...f.guards.map((g) => g.detail), ...f.evidence.flatMap((e) => [e.note ?? "", ...e.exclusions])]).filter((t) => /\d/.test(t));
+    assert.ok(texts.length > 0);
+    const only = buildDataset({ findings: base.findings.map((f) => ({ ...f, title: "x", summary: "x", recommendation: "", notMeasurableReason: f.notMeasurableReason ? "x" : f.notMeasurableReason, effort: { ...f.effort, note: undefined }, dependencies: [], value: { kind: "not_sized", reason: "x" }, subjects: [], facts: {}, segmentsChecked: [], orgWords: undefined, evidence: f.evidence.map((e) => ({ ...e, count: null, dateRange: null })) })) as Finding[], metrics: [] });
+    // The run's summary counts aside, every row left is read from those texts.
+    const read = only.figures.filter((x) => x.source !== "summary");
+    assert.ok(read.length > 0 && read.every((x) => x.org));
+    assert.ok(set.figures.some((x) => x.org));
+  });
+});
+
 describe("the number check's reading of the org's words", () => {
   test("a figure is the org's when every digit lies in its words, or a figure in words starts there; a unit of theirs leaves it ours", () => {
     const text = "Stage 9 of 12 holds 1200 GBP and Tier Three has 4 deals.";
@@ -180,6 +216,21 @@ describe("the number check's reading of the org's words", () => {
     const { figures } = extractFigures(text);
     const read = Object.fromEntries(figures.map((f, i) => [f.raw, inOrgWords(text, figures, spans)[i]]));
     assert.deepEqual(read, { "9": true, "12": true, "1200 GBP": false, Three: true, "4": false });
+  });
+
+  test("a number in words is the org's only when every letter of every number word lies in its words", () => {
+    const read = (text: string, org: string) => {
+      const at = text.indexOf(org);
+      const { figures } = extractFigures(text);
+      return Object.fromEntries(figures.map((f, i) => [f.raw, inOrgWords(text, figures, [{ start: at, end: at + org.length }])[i]]));
+    };
+    // The reviewer's three: a name ending in a number word never takes the rest of a number of ours with it.
+    assert.deepEqual(read("Deals in Tier Three hundred and twelve days late.", "Tier Three"), { "Three hundred and twelve days": false });
+    assert.deepEqual(read("Region One million in pipeline", "Region One"), { "One million": false });
+    assert.deepEqual(read("Deals at forty-two thousand lost.", "f"), { "forty-two thousand": false });
+    // A name holding the whole number in words is still the org's, a unit of ours after it too.
+    assert.deepEqual(read("Team Seven 7 deals", "Team Seven"), { Seven: true, "7": false });
+    assert.deepEqual(read("Tier Three days late", "Tier Three"), { "Three days": true });
   });
 
   test("checked with its marks, a figure in the org's words is never checked, and one of ours is never read as 'of' it", () => {
@@ -197,7 +248,7 @@ describe("the number check's reading of the org's words", () => {
     f.subjects = [{ type: "stage", label: "Stage 4242" }];
     f.summary = "Deals in Stage 4242 waited.";
     f.orgWords = { summary: { spans: [{ start: 9, end: 19 }], textSha256: textSha256(f.summary) } };
-    f.evidence = f.evidence.map((e) => ({ ...e, note: "Also Stage 4242 and 77 more." }));
+    f.dependencies = ["Also Stage 4242 and 77 more."];
     const set = buildDataset({ findings: [f], metrics: [], orgNames: ["Record 555"], extraText: [{ source: "x", text: "Record 555 then 556." }, { source: "y", text: "ACME 557", org: true }] });
     const free = orgFree(set);
     const has = (s: typeof set, v: number, org?: boolean) => s.figures.some((x) => x.value === v && (org === undefined || !!x.org === org));
