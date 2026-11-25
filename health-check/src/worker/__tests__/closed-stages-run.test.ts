@@ -221,6 +221,17 @@ describe("a value's period marked only where code checks the digest (DECISIONS.m
     }
   });
 
+  test("a gated pulse says so in its run.json, so its comparison is the checked one; any other run's is as before", async () => {
+    const { checkedByCode } = await import("../../schemas/index.ts");
+    const gated = await pulse(true);
+    assert.equal(gated.input.run.gated, true);
+    assert.ok(checkedByCode(gated.input.run));
+    const plain = await pulse(false);
+    assert.equal(plain.input.run.gated, undefined);
+    assert.ok(!checkedByCode(plain.input.run));
+    assert.ok(!JSON.stringify(plain.input.run).includes("gated"));
+  });
+
   test("a run whose digest nobody checks by code keeps its findings exactly as before: no period mark", async () => {
     const r = await pulse(false);
     assert.ok(r.input.findings.some((f) => f.value.kind !== "not_sized" && PERIOD.test(f.value.period)));
