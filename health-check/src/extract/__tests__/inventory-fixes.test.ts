@@ -292,8 +292,8 @@ describe("[6] each count is one API call in the budget", () => {
     const step = result.run.steps.find((s) => s.id === fillRatesExtractor.id)!;
     const counts = sim.requests.flatMap(fillCounts).length;
     assert.ok(counts > sim.requests.filter((r) => fillCounts(r).length > 0).length, "more counts than calls, so the two ways differ");
-    // The describes the fill-rate step made are the last seven: the custom objects' and the core four's again.
-    assert.equal(step.calls, 7 + counts);
+    // The describes the fill-rate step made are the three custom objects': the core four's are the schema step's (KAN-77).
+    assert.equal(step.calls, 3 + counts);
     assert.ok(describes >= 7);
   });
 });

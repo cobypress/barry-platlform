@@ -3,7 +3,7 @@ import { BudgetStopError } from "../salesforce/budget.ts";
 import { classifyError, isUnavailable, runStoppedWords, type OrgLimit, type SalesforceError } from "../salesforce/client.ts";
 import { INVENTORY_VERSION, NAME_MAX, type ConnectedAppRow, type FillRateObject, type Inventory, type LimitRow, type PackageRow, type RiskyPermissionRow } from "../schemas/inventory.ts";
 import type { RunScope } from "../schemas/index.ts";
-import { CORE_OBJECTS, recordCountsExtractor } from "./configuration.ts";
+import { CORE_OBJECTS, recordCountsExtractor, schemaExtractor } from "./configuration.ts";
 import { orgDocumentationExtractor, type ConnectedAppRow as AppSetting } from "./documentation.ts";
 import { accessExtractor, holdersOf, type AccessData, type AccessAssignment } from "./security.ts";
 import { accessOf, isPartlyHidden, recordTypeUseExtractor } from "./record-types.ts";
@@ -236,14 +236,20 @@ export const fillRatesExtractor: Extractor<Sourced<FillRateData>> = {
       pending.length = 0;
     };
 
+    // The core objects' describes the schema step already read in this run, so each costs no second call (KAN-77).
+    const schema = earlier(ctx, schemaExtractor);
     for (const object of objects) {
       if (done.has(object)) continue;
       let described: { fields: DescribeField[] };
-      try {
-        described = await ctx.client.describe<{ fields: DescribeField[] }>(object);
-      } catch (err) {
-        keep([{ object, unavailable: failedCount(err, object) }]);
-        continue;
+      const read = schema?.[object];
+      if (read?.status === "ok") described = read.data;
+      else {
+        try {
+          described = await ctx.client.describe<{ fields: DescribeField[] }>(object);
+        } catch (err) {
+          keep([{ object, unavailable: failedCount(err, object) }]);
+          continue;
+        }
       }
       const counted = described.fields.filter((f) => skipReason(f) === null).map((f) => f.name);
       const skipped = described.fields.flatMap((f) => {

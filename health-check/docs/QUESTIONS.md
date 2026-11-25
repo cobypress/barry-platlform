@@ -409,3 +409,12 @@ What to check on the real Professional Edition org, in this order (the review of
 A fix is never a "Quick fix" when it turns on a setting we can't confirm can be turned off again (`touches.mayNotUndo` in `src/fix/table.ts`).
 
 a) Can campaign influence models from Account Engagement (`mkt.campaign-influence`) be turned off again once allowed in an org's campaign influence settings, or is the change one way, as some of Salesforce's influence settings are? Unconfirmed here, so the rule is labelled "Needs planning". Its fix prompt says "it can be turned off again": if that is wrong, the prompt must change too.
+
+## Cheaper fill rates (DECISIONS.md 728, KAN-77)
+
+The fill-rate step is about two thirds of a full check's calls. Each larger saving waits on one of these, read on the test orgs before anything is built:
+
+a) Does Salesforce charge a composite batch of five queries as five calls against the daily API limit, or one? The engine charges five (609). The `Sforce-Limit-Info` usage before and after one batch on a test org settles it.
+b) How many `COUNT(<field>)` expressions, and how long a query, does Salesforce accept in one SELECT sent as a composite subrequest (today 50, chosen, not a known limit)? What error comes back past the limit, and is it the same for every object?
+c) Does a Tooling (or REST) query of `EntityParticle` or `FieldDefinition`, ten objects a query, give for every field the describe lists exactly the same names, type, formula flag and whether it can be aggregated, and leave out the fields the connected user can't read, as the describe does? If not field for field, it can't replace the describe.
+d) Is a field the describe marks not nillable always counted as every record, on every object, including records made before the field was made required?
