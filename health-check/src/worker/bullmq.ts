@@ -1,6 +1,5 @@
 import type { JobHandler } from "./worker.ts";
 import { BadJobError, type WorkerStore } from "./types.ts";
-import { orgWordsStore } from "../engine/org-words.ts";
 
 // A thin adapter between BullMQ and the job handler, for the console's
 // "health-check-jobs" queue (blackcloud-next lib/health-check/jobs.ts). BullMQ
@@ -69,80 +68,19 @@ export function processorFor(
   handler: JobHandler,
   bull: Pick<BullModule, "UnrecoverableError">,
   log: (line: string) => void,
-  /** Called after every job, done or failed, so the worker can recycle itself when the store fills (DECISIONS.md 666). It must not wait for anything. */
-  afterJob?: () => void,
 ): (job: QueueJob) => Promise<unknown> {
   return async (job) => {
     const final = job.attemptsMade + 1 >= (job.opts.attempts ?? 1);
     try {
       // The job's own id goes with it: "Run again" is known by its id (DECISIONS.md 698). The heavy queue keeps the console's id.
       const result = await handler(job.data, { final, ...(job.id ? { jobId: job.id } : {}) });
-      // With how full the org-word store is, so a worker whose marks have degraded to unknown is seen (DECISIONS.md 663).
-      const store = orgWordsStore();
-      log(`${job.id ?? "?"} ${result.outcome}: ${result.detail} (org-word store ${store.size} of ${store.limit}${store.full ? ", full: marks are unknown until restart" : ""})`);
+      // The org-word store is each run's own now (DECISIONS.md 743, 749), freed when the run ends, so the process's says nothing here.
+      log(`${job.id ?? "?"} ${result.outcome}: ${result.detail}`);
       return { outcome: result.outcome };
     } catch (err) {
       if (err instanceof BadJobError) throw new bull.UnrecoverableError(err.message);
       throw err;
-    } finally {
-      afterJob?.();
     }
-  };
-}
-
-// Recycling the worker (DECISIONS.md 666, carrying out 663's recommendation). The
-// org-word store only grows, and once full every mark falls back to unknown until
-// the process restarts. In-process clearing isn't sound (663), so, when
-// HC_WORKER_RECYCLE_AT is set, the worker stops itself once the store reaches it
-// and the host starts a fresh process with an empty store. Off unless set: nobody
-// has yet seen Render restart a worker that exits by itself, and a worker that
-// stays down is worse than degraded marks. It can't loop: a fresh process starts
-// at 0, and one run of the small synthetic org adds about 160 sentences (a repeat
-// of the same org none), so half the bound is some 300 different orgs' runs away,
-// fewer for big orgs.
-
-/**
- * The exit code of a worker that recycled itself. Not 0: Render's docs say a
- * background worker should never exit unless sent SIGTERM, and call an exit 0
- * "exited successfully but early"; the one restart they show follows an exit
- * 137. They say nothing of what follows 0 or any other code, which is why
- * recycling is off until it has been watched on the service. 75 is EX_TEMPFAIL
- * (sysexits.h): try again. Distinct from the CLI's 2 and 3, and from Render's own
- * 2 for a failed start command.
- */
-export const RECYCLE_EXIT = 75;
-/**
- * How long a recycle may wait for the jobs in hand before the worker exits
- * anyway: an hour, six heavy locks. close() waits without limit, and while it
- * waits the heavy slot takes nothing. A run cut short is found stalled once its
- * lock lapses and resumes from its checkpoints in the fresh worker; it may stall
- * twice (HEAVY_MAX_STALLS) before BullMQ gives up on it.
- */
-export const RECYCLE_WATCHDOG_MS = 6 * 10 * 60_000;
-
-export type StoreFill = { size: number; limit: number; full: boolean };
-/** Whether a store this full is time to recycle: at `at`, or full however it got there. */
-export const shouldRecycle = (fill: StoreFill, at: number): boolean => fill.full || fill.size >= at;
-
-/**
- * A promise that resolves, once, with the store's fill when a job ends with the
- * store at `at` or full. `check` only resolves the promise: it never waits on the
- * worker, so a check from inside a job's own processor returns at once, and the
- * job ends before anyone closes the worker.
- */
-export function recycleWatch(at: number, fill: () => StoreFill = orgWordsStore): { check: () => void; due: Promise<StoreFill> } {
-  let resolve!: (fill: StoreFill) => void;
-  const due = new Promise<StoreFill>((r) => (resolve = r));
-  let done = false;
-  return {
-    due,
-    check() {
-      if (done) return;
-      const now = fill();
-      if (!shouldRecycle(now, at)) return;
-      done = true;
-      resolve({ ...now });
-    },
   };
 }
 
@@ -221,9 +159,8 @@ export function gatedProcessor(
   bull: Pick<BullModule, "UnrecoverableError">,
   heavy: Pick<QueueSender, "add">,
   log: (line: string) => void,
-  afterJob?: () => void,
 ): (job: QueueJob) => Promise<unknown> {
-  const direct = processorFor(handler, bull, log, afterJob);
+  const direct = processorFor(handler, bull, log);
   return async (job) => {
     if (!isHeavy(job.data)) return direct(job);
     const { attempts, backoff, priority, removeOnFail } = job.opts;
@@ -269,15 +206,10 @@ export function lostRecorder(
 
 /**
  * Both workers. `close`, on SIGTERM: the console's first, so nothing more is
- * handed on, then the heavy one, which finishes the job in hand. `closeHeavyFirst`,
- * on a recycle (DECISIONS.md 666): the heavy one first, so it takes no new run and
- * finishes the one in hand while the console's keeps serving connect and share
- * jobs (decision 371) and hands heavy jobs on to Redis for the fresh worker; then
- * the console's. SIGTERM keeps its order: Render's default grace is 30 seconds,
- * so the process is killed long before a run ends either way, and the console's
- * jobs are the ones that can finish.
+ * handed on, then the heavy one, which finishes the job in hand. (The recycle's
+ * heavy-first close went with the recycle, DECISIONS.md 749.)
  */
-export type GatedWorkers = { light: QueueWorker; heavy: QueueWorker; close(): Promise<void>; closeHeavyFirst(): Promise<void> };
+export type GatedWorkers = { light: QueueWorker; heavy: QueueWorker; close(): Promise<void> };
 
 export function startQueueWorker(
   bull: BullModule,
@@ -288,14 +220,12 @@ export function startQueueWorker(
     log: (line: string) => void;
     /** Records a heavy job BullMQ gave up on without running its handler, so it isn't left in progress for ever (DECISIONS.md 396). */
     onLost?: (data: unknown, reason: string) => Promise<void>;
-    /** Called after every job either worker runs (DECISIONS.md 666). */
-    afterJob?: () => void;
   },
 ): GatedWorkers {
   const connection = redisConnection(options.redisUrl);
   const heavyQueue = new bull.Queue(HEAVY_QUEUE, { connection });
-  const light = new bull.Worker(HEALTH_CHECK_QUEUE, gatedProcessor(handler, bull, heavyQueue, options.log, options.afterJob), { connection, concurrency: options.concurrency });
-  const heavy = new bull.Worker(HEAVY_QUEUE, processorFor(handler, bull, options.log, options.afterJob), { connection, concurrency: 1, lockDuration: HEAVY_LOCK_MS, maxStalledCount: HEAVY_MAX_STALLS });
+  const light = new bull.Worker(HEALTH_CHECK_QUEUE, gatedProcessor(handler, bull, heavyQueue, options.log), { connection, concurrency: options.concurrency });
+  const heavy = new bull.Worker(HEAVY_QUEUE, processorFor(handler, bull, options.log), { connection, concurrency: 1, lockDuration: HEAVY_LOCK_MS, maxStalledCount: HEAVY_MAX_STALLS });
   for (const worker of [light, heavy]) {
     worker.on("failed", (job, err) => {
       options.log(`${job?.id ?? "?"} failed (attempt ${(job?.attemptsMade ?? 0)} of ${job?.opts.attempts ?? 1}): ${err.message}`);
@@ -312,11 +242,6 @@ export function startQueueWorker(
     async close() {
       await light.close();
       await heavy.close();
-      await heavyQueue.close();
-    },
-    async closeHeavyFirst() {
-      await heavy.close();
-      await light.close();
       await heavyQueue.close();
     },
   };

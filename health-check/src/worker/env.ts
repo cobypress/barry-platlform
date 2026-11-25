@@ -3,12 +3,9 @@ import { BUDGET_DEFAULTS } from "../config.ts";
 import type { OAuthClient } from "../salesforce/oauth.ts";
 import type { DriveConfig } from "./drive.ts";
 import { MicrositeKeyError, micrositeKey } from "../microsite/seal.ts";
-import { orgWordsStore } from "../engine/org-words.ts";
 import { readAutomaticOrgs, type AutomaticSwitch } from "./automatic.ts";
 import { DocumentsKeyError, documentsKey, type PortalDocumentsSwitch } from "./portal-documents.ts";
 
-/** The highest HC_WORKER_RECYCLE_AT takes: half the org-word store's bound (DECISIONS.md 666). */
-export const RECYCLE_AT_LIMIT = Math.floor(orgWordsStore().limit / 2);
 
 // What `hc worker` needs before it starts. Every variable is required except
 // the optional ones, and the worker refuses to start with any missing or wrong,
@@ -44,7 +41,7 @@ export const WORKER_ENV = {
     HC_SF_SIGNIN_CLIENT_ID: "The sign-in app's consumer key: a classic connected app a customer's admin can authorise with nothing installed (DECISIONS.md 616). Set all three HC_SF_SIGNIN_ variables or none. Without them, every connection uses the package app",
     HC_SF_SIGNIN_CLIENT_SECRET: "Its secret, needed for the code exchange and refresh",
     HC_SF_SIGNIN_REDIRECT_URI: "The console's OAuth callback, exactly as registered on the sign-in app",
-    HC_WORKER_RECYCLE_AT: `A whole number from 1 to ${RECYCLE_AT_LIMIT}: once that many org-worded sentences are in the worker's store, it finishes the jobs in hand and exits 75 for Render to start a fresh one (DECISIONS.md 666). Unset: it never recycles itself. Set it low once and watch Render restart it before relying on it`,
+    HC_WORKER_RECYCLE_AT: "No longer used (DECISIONS.md 749): each health check keeps its own store of org-worded sentences, freed when it ends, so the worker has nothing to recycle for. Accepted, whatever its value, and ignored, with a line at start saying so; it can be removed from the service",
     HC_PMD_HOME: "Absolute path of the unpacked PMD 7.29.0 (the pmd-bin-7.29.0 folder): PMD then checks each health check's Apex code, and its findings are stored beside our own scan's (DECISIONS.md 670). Unset: PMD doesn't run, and each run says so",
     HC_JAVA_HOME: "Absolute path of the Java PMD runs on (the folder holding bin/java). Needed with HC_PMD_HOME",
     HC_AUTOMATIC: "on, exactly, to let the worker take automatic runs, which no person reviews (DECISIONS.md 688). Anything else, or unset, is off: an automatic run's connect is refused and its run fails at its claim with nothing read. With it on, an automatic run connects, is calibrated from the org's settings and queued (DECISIONS.md 692), then fails before reading the org for analysis, until lane E3",
@@ -92,8 +89,8 @@ export type WorkerConfig = {
   micrositeKey: Buffer | null;
   /** HC_HANDBOOK_SUMMARIES=on, and only that: Claude summarises the Apex code (DECISIONS.md 490). */
   apexSummaries: boolean;
-  /** HC_WORKER_RECYCLE_AT: the org-word store's size at which the worker recycles itself. Null, the default: it never does (DECISIONS.md 666). */
-  recycleAt: number | null;
+  /** Whether HC_WORKER_RECYCLE_AT is set: it is ignored (DECISIONS.md 749), and the start says so. */
+  recycleAtIgnored: boolean;
   /** HC_PMD_HOME and HC_JAVA_HOME, or null: where PMD and its Java are, checked when the worker starts (DECISIONS.md 670). */
   pmdHome: string | null;
   javaHome: string | null;
@@ -141,11 +138,6 @@ export function readWorkerEnv(env: NodeJS.ProcessEnv): { ok: true; config: Worke
   if (get("HC_DRIVE_FOLDER_ID") && !/^[A-Za-z0-9_-]{10,200}$/.test(get("HC_DRIVE_FOLDER_ID"))) problems.push("HC_DRIVE_FOLDER_ID must be a Drive folder id, the last part of the folder's address");
   const federationSet = FEDERATION_VARS.filter((name) => get(name));
   if (federationSet.length > 0 && federationSet.length < FEDERATION_VARS.length) problems.push(`Set all of ${FEDERATION_VARS.join(", ")} or none: ${FEDERATION_VARS.filter((n) => !get(n)).join(", ")} missing`);
-  // Digits only, so "1e3" or "0x10" isn't read as a number nobody typed.
-  const recycleAt = get("HC_WORKER_RECYCLE_AT") ? (/^\d+$/.test(get("HC_WORKER_RECYCLE_AT")) ? Number(get("HC_WORKER_RECYCLE_AT")) : NaN) : null;
-  if (recycleAt !== null && !(Number.isInteger(recycleAt) && recycleAt >= 1 && recycleAt <= RECYCLE_AT_LIMIT)) {
-    problems.push(`HC_WORKER_RECYCLE_AT must be a whole number from 1 to ${RECYCLE_AT_LIMIT}, or unset`);
-  }
   for (const name of ["HC_PMD_HOME", "HC_JAVA_HOME"]) if (get(name) && !isAbsolute(get(name))) problems.push(`${name} must be an absolute path, or unset`);
   const automaticOrgs = readAutomaticOrgs(get("HC_AUTOMATIC_ORGS"));
   if (!automaticOrgs.ok) problems.push(`HC_AUTOMATIC_ORGS must be 15-character org ids separated by commas: ${automaticOrgs.bad} ${automaticOrgs.bad === 1 ? "entry isn't" : "entries aren't"}`);
@@ -210,7 +202,8 @@ export function readWorkerEnv(env: NodeJS.ProcessEnv): { ok: true; config: Worke
       micrositeKey: siteKey,
       // Exactly "on", untrimmed: a switch that sends code to Claude doesn't guess.
       apexSummaries: env.HC_HANDBOOK_SUMMARIES === "on",
-      recycleAt,
+      // Set on the service before 749, so never a reason not to start: accepted, whatever its value, and ignored.
+      recycleAtIgnored: Boolean(get("HC_WORKER_RECYCLE_AT")),
       pmdHome: get("HC_PMD_HOME") || null,
       javaHome: get("HC_JAVA_HOME") || null,
       // Exactly "on", untrimmed, as the summaries' switch: a switch that lets a run skip a person doesn't guess.
