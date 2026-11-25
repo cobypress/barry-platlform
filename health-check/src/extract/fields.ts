@@ -1,3 +1,4 @@
+import { fieldsNotInOrg, fieldsUnseen, objectAbsent } from "../salesforce/refusal-words.ts";
 import { isUnavailable } from "../salesforce/client.ts";
 import { refusalReason, type ExtractContext, type Extractor, type Sourced } from "./types.ts";
 
@@ -95,7 +96,6 @@ export async function describeObject(ctx: ExtractContext, object: string): Promi
 
 export type FieldPlan = { ok: true; select: string; missing: string[] } | { ok: false; reason: string };
 
-const listOf = (names: string[]): string => (names.length === 1 ? names[0]! : `${names.slice(0, -1).join(", ")} and ${names.at(-1)}`);
 
 function has(described: Extract<DescribedObject, { status: "ok" }>, field: string): boolean {
   const [first, ...rest] = field.toLowerCase().split(".");
@@ -112,11 +112,11 @@ export function planFrom(described: DescribedObject | undefined, spec: FieldSpec
   const optional = spec.optional ?? [];
   const everything = { ok: true as const, select: [...spec.required, ...optional].join(", "), missing: [] };
   if (!described || described.status === "unknown") return everything;
-  if (described.status === "absent") return { ok: false, reason: `${spec.object} isn't available in this org, or to the connected user: ${described.reason}` };
+  if (described.status === "absent") return { ok: false, reason: objectAbsent(spec.object, described.reason) };
   const missingRequired = spec.required.filter((f) => !has(described, f));
   if (missingRequired.length > 0) {
     const names = missingRequired.map((f) => `${spec.object}.${f}`);
-    return { ok: false, reason: `${listOf(names)} ${names.length === 1 ? "isn't" : "aren't"} in this org, and the read needs ${names.length === 1 ? "it" : "them"}, so it wasn't run.` };
+    return { ok: false, reason: fieldsNotInOrg(names) };
   }
   const present = optional.filter((f) => has(described, f));
   return { ok: true, select: [...spec.required, ...present].join(", "), missing: optional.filter((f) => !present.includes(f)).map((f) => `${spec.object}.${f}`) };
@@ -132,6 +132,5 @@ export function missingFieldReason(source: Sourced<unknown>, ...fields: string[]
   if (source.status !== "ok") return null;
   const gone = fields.filter((f) => source.missingFields?.includes(f));
   if (gone.length === 0) return null;
-  const one = gone.length === 1;
-  return `${listOf(gone)} couldn't be seen in this org: ${one ? "it" : "they"} may not exist, or the connected user may not have access to ${one ? "it" : "them"}, so this can't be measured.`;
+  return fieldsUnseen(gone);
 }

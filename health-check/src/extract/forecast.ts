@@ -1,3 +1,4 @@
+import { forecastTypesAmbiguous } from "../salesforce/refusal-words.ts";
 import { FIELD_SPECS, planFields } from "./fields.ts";
 import { monthsBefore, readSoql, soqlDate, soqlDateTime, soqlUpTo, type Extractor, type SourceInfo, type Sourced } from "./types.ts";
 
@@ -33,7 +34,7 @@ export function revenueForecastType(types: ForecastTypeRow[]): { id: string } | 
   if (amount.length === 1) return { id: amount[0]!.Id };
   if (amount.length === 0) return { reason: "No revenue forecast type is active, so Forecasting isn't in use for revenue.", switchedOff: true };
   const standard = amount.find((t) => t.DeveloperName === "OpportunityRevenue");
-  return standard ? { id: standard.Id } : { reason: `${amount.length} revenue forecast types are active, and none is the standard one, so we can't tell which to read.` };
+  return standard ? { id: standard.Id } : { reason: forecastTypesAmbiguous(amount.length) };
 }
 
 export type PeriodRow = { Id: string; Type: string; StartDate: string; EndDate: string };

@@ -47,7 +47,10 @@ export const UNREAD_LABELS: Record<UnreadKind, string> = { workflowRules: "Workf
 /** Why a kind the caller needs wasn't read whole, or null when everything it needs was. */
 export function unreadReason(bundle: MetadataBundle, needs: UnreadKind[]): string | null {
   const kind = needs.find((k) => bundle.unread?.[k]);
-  return kind ? `${UNREAD_LABELS[kind]} couldn't be read: ${bundle.unread![kind]}` : null;
+  if (!kind) return null;
+  // A whole head of ours per kind, so the passed-on route knows it (DECISIONS.md 702, 743).
+  const read = { reason: bundle.unread![kind]! };
+  return kind === "workflowRules" ? `Workflow Rules couldn't be read: ${read.reason}` : `Validation rules couldn't be read: ${read.reason}`;
 }
 
 /**

@@ -1,4 +1,5 @@
 import { createHash } from "node:crypto";
+import { passedOnSpans } from "./passed-on.ts";
 
 // Which characters of a finding's sentence were chosen inside the customer's org
 // (DECISIONS.md 655): a flow's label, a field's name, a stage. The connector
@@ -185,6 +186,18 @@ export function said<const P extends readonly unknown[]>(strings: TemplateString
   const { text, spans } = piecesOf(strings, pieces);
   record(text, spans);
   return text as Said;
+}
+
+/**
+ * A reason read elsewhere and passed on inside a sentence said makes, such as
+ * `said\`Field usage on ${org(label)} couldn't be read: ${passedOn(scan.reason)}\``
+ * (DECISIONS.md 743): known by the passed-on route's words (702), with the object
+ * it names marked as the org's, or unknown, which makes the whole sentence
+ * unknown. A sentence said already made keeps its own marks.
+ */
+export function passedOn(reason: string): Said {
+  if (!ledger?.has(reason)) record(reason, passedOnSpans(reason));
+  return reason as Said;
 }
 
 /** Sentences joined, as `Array.join` would, keeping their spans. Every part must be one `said` made in this analysis, or the whole is unknown. */

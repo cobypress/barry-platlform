@@ -20,9 +20,10 @@ import { engineTextKey } from "./engine-texts-key.ts";
  * into what the portal serves (the plan's hours note, DECISIONS.md 673, and the
  * overall score's fallback reason) and marks them as ours only through this list
  * (DECISIONS.md 739): left out, an automatic run with a code checker finding in
- * its plan was held for one sentence of our own.
+ * its plan was held for one sentence of our own. And the extractors', whose own
+ * reasons a rule passes on whole or after a head (DECISIONS.md 743).
  */
-export const ENGINE_TEXT_DIRS = [...CUSTOMER_TEXT_DIRS, "engine", "guards", "digest"];
+export const ENGINE_TEXT_DIRS = [...CUSTOMER_TEXT_DIRS, "engine", "guards", "digest", "extract"];
 
 function* sourceFiles(dir: string): Generator<string> {
   for (const entry of readdirSync(dir, { withFileTypes: true })) {
@@ -69,8 +70,8 @@ export function scanEngineTexts(srcDir: string): string[] {
   return [...keys].sort();
 }
 
-/** Where a rule or an extractor passes a read's reason on: those folders, and the extractors' own. */
-export const REASON_PREFIX_DIRS = [...ENGINE_TEXT_DIRS, "extract"];
+/** Where a rule or an extractor passes a read's reason on: the same folders, the extractors' among them. */
+export const REASON_PREFIX_DIRS = ENGINE_TEXT_DIRS;
 
 /**
  * The words the engine puts before a reason it passes on (DECISIONS.md 702):

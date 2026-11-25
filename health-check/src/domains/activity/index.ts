@@ -332,7 +332,7 @@ function activityMetrics(ctx: Ctx): Metric[] {
     return { date: last, value: thin ? null : Math.round((rows.filter((e) => e.WhatId !== null).length / rows.length) * 1000) / 10, n: rows.length, notMeasurableReason: thin ? `${rows.length} events is below the calibrated minimum of ${minSample}` : null };
   });
   const latest = series.filter((p) => p.value !== null).at(-1);
-  if (!latest) metrics.push({ ...definitions.linked, ...common, status: "not_measurable", reason: `No whole month has ${minSample} events.` });
+  if (!latest) metrics.push({ ...definitions.linked, ...common, status: "not_measurable", reason: said`No whole month has ${minSample} events.` });
   else metrics.push({ ...definitions.linked, ...common, status: "measured", value: latest.value!, n: data.events.length, dateRange: { from: data.from, to: ctx.window.to }, segments: [], segmentExemptReason: "Shown by month. Team and rep cuts are in the event link check.", series, stats: {} });
 
   const touches = touchesByDeal(data);
@@ -344,7 +344,7 @@ function activityMetrics(ctx: Ctx): Metric[] {
     const rows = deals.filter((d) => d.category === category);
     // Lost leaves no decision out (DECISIONS.md 600).
     if (unsplit && category === "lost") metrics.push({ ...definition, ...common, status: "not_measurable", reason: unsplit });
-    else if (rows.length < minSample) metrics.push({ ...definition, ...common, status: "not_measurable", reason: `${rows.length} ${category} deals is below the calibrated minimum of ${minSample}.` });
+    else if (rows.length < minSample) metrics.push({ ...definition, ...common, status: "not_measurable", reason: said`${rows.length} ${category} deals is below the calibrated minimum of ${minSample}.` });
     else metrics.push({ ...definition, ...common, status: "measured", value: median(rows.map(count)), n: rows.length, dateRange: { from: data.from, to: ctx.window.to }, segments: segment(rows, dims, minSample, (group) => median(group.map(count))), segmentExemptReason: null, series: [], stats: {} });
   }
   return metrics;

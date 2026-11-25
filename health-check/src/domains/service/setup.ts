@@ -10,7 +10,7 @@ import { judged, lapse } from "../logins.ts";
 import type { DomainModule } from "../types.ts";
 import { byOrigin, caseQueues, limitsOf, MIN_SEGMENT, priorityOf } from "./shared.ts";
 import { WHERE } from "../where.ts";
-import { said, type Said } from "../../engine/org-words.ts";
+import { passedOn, said, type Said } from "../../engine/org-words.ts";
 import { andList } from "../../engine/said-forms.ts";
 import { editionIsWhy } from "../../salesforce/refusal-words.ts";
 
@@ -68,7 +68,7 @@ const escalation: Rule = {
       // Entitlement processes escalate too, so with one active the gap doesn't matter.
       // Not read because the edition has no Metadata API (DECISIONS.md 710): said in our words whole, so the summary is known as ours.
       if (activeSla.length && editionIsWhy(rules.reason)) return { outcome: "pass", summary: said`Escalation rules weren't read, because Professional Edition only opens the Metadata API to security-reviewed apps, but ${plural(activeSla.length, "entitlement process")} for cases ${isAre(activeSla.length)} active, which can escalate cases.`, evidence, segmentExemptReason: single, facts: { processes: activeSla.length } };
-      if (activeSla.length) return { outcome: "pass", summary: `Escalation rules couldn't be read (${rules.reason}), but ${plural(activeSla.length, "entitlement process")} for cases ${isAre(activeSla.length)} active, which can escalate cases.`, evidence, segmentExemptReason: single, facts: { processes: activeSla.length } };
+      if (activeSla.length) return { outcome: "pass", summary: said`Escalation rules couldn't be read (${passedOn(rules.reason)}), but ${plural(activeSla.length, "entitlement process")} for cases ${isAre(activeSla.length)} active, which can escalate cases.`, evidence, segmentExemptReason: single, facts: { processes: activeSla.length } };
       return nm(`Escalation rules couldn't be read: ${rules.reason}`, evidence);
     }
     const active = rules.data.filter((r) => r.active);
@@ -179,7 +179,7 @@ const omniRouting: Rule = {
   evaluate(ctx) {
     const setup = setupOf(ctx);
     const { channels, routingConfigs } = setup;
-    if (channels.status !== "ok") return nm(`Omni-Channel couldn't be read: ${channels.reason} It may not be turned on.`, unavailableEvidence(ctx, channels.source));
+    if (channels.status !== "ok") return nm(said`Omni-Channel couldn't be read: ${passedOn(channels.reason)} It may not be turned on.`, unavailableEvidence(ctx, channels.source));
     const evidence = [ctx.ev(channels.source, { count: channels.data.length })];
     const forCases = channels.data.filter((c) => c.RelatedEntity === "Case");
     if (forCases.length === 0) return { outcome: "pass", summary: said`Omni-Channel isn't set up to route cases, so there's nothing to check.`, evidence, segmentExemptReason: "No service channel takes cases" };
@@ -304,7 +304,7 @@ function knowledgeSwitchedOff(ctx: RuleContext): boolean {
 function publishedArticles(ctx: RuleContext): { rows: ArticleRow[]; evidence: Evidence[] } | RuleResult {
   const { articles } = setupOf(ctx);
   if (articles.status !== "ok" && knowledgeSwitchedOff(ctx)) return nm(said`Salesforce Knowledge is switched off in this org, so there are no articles to check.`, [...unavailableEvidence(ctx, articles.source), ctx.ev(SETTINGS_SOURCE, { count: null, note: "KnowledgeSettings.enableKnowledge is false" })]);
-  if (articles.status !== "ok") return nm(`Knowledge articles couldn't be read: ${articles.reason} Knowledge may not be turned on.`, unavailableEvidence(ctx, articles.source));
+  if (articles.status !== "ok") return nm(said`Knowledge articles couldn't be read: ${passedOn(articles.reason)} Knowledge may not be turned on.`, unavailableEvidence(ctx, articles.source));
   const evidence = [ctx.ev(articles.source, { count: articles.data.length, note: "Published articles, latest versions" })];
   if (articles.data.length === 0) return nm(said`Knowledge is on, but no article is published.`, evidence);
   return { rows: articles.data, evidence };
@@ -454,7 +454,7 @@ const caseRoutingOverlap: Rule = {
     if (assignmentRules.status !== "ok") return nm(`Case assignment rules couldn't be read: ${assignmentRules.reason}`, unavailableEvidence(ctx, assignmentRules.source));
     const evidence = [ctx.ev(assignmentRules.source, { count: assignmentRules.data.length })];
     const active = assignmentRules.data.filter((r) => r.Active);
-    if (channels.status !== "ok") return { outcome: "pass", summary: `Omni-Channel couldn't be read (${channels.reason}), so assignment rules are the only routing we can see.`, evidence, segmentExemptReason: "There's one routing set-up to look at" };
+    if (channels.status !== "ok") return { outcome: "pass", summary: said`Omni-Channel couldn't be read (${passedOn(channels.reason)}), so assignment rules are the only routing we can see.`, evidence, segmentExemptReason: "There's one routing set-up to look at" };
     const queues = caseQueues(setup) ?? [];
     const routedQueues = queues.filter((q) => q.QueueRoutingConfigId).length;
     const omni = channels.data.some((c) => c.RelatedEntity === "Case") && routedQueues > 0;

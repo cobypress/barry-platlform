@@ -86,7 +86,7 @@ function costMetric(d: Definition, evidence: Evidence[], licences: UserLicenseRo
     seats,
     priced.map((p) => segment(p.licence.Name, p.seats, p.seats * p.price.annual)),
     {
-      assumptions: priced.map((p) => `${plural(p.seats, `${p.licence.Name} seat`)} at ${p.price.note}`),
+      assumptions: priced.map((p) => said`${p.seats} ${org(p.licence.Name)} ${p.seats === 1 ? "seat" : "seats"} at ${p.price.note}`),
       // Which prices were used, so a report can label the total without reading the text.
       stats: { calibrationPriced: priced.filter((p) => p.price.basis === "calibration").length, listPriced: priced.filter((p) => p.price.basis === "list_price").length },
     },
@@ -165,7 +165,7 @@ function activeShare(ctx: Ctx, paid: UserLicenseRow[], usedSeats: number, licenc
   const recent = users.data.filter((u) => u.IsActive && names.has(licenceOf(u)) && u.LastLoginDate !== null && new Date(u.LastLoginDate) >= cutoff);
   // Seats in use come from Salesforce's licence counts, and users from the user
   // list. If they disagree this far, a share of one over the other means nothing.
-  if (recent.length > usedSeats) return notMeasurable(d, evidence, `${recent.length} users logged in recently, more than the ${usedSeats} seats Salesforce counts as in use, so the two counts don't agree.`);
+  if (recent.length > usedSeats) return notMeasurable(d, evidence, said`${recent.length} users logged in recently, more than the ${usedSeats} seats Salesforce counts as in use, so the two counts don't agree.`);
   const segments = paid
     .filter((l) => l.UsedLicenses > 0)
     .map((l) => {

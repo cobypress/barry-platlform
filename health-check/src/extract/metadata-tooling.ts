@@ -1,3 +1,4 @@
+import { flowWithoutDefinition, tooManyFlows } from "../salesforce/refusal-words.ts";
 import { isUnavailable } from "../salesforce/client.ts";
 import { redactSecrets } from "../privacy/secrets.ts";
 import { METADATA_READING, validationRuleDetail } from "../handbook/detail.ts";
@@ -136,10 +137,10 @@ export async function readBundleThroughTooling(ctx: ExtractContext): Promise<Met
   // version, or its latest when none is active, so this does the same.
   const definitions = (await tooling(ctx, "SELECT Id, DeveloperName, ActiveVersionId, LatestVersionId, NamespacePrefix FROM FlowDefinition WHERE NamespacePrefix = null")).filter(own);
   const versions = definitions.map((d) => ({ name: String(d.DeveloperName), id: (d.ActiveVersionId ?? d.LatestVersionId) as string | null })).filter((v) => v.id);
-  if (versions.length > MAX_ITEM_READS) throw new ToolingGapError(`There are ${versions.length} flows, more than the ${MAX_ITEM_READS} we read one at a time.`);
+  if (versions.length > MAX_ITEM_READS) throw new ToolingGapError(tooManyFlows(versions.length, MAX_ITEM_READS));
   for (const version of versions.sort((a, b) => a.name.localeCompare(b.name))) {
     const { metadata } = await reader.read("Flow", version.id!);
-    if (!metadata) throw new ToolingGapError(`Flow ${version.name} came back without its definition.`);
+    if (!metadata) throw new ToolingGapError(flowWithoutDefinition(version.name));
     const summary = summariseFlowMetadata(version.name, metadata);
     bundle.flows.push(summary);
     bundle.handbook!.flows.push(flowDetailMetadata(version.name, metadata));

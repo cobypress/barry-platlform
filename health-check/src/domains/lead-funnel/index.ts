@@ -356,12 +356,12 @@ function funnelMetrics(ctx: Ctx): Metric[] {
     );
   const rate = (group: Lead[]): number => pct(group.filter((l) => l.IsConverted).length, group.length);
   const leads = settled(ctx, data);
-  if (leads.length < minSample) metrics.push({ ...definitions.conversion, evidence, status: "not_measurable", reason: `${leads.length} leads is below the calibrated minimum of ${minSample}.` });
+  if (leads.length < minSample) metrics.push({ ...definitions.conversion, evidence, status: "not_measurable", reason: said`${leads.length} leads is below the calibrated minimum of ${minSample}.` });
   else metrics.push({ ...definitions.conversion, evidence, status: "measured", value: rate(leads), n: leads.length, segments: cuts(leads, rate), ...rest });
 
   const touched = judgeable(ctx, data).filter((l) => l.firstTouch);
   if (!data.activityReadable) metrics.push({ ...definitions.response, evidence, status: "not_measurable", reason: "Activities couldn't be read in full." });
-  else if (touched.length < minSample) metrics.push({ ...definitions.response, evidence, status: "not_measurable", reason: `${touched.length} leads with a response is below the calibrated minimum of ${minSample}.` });
+  else if (touched.length < minSample) metrics.push({ ...definitions.response, evidence, status: "not_measurable", reason: said`${touched.length} leads with a response is below the calibrated minimum of ${minSample}.` });
   else {
     const hours = (group: Lead[]): number => round1(median(group.map(hoursToTouch)));
     metrics.push({ ...definitions.response, evidence, status: "measured", value: hours(touched), n: touched.length, segments: cuts(touched, hours), ...rest });

@@ -9,7 +9,13 @@ import { eng, said, type Said } from "../../engine/org-words.ts";
 // code (DECISIONS.md 169).
 
 // An edition with no Apex says so plainly, rather than as a failed read.
-export const apexGap = (what: string, reason: string): string => (reason.startsWith("Professional Edition has no Apex") || editionIsWhy(reason) ? reason : `Apex ${what} couldn't be read: ${reason}`);
+// One whole head of ours per kind, each passing the reason on as the passed-on route knows it (DECISIONS.md 702, 743):
+// a head with the kind put in isn't one the source writes, and an automatic run was held for it on a read-only connection.
+export const apexGap = (what: "classes" | "triggers" | "coverage", reason: string): string => {
+  if (reason.startsWith("Professional Edition has no Apex") || editionIsWhy(reason)) return reason;
+  const read = { reason };
+  return what === "classes" ? `Apex classes couldn't be read: ${read.reason}` : what === "triggers" ? `Apex triggers couldn't be read: ${read.reason}` : `Apex coverage couldn't be read: ${read.reason}`;
+};
 
 /**
  * The org's own classes or triggers: as read, or none when a Professional

@@ -1,7 +1,8 @@
 import { engineTextKey } from "../digest/engine-texts-key.ts";
+import { ENGINE_TEXT_KEYS } from "../digest/engine-texts.ts";
 import { REASON_PREFIX_KEYS, REASON_PREFIX_LONGEST } from "../digest/reason-prefixes.ts";
 import { refusalSpans } from "../salesforce/refusal-words.ts";
-import type { OrgSpan } from "./org-words.ts";
+import { orgWordsOf, saidMade, type OrgSpan } from "./org-words.ts";
 
 // A refused read's reason passed on by a rule or an extractor, known as ours
 // (DECISIONS.md 702). Rules write `Quotas couldn't be read: ${quotas.reason}`
@@ -24,6 +25,10 @@ export function passedOnSpans(text: string, orgValues: ReadonlySet<string> = new
   if (orgValues.has(text)) return null;
   const own = refusalSpans(text);
   if (own) return own;
+  // A reason the engine's source writes whole, such as an extractor's or a loader's own sentence, passed on
+  // whole or after a head (DECISIONS.md 743): ours, as engineOwn knows a metric's whole text. One said made
+  // (passedOn notes the reasons it is given) keeps its own marks, unknown included.
+  if (ENGINE_TEXT_KEYS.has(engineTextKey(text))) return saidMade(text) ? orgWordsOf(text) : [];
   if (depth >= MAX_DEPTH) return null;
   // No head is longer than the longest in the source, so the search stops there, whatever the text's length.
   const longest = Math.min(text.length - 1, REASON_PREFIX_LONGEST);

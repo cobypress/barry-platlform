@@ -1,3 +1,4 @@
+import { pardotUnknown } from "../salesforce/refusal-words.ts";
 import { XMLParser } from "fast-xml-parser";
 import { isUnavailable } from "../salesforce/client.ts";
 import { schemaExtractor } from "./configuration.ts";
@@ -40,7 +41,7 @@ export function pardotPresence(ctx: ExtractContext): PardotPresence {
   const licensed = packageLicenses.status === "ok" && packageLicenses.data.some((p) => (p.NamespacePrefix ?? "").toLowerCase() === PARDOT_NAMESPACE);
   if (licensed || piFields.some((f) => f.toLowerCase() === PI_FIELDS.url)) return { status: "installed", leadFields: piFields.map((f) => f.toLowerCase()) };
   if (lead?.status === "ok") return { status: "absent", reason: "Account Engagement (the Pardot package, namespace pi) isn't installed in this org, so there's nothing of it to check." };
-  return { status: "unknown", reason: `We couldn't tell whether Account Engagement is installed: Lead couldn't be described${lead?.status === "unavailable" ? `: ${lead.reason}` : ""}.` };
+  return { status: "unknown", reason: pardotUnknown(lead?.status === "unavailable" ? lead.reason : null) };
 }
 
 const parser = new XMLParser({ removeNSPrefix: true, ignoreAttributes: true, parseTagValue: false });

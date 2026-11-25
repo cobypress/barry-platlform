@@ -207,9 +207,9 @@ function evaluateGroup(group: Group, ctx: RuleContext): RuleResult | RuleResult[
   const checked = pmd.read.classes + pmd.read.triggers;
 
   const exclusions = [
-    ...(pmd.skipped.tooLarge ? [`Classes and triggers too large for our code checker: ${pmd.skipped.tooLarge}`] : []),
-    ...(pmd.skipped.unparsable ? [`Classes and triggers our code checker couldn't read: ${pmd.skipped.unparsable}`] : []),
-    ...(pmd.skipped.unreadable ? [`Classes and triggers whose code is hidden: ${pmd.skipped.unreadable}`] : []),
+    ...(pmd.skipped.tooLarge ? [said`Classes and triggers too large for our code checker: ${pmd.skipped.tooLarge}`] : []),
+    ...(pmd.skipped.unparsable ? [said`Classes and triggers our code checker couldn't read: ${pmd.skipped.unparsable}`] : []),
+    ...(pmd.skipped.unreadable ? [said`Classes and triggers whose code is hidden: ${pmd.skipped.unreadable}`] : []),
     "Installed packages' code",
     ...pmd.limits,
   ];
