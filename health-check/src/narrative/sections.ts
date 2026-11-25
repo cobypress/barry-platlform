@@ -981,12 +981,15 @@ export function buildReport(all: ReportInput): BuiltReport {
     currency: calibration.currency,
     overrides: [],
     structural: STRUCTURE,
+    // The org's stage and record type names, which the calibration's text writes with no marks (DECISIONS.md 764).
+    orgNames: [...calibration.stages.map((s) => s.name), ...(calibration.scope.recordTypes === "all" ? [] : calibration.scope.recordTypes)],
     extraText: [
       { source: CALIBRATION, text: calibrationText(run, calibration, factsLines(input, effective.findings)) },
-      ...(intake ? [{ source: INTAKE, text: intakeText(intake) }] : []),
+      // The customer's words and names, never ours: the digest's check reads no figure from them (DECISIONS.md 764).
+      ...(intake ? [{ source: INTAKE, text: intakeText(intake), org: true as const }] : []),
       // The cover's customer name, which can be a reference such as "ACME-02", and
       // the consultant's, which can read as a number ("Ten Eyck"). No section's scope includes it.
-      { source: COVER, text: [intake?.customerName, run.customerRef, input.preparedBy].filter(Boolean).join("\n") },
+      { source: COVER, text: [intake?.customerName, run.customerRef, input.preparedBy].filter(Boolean).join("\n"), org: true as const },
       ...(overrides.length ? [{ source: OVERRIDES, text: overrideText(overrides) }] : []),
       // Each interview's words are what someone said, and can only be quoted as that (DECISIONS.md 183).
       ...(interviews ? interviewDatasetText(input.interviews ?? [], interviews) : []),

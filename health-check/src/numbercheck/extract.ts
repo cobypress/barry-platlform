@@ -377,3 +377,30 @@ export function extractFigures(text: string, options: ExtractOptions = {}): { no
   linkPairs(figures, s.source);
   return { normalised: s.source, figures };
 }
+
+// Words that make up a number written in words: what scanWords and scanFractions read.
+const NUMBER_PART = new Set([...Object.keys(UNITS), ...Object.keys(TENS), ...Object.keys(LARGE), ...Object.keys(ORDINAL), ...Object.keys(DENOMINATOR), ...Object.keys(MULTIPLE), "dozen", "couple", "pair", "half"]);
+
+/**
+ * Which figures lie in the org's words (DECISIONS.md 764): every digit inside
+ * one of the spans or, for a figure in words, every letter of every number word
+ * ("Tier Three" holds the three of "Tier Three hundred and twelve", not the
+ * 312). Such a figure is part of a name the org chose ("Stage 9 of 12", "Tier
+ * Three"), never a figure of ours. A unit the org's words give one of ours, such
+ * as its currency's code, leaves it ours, and so does one of ours after theirs.
+ * Spans index the text as given; figures, as normalised.
+ */
+export function inOrgWords(text: string, figures: readonly Figure[], spans: ReadonlyArray<{ start: number; end: number }>): boolean[] {
+  if (spans.length === 0) return figures.map(() => false);
+  const at = spans.map((s) => ({ start: normalise(text.slice(0, s.start)).length, end: normalise(text.slice(0, s.end)).length }));
+  const inside = (i: number): boolean => at.some((s) => i >= s.start && i < s.end);
+  return figures.map((f) => {
+    const digits = [...f.raw].flatMap((c, k) => (/\d/.test(c) ? [f.start + k] : []));
+    if (digits.length > 0) return digits.every(inside);
+    // Every letter of each number word; with none found, every letter of the figure.
+    const words = [...f.raw.matchAll(/[A-Za-z]+/g)];
+    const parts = words.filter((w) => NUMBER_PART.has(w[0].toLowerCase()));
+    const letters = (parts.length > 0 ? parts : words).flatMap((w) => [...w[0]].map((_c, k) => f.start + w.index + k));
+    return letters.length > 0 && letters.every(inside);
+  });
+}
