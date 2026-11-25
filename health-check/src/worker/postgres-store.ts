@@ -607,6 +607,7 @@ export class PostgresWorkerStore implements WorkerStore {
   #saidNoSummariesTable = false;
   #saidNoOrgStagesTable = false;
   #saidNoAnswersTable = false;
+  #saidUnknownAnswer = false;
 
   constructor(pool: SqlPool, options: { log?: (line: string) => void } = {}) {
     this.#pool = pool;
@@ -1211,7 +1212,14 @@ export class PostgresWorkerStore implements WorkerStore {
   async customerCurrency(orgId15: string): Promise<string | null> {
     try {
       const value = one(await this.#pool.query(CUSTOMER_CURRENCY_SQL, [orgId15.slice(0, 15)]))?.value;
-      return isCurrencyCode(value) ? value : null;
+      if (value === undefined || value === null) return null;
+      if (isCurrencyCode(value)) return value;
+      // A stored code off the engine's list (a console on a newer list): ignored, never the run's currency, and said once.
+      if (!this.#saidUnknownAnswer) {
+        this.#saidUnknownAnswer = true;
+        this.#log("A customer's stored currency isn't on the engine's list of currencies, so it was ignored and the amounts are shown with none. Check the list in src/schemas/calibration.ts against the console's copy.");
+      }
+      return null;
     } catch (err) {
       const code = (err as { code?: unknown }).code;
       if (code !== "42P01") throw new StoreError(`the console's database refused the customer's answer (SQLSTATE ${sqlState(code)})`);

@@ -346,7 +346,7 @@ function progressText(p: Progress, currency: string): string {
   const list = (title: string, items: Progress["fixed"], why = "") => (items.length ? `${title} (${items.length})${why}:\n${items.map((c) => c.title).join("\n")}` : null);
   return lines(
     p.score.before !== null && p.score.after !== null ? `Your Barometer score has gone from ${p.score.before} to ${p.score.after} since your first health check.` : null,
-    `What the open issues are worth has gone from ${m(p.worth.before)} to ${m(p.worth.after)}. Some of that change can come from the business itself, not only from fixes.`,
+    p.worth ? `What the open issues are worth has gone from ${m(p.worth.before)} to ${m(p.worth.after)}. Some of that change can come from the business itself, not only from fixes.` : null,
     list("Fixed since then", p.fixed),
     list("Still open", p.remaining),
     list("New since then", p.added),

@@ -7,7 +7,8 @@ import { CURRENCY_NOT_NAMED, currencyStanding, NO_CURRENCY } from "../../engine/
 import { fullReportHtml } from "../../render/full-report.ts";
 import { buildReport } from "../../narrative/sections.ts";
 import { loadRun } from "../../render/render-run.ts";
-import { Calibration, CURRENCY_CODES, isCurrencyCode } from "../../schemas/calibration.ts";
+import { Calibration, CURRENCY_CODES, currencyShaped, isCurrencyCode } from "../../schemas/calibration.ts";
+import { COUNTRY_CURRENCY } from "../../connect/locale-currency.ts";
 import { AutomaticReplay, stagesOf } from "../../testing/automatic.ts";
 import { runFromRecording } from "../../testing/harness.ts";
 import { HOURS_IN_POUNDS, valueCurrency } from "../../value/model.ts";
@@ -73,19 +74,22 @@ describe("the customer's currency at calibration", () => {
     }
   });
 
-  test("the schema: a customer's currency is a real code, on a calibration read from the org's settings only", () => {
+  test("the schema checks a customer's currency's shape only, on a calibration read from the org's settings: a stored code off the list still parses, so it never breaks a run", () => {
     const base = built({ kind: "single", suggested: null }, "EUR");
     assert.ok(Calibration.safeParse(base).success);
     assert.ok(!Calibration.safeParse({ ...base, source: "confirmed" }).success, "never a person's calibration");
     assert.ok(!Calibration.safeParse({ ...base, currency: "XXX" }).success, "never no currency");
-    assert.ok(!Calibration.safeParse({ ...base, currency: "ZZZ" }).success, "never a code Intl doesn't know");
+    assert.ok(!Calibration.safeParse({ ...base, currency: "XTS" }).success, "never the testing code");
+    assert.ok(Calibration.safeParse({ ...base, currency: "QQQ" }).success, "a code off the list parses: the list is checked where answers come in and are read");
+    assert.ok(currencyShaped("QQQ") && !currencyShaped("eur") && !currencyShaped("XXX"));
   });
 
-  test("the codes come from the runtime's Intl, without no currency or the testing code", () => {
-    assert.ok(CURRENCY_CODES.size > 100);
-    for (const c of ["GBP", "EUR", "USD", "JPY", "INR"]) assert.ok(isCurrencyCode(c), c);
-    for (const c of ["XXX", "XTS", "gbp"]) assert.ok(!isCurrencyCode(c), c);
-    for (const c of CURRENCY_CODES) assert.doesNotThrow(() => new Intl.NumberFormat("en-GB", { style: "currency", currency: c }).format(1), c);
+  test("the list: fixed, real and current, every code formatting with Intl.NumberFormat; withdrawn codes and units of account out", () => {
+    assert.equal(CURRENCY_CODES.size, 153);
+    for (const c of ["GBP", "EUR", "USD", "JPY", "INR", "KHR", "LBP", "PAB", "SLE", "XCG", "ZWG", "VES", "CUP"]) assert.ok(isCurrencyCode(c), c);
+    for (const c of ["XXX", "XTS", "gbp", "ANG", "BGN", "CUC", "HRK", "SLL", "SVC", "ZWL", "XDR", "XSU", "XAU", "QQQ"]) assert.ok(!isCurrencyCode(c), c);
+    for (const c of Object.values(COUNTRY_CURRENCY)) assert.ok(isCurrencyCode(c), `${c} from the country map`);
+    for (const c of CURRENCY_CODES) assert.match(new Intl.NumberFormat("en-GB", { style: "currency", currency: c }).format(1234.5), /1,234\.50|1,234\.5|1,235/, c);
   });
 
   test("the value model treats it as a currency read from the org: hours stay hours beside a currency that isn't pounds, and no line", () => {
@@ -106,6 +110,8 @@ describe("the stores", () => {
     assert.equal(back.currencyFrom, "customer");
     assert.equal(back.currency, "EUR");
     assert.equal(back.currencySuggested, undefined);
+    // A stored code off the list still reads back, so no run or monthly scan fails on it.
+    assert.doesNotThrow(() => calibrationFromRow({ ...row, currency: "QQQ", source: "org_settings", fields: row.fields }));
   });
 
   test("memory: by the org's 15 characters, a code only, none without the table", async () => {
@@ -143,6 +149,13 @@ describe("the stores", () => {
     assert.equal(await new PostgresWorkerStore(pool).customerCurrency(ORG), "EUR");
     assert.deepEqual(pool.seen, [{ text: CUSTOMER_CURRENCY_SQL, values: [ORG.slice(0, 15)] }]);
     assert.equal(await new PostgresWorkerStore(new Pool(() => ({ rows: [{ value: "XXX" }], rowCount: 1 }))).customerCurrency(ORG), null);
+    // A stored code off the engine's list (a console on a newer list): ignored, and said once.
+    const lines: string[] = [];
+    const unknown = new PostgresWorkerStore(new Pool(() => ({ rows: [{ value: "QQQ" }], rowCount: 1 })), { log: (l) => lines.push(l) });
+    assert.equal(await unknown.customerCurrency(ORG), null);
+    assert.equal(await unknown.customerCurrency(ORG), null);
+    assert.equal(lines.length, 1);
+    assert.match(lines[0]!, /isn't on the engine's list/);
     assert.equal(await new PostgresWorkerStore(new Pool(() => ({ rows: [], rowCount: 0 }))).customerCurrency(ORG), null);
   });
 
@@ -189,5 +202,20 @@ describe("a run made with the customer's currency (synthetic org)", async () => 
     const html = fullReportHtml(buildReport(answered.input), answered.pseudonyms);
     assert.ok(!html.includes("which you haven't told us yet"));
     assert.ok(!html.includes(CURRENCY_NOT_NAMED.replace("'", "&#39;")) && !html.includes(CURRENCY_NOT_NAMED));
+  });
+});
+
+describe("since last time, when the currency changed (KAN-41)", async () => {
+  const { compareWithBaseline, worthFigures } = await import("../../progress/compare.ts");
+  const side = (runId: string, currency: string, expected: number) =>
+    ({ runId, asOf: "2026-11-01T00:00:00.000Z", findings: [], scores: [], overall: { status: "not_measurable", reason: "x" }, value: { currency, total: { low: expected, expected, high: expected } }, limitsReadAt: null }) as never;
+
+  test("plain numbers then, a named currency now: no change in money is said; the same currency both times: as before", () => {
+    const changed = compareWithBaseline(side("a", NO_CURRENCY, 1000), side("b", "GBP", 4000));
+    assert.equal(changed.worth, undefined);
+    assert.deepEqual(worthFigures(changed), []);
+    const same = compareWithBaseline(side("a", "EUR", 1000), side("b", "EUR", 800));
+    assert.deepEqual(same.worth, { before: 1000, after: 800 });
+    assert.deepEqual(worthFigures(same), [1000, 800, 200]);
   });
 });

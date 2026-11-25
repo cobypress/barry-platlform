@@ -19,12 +19,32 @@ export const UserKind = z.enum(["sales_rep", "manager", "admin", "shared", "syst
 export type UserKind = z.infer<typeof UserKind>;
 
 /**
- * The codes a currency can be named by: ISO 4217's, as the runtime's own
- * Intl knows them (the list Intl.NumberFormat formats), with "no currency"
- * and the testing code left out. Never a list we keep by hand.
+ * The currencies a customer may name (KAN-41): real, current ISO 4217 codes,
+ * fixed here so the console and the worker agree whatever Node each runs.
+ * Source: the hand-checked country map in src/connect/locale-currency.ts
+ * (135 codes), plus the real currencies it leaves out on purpose or has no
+ * country for: BTN CUP FKP HTG KHR LBP LRD LSL NAD PAB SHP SLE SOS SSP SZL
+ * VES XCG ZWG. Left out: withdrawn or replaced codes (ANG, BGN, CUC, HRK,
+ * SLL, SVC, ZWL), units of account (XDR, XSU), metals, funds, "no currency"
+ * (XXX) and the testing code (XTS). Made 25 November 2026, with no network:
+ * a code added later goes here, in the engine, and is copied to the console.
  */
-export const CURRENCY_CODES: ReadonlySet<string> = new Set(Intl.supportedValuesOf("currency").filter((c) => /^[A-Z]{3}$/.test(c) && c !== "XXX" && c !== "XTS"));
+export const CURRENCY_CODES: ReadonlySet<string> = new Set([
+  "AED", "AFN", "ALL", "AMD", "AOA", "ARS", "AUD", "AWG", "AZN", "BAM", "BBD", "BDT", "BHD", "BIF", "BMD", "BND",
+  "BOB", "BRL", "BSD", "BTN", "BWP", "BYN", "BZD", "CAD", "CDF", "CHF", "CLP", "CNY", "COP", "CRC", "CUP", "CVE",
+  "CZK", "DJF", "DKK", "DOP", "DZD", "EGP", "ERN", "ETB", "EUR", "FJD", "FKP", "GBP", "GEL", "GHS", "GIP", "GMD",
+  "GNF", "GTQ", "GYD", "HKD", "HNL", "HTG", "HUF", "IDR", "ILS", "INR", "IQD", "IRR", "ISK", "JMD", "JOD", "JPY",
+  "KES", "KGS", "KHR", "KMF", "KPW", "KRW", "KWD", "KYD", "KZT", "LAK", "LBP", "LKR", "LRD", "LSL", "LYD", "MAD",
+  "MDL", "MGA", "MKD", "MMK", "MNT", "MOP", "MRU", "MUR", "MVR", "MWK", "MXN", "MYR", "MZN", "NAD", "NGN", "NIO",
+  "NOK", "NPR", "NZD", "OMR", "PAB", "PEN", "PGK", "PHP", "PKR", "PLN", "PYG", "QAR", "RON", "RSD", "RUB", "RWF",
+  "SAR", "SBD", "SCR", "SDG", "SEK", "SGD", "SHP", "SLE", "SOS", "SRD", "SSP", "STN", "SYP", "SZL", "THB", "TJS",
+  "TMT", "TND", "TOP", "TRY", "TTD", "TWD", "TZS", "UAH", "UGX", "USD", "UYU", "UZS", "VES", "VND", "VUV", "WST",
+  "XAF", "XCD", "XCG", "XOF", "XPF", "YER", "ZAR", "ZMW", "ZWG",
+]);
+/** One of the list above: where an answer comes in, and where one is read. */
 export const isCurrencyCode = (code: unknown): code is string => typeof code === "string" && CURRENCY_CODES.has(code);
+/** The shape a stored code must have: three capitals, never "no currency" or the testing code. A code off the list still parses, so a stored answer never breaks a run. */
+export const currencyShaped = (code: unknown): code is string => typeof code === "string" && /^[A-Z]{3}$/.test(code) && code !== "XXX" && code !== "XTS";
 
 export const Calibration = z
   .object({
@@ -91,9 +111,10 @@ export const Calibration = z
     if ((c.currency === "XXX" || c.currency === "XTS") && c.source !== "org_settings") {
       ctx.addIssue({ code: "custom", path: ["currency"], message: "A person's calibration names its currency" });
     }
-    // A currency the customer named (KAN-41) is a real code, on a calibration read from the org's settings only.
-    if (c.currencyFrom === "customer" && (c.source !== "org_settings" || !isCurrencyCode(c.currency))) {
-      ctx.addIssue({ code: "custom", path: ["currencyFrom"], message: "A currency the customer named is a real code, on a calibration read from the org's settings" });
+    // A currency the customer named (KAN-41) is a code's shape, on a calibration read from the org's settings only. Its
+    // place on the list is checked where an answer comes in and where one is read, never here: a stored row must parse.
+    if (c.currencyFrom === "customer" && (c.source !== "org_settings" || !currencyShaped(c.currency))) {
+      ctx.addIssue({ code: "custom", path: ["currencyFrom"], message: "A currency the customer named is a currency code, on a calibration read from the org's settings" });
     }
     const seen = new Set<string>();
     for (const stage of c.stages) {
