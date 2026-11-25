@@ -69,6 +69,11 @@ export type ReportInput = {
    * run's limits step finishes in a later sitting than the reading it uses. Absent: the step's finish.
    */
   limitsReadAt?: string | null;
+  /**
+   * By rule, the version of the issue each of this run's passes stood apart from, from its folder's
+   * RULE_CHANGES_FILE (DECISIONS.md 732): read when the run is a later one's baseline. Absent: none known.
+   */
+  carried?: Readonly<Record<string, number>> | null;
   now?: Date;
 };
 
@@ -934,8 +939,8 @@ export function buildReport(all: ReportInput): BuiltReport {
     const first = buildReport({ ...input.baseline, baseline: null });
     baselineRefused = first.refused.length;
     progress = compareWithBaseline(
-      { runId: first.input.run.id, asOf: first.input.run.asOf, findings: first.teamFindings, scores: first.input.scores ?? [], overall: first.overall, value: first.value, limitsReadAt: limitsReadAt(first.input.run, first.input.limitsReadAt) },
-      { runId: run.id, asOf: run.asOf, findings: team, scores, overall, value, limitsReadAt: limitsReadAt(run, input.limitsReadAt) },
+      { runId: first.input.run.id, asOf: first.input.run.asOf, findings: first.teamFindings, scores: first.input.scores ?? [], overall: first.overall, value: first.value, limitsReadAt: limitsReadAt(first.input.run, first.input.limitsReadAt), ...(input.baseline.carried ? { carried: input.baseline.carried } : {}) },
+      { runId: run.id, asOf: run.asOf, findings: team, scores, overall, value, limitsReadAt: limitsReadAt(run, input.limitsReadAt), ownCalls: run.budget.callsMade },
     );
   }
   // Every compared figure comes from deals, which a set-up review never reads.

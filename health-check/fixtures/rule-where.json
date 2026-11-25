@@ -251,6 +251,9 @@
         1,
         2
       ]
+    },
+    "loosenedOn": {
+      "3": "2026-11-25"
     }
   },
   "int.failed-async-jobs": {

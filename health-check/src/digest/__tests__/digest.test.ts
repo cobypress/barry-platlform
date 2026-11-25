@@ -86,9 +86,10 @@ function resolve(d: RunDigest, r: BuiltReport, path: Array<string | number>): nu
   // An issue's hours (DECISIONS.md 628, 636): the built finding's own.
   // A loosened rule's version, and a pass's verdict on the old line (DECISIONS.md 732): the finding's own version, and issueUnder's.
   if (top === "findings" && field === "ruleVersion") return r.teamFindings.find((x) => x.id === d.findings[i as number]!.id)?.ruleVersion;
+  if (top === "findings" && field === "carriedFrom") return r.progress?.carried?.[d.findings[i as number]!.ruleId];
   if (top === "findings" && field === "issueUnder") {
     const own = r.teamFindings.find((x) => x.id === d.findings[i as number]!.id);
-    return own ? issueUnder(own)?.[sub as number] : undefined;
+    return own ? issueUnder(own, r.input.run.budget.callsMade)?.[sub as number] : undefined;
   }
   if (top === "findings" && field === "effortHours" && (sub === "low" || sub === "high")) return r.teamFindings.find((x) => x.id === d.findings[i as number]!.id)?.effortHours?.[sub];
   // The plan's hours, built independently of the builder's walk: every issue in the digest with hours that the plan names anywhere.

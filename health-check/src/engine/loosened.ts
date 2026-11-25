@@ -22,10 +22,20 @@
 export type Loosening = {
   /** The version that loosened the rule. */
   version: number;
+  /**
+   * The day the loosening version was first committed (YYYY-MM-DD). No run that
+   * started before it can have been analysed under it, so the console can call a
+   * pass from such a run an ordinary one without its version.
+   */
+  on: string;
   /** The earlier versions whose issues may no longer be issues under it, ascending. */
   from: readonly number[];
-  /** Whether a pass's reading, by its facts, would have been an issue under the versions in `from`. */
-  raisedBefore?: (facts: Readonly<Record<string, number>>) => boolean;
+  /**
+   * Whether a pass's reading, by its facts, would have been an issue under the
+   * versions in `from`. `ownCalls` is the run's own API calls, where known: an
+   * earlier version may have read later in its run than this one does.
+   */
+  raisedBefore?: (facts: Readonly<Record<string, number>>, ownCalls: number | undefined) => boolean;
 };
 
 /** int.api-usage's line before version 3: a daily allowance was an issue from 80% used (DECISIONS.md 726). */
@@ -34,17 +44,36 @@ export const API_USAGE_LINE_BEFORE_3 = 80;
 export const LOOSENED: Readonly<Record<string, readonly Loosening[]>> = {
   // Version 3 raised the line from 80% to 95% (DECISIONS.md 726). Versions 1 and 2
   // read the same shares, used over max (726 only caps the printed share at 99.9 with
-  // some left, which doesn't move it across 80), so a pass's shares say what they'd have said.
+  // some left, which doesn't move it across 80). But version 3 reads the allowance
+  // before the run's own calls, and 1 and 2 read it after some of them, so API
+  // requests are judged with the run's own calls added (all of them, the most they
+  // could have been; unknown, the reading is taken as still raised). The run starts
+  // no background jobs, so their share is judged as read.
   "int.api-usage": [
     {
       version: 3,
+      on: "2026-11-25",
       from: [1, 2],
-      raisedBefore: (facts) => Object.entries(facts).some(([key, share]) => key.endsWith("Share") && share >= API_USAGE_LINE_BEFORE_3),
+      raisedBefore: (facts, ownCalls) =>
+        Object.entries(facts).some(([key, share]) => {
+          if (!key.endsWith("Share")) return false;
+          if (share >= API_USAGE_LINE_BEFORE_3) return true;
+          if (key !== "DailyApiRequestsShare") return false;
+          const [used, max] = [facts.DailyApiRequestsUsed, facts.DailyApiRequestsMax];
+          if (ownCalls === undefined || used === undefined || max === undefined || !(max > 0)) return true;
+          return ((used + ownCalls) / max) * 100 >= API_USAGE_LINE_BEFORE_3;
+        }),
     },
   ],
 };
 
 const loosenings = (ruleId: string): readonly Loosening[] => (Object.hasOwn(LOOSENED, ruleId) ? LOOSENED[ruleId]! : []);
+
+/** By version, the day it was first committed, for rule-where.json; undefined for a rule that never loosened. */
+export function loosenedOn(ruleId: string): Record<string, string> | undefined {
+  const all = loosenings(ruleId);
+  return all.length ? Object.fromEntries([...all].sort((a, b) => a.version - b.version).map((l) => [String(l.version), l.on])) : undefined;
+}
 
 /** By version, the earlier versions it loosened the rule from, for rule-where.json; undefined for a rule that never loosened. */
 export function loosenedFrom(ruleId: string): Record<string, number[]> | undefined {
@@ -61,11 +90,11 @@ export const hasLoosened = (ruleId: string): boolean => loosenings(ruleId).lengt
  * (empty: it would have passed under every one). Undefined for anything else,
  * or when a loosening can't judge a reading.
  */
-export function issueUnder(f: { ruleId: string; ruleVersion: number; status: string; facts: Readonly<Record<string, number>> }): number[] | undefined {
+export function issueUnder(f: { ruleId: string; ruleVersion: number; status: string; facts: Readonly<Record<string, number>> }, ownCalls: number | undefined): number[] | undefined {
   if (f.status !== "passed") return undefined;
   const upTo = loosenings(f.ruleId).filter((l) => l.version <= f.ruleVersion);
   if (!upTo.length || upTo.some((l) => !l.raisedBefore)) return undefined;
-  return [...new Set(upTo.filter((l) => l.raisedBefore!(f.facts)).flatMap((l) => l.from))].sort((a, b) => a - b);
+  return [...new Set(upTo.filter((l) => l.raisedBefore!(f.facts, ownCalls)).flatMap((l) => l.from))].sort((a, b) => a - b);
 }
 
 /**
@@ -99,6 +128,7 @@ export function loosenedProblems(table: Readonly<Record<string, readonly Looseni
     if (!all.length) out.push(`${ruleId}: an empty list`);
     if (new Set(all.map((l) => l.version)).size !== all.length) out.push(`${ruleId}: a version loosened twice`);
     for (const l of all) {
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(l.on) || Number.isNaN(Date.parse(l.on))) out.push(`${ruleId} ${l.version}: "${l.on}" isn't a day`);
       if (!Number.isInteger(l.version) || l.version < 2 || l.version > current) out.push(`${ruleId}: version ${l.version} isn't one the rule has had after its first (it is at ${current})`);
       if (!l.from.length) out.push(`${ruleId} ${l.version}: loosened from nothing`);
       for (const [i, v] of l.from.entries()) {

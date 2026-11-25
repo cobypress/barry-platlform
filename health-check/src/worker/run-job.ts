@@ -8,7 +8,7 @@ import type { NarrativeClient } from "../narrative/client.ts";
 import { classifyError, NoApiAccessError, runStoppedWords, SalesforceError } from "../salesforce/client.ts";
 import { buildReport, surveyMetricsOf, type BuiltReport, type ReportInput } from "../narrative/sections.ts";
 import type { Pseudonymiser } from "../privacy/pseudonymiser.ts";
-import { BASELINE_OVERRIDES_FILE, BASELINE_READ_FILE, INTERVIEWS_FILE, keepSurveyMetrics, loadRun, OUTPUT_FILES, SURVEY_FILE, writeBaselineRead, writeRows } from "../render/render-run.ts";
+import { BASELINE_OVERRIDES_FILE, BASELINE_READ_FILE, INTERVIEWS_FILE, keepRuleChanges, keepSurveyMetrics, loadRun, OUTPUT_FILES, SURVEY_FILE, writeBaselineRead, writeRows } from "../render/render-run.ts";
 import { BASELINE_ROWS_UNREAD, baselineRefusedSummary } from "../render/render-released.ts";
 import { INTERVIEW_VERSION } from "../interviews/questions.ts";
 import { OAuthConnectionProvider, ReconnectionNeeded } from "../salesforce/oauth-provider.ts";
@@ -562,6 +562,7 @@ async function runLocked(runId: string, deps: WorkerDeps, attempt: Attempt, seen
       const checked = checkSections(report, pseudonyms);
       if (checked.fellBack || checked.failed) log(`Run ${runId}: ${checked.fellBack} section${checked.fellBack === 1 ? "" : "s"} fell back to the engine's own text, and ${checked.failed} didn't pass its check.`);
     }
+    keepRuleChanges(dir, report.progress?.carried);
     const outputs = Object.values(report.outputs);
     // The survey's metrics as this report made them, stored with the run's own,
     // so its sections cite only what the run holds (DECISIONS.md 645). Before the
@@ -859,6 +860,7 @@ async function finishPulse(runId: string, dir: string, deps: WorkerDeps, at: str
     const report = buildReport(input);
     // The baseline is read as its documents showed it, where that can still be carried (DECISIONS.md 522).
     if (report.baselineRefused) log(`Pulse ${runId}: ${baselineRefusedSummary(report.baselineRefused)}`);
+    keepRuleChanges(dir, report.progress?.carried);
     const result = buildPulseResult(report);
     await deps.store.savePulseResult(runId, result, at);
     log(`Pulse ${runId}'s result is ready${result.baselineRunId ? `, against ${result.baselineRunId}` : ", with no baseline we could read"}.`);

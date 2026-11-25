@@ -109,7 +109,7 @@ export function withheldNames(inventory: Inventory | null, pseudonyms: Pseudonym
 
 // Each part is put together from the report as it stands; guardDigest then takes every string in it through the guard.
 
-function digestFinding(f: Finding): DigestFinding {
+function digestFinding(f: Finding, change: RuleChangeContext): DigestFinding {
   const v = f.value;
   return {
     id: f.id,
@@ -132,7 +132,7 @@ function digestFinding(f: Finding): DigestFinding {
     ...(f.difficulty ? { difficulty: f.difficulty } : {}),
     ...fixPromptOf(f),
     ...checkerReadOf(f),
-    ...ruleChangeOf(f),
+    ...ruleChangeOf(f, change),
     ...(f.amountsUnnamed ? { amountsUnnamed: true as const } : {}),
     ...orgWordsOf(f),
   };
@@ -147,16 +147,21 @@ function checkerReadOf(f: Finding): { checkerRead?: DigestFinding["checkerRead"]
   return { checkerRead: { readClasses, readTriggers, alreadyListed } };
 }
 
+type RuleChangeContext = { ownCalls: number; carried: Readonly<Record<string, number>> };
+
 /**
- * For a rule we have loosened (DECISIONS.md 732): its version on every finding, and on
- * a pass the earlier versions its reading would still have been an issue under. The
- * console needs both to tell a fix from a pass that came only from our change, since a
- * later run has no link to the run that raised the issue. Absent on every other rule.
+ * Every finding's rule version (DECISIONS.md 732), so a rule loosened later can be
+ * told apart from its first run on. For a rule we have loosened, a pass also carries
+ * the earlier versions its reading would still have been an issue under, and where
+ * this run's comparison kept the rule apart, the version of the issue it stands apart
+ * from. The console needs these to tell a fix from a pass that came only from our
+ * change, since a later run may have no link to the run that raised the issue.
  */
-function ruleChangeOf(f: Finding): Pick<DigestFinding, "ruleVersion" | "issueUnder"> {
-  if (!hasLoosened(f.ruleId)) return {};
-  const under = issueUnder(f);
-  return { ruleVersion: f.ruleVersion, ...(under ? { issueUnder: under } : {}) };
+function ruleChangeOf(f: Finding, change: RuleChangeContext): Pick<DigestFinding, "ruleVersion" | "issueUnder" | "carriedFrom"> {
+  if (!hasLoosened(f.ruleId)) return { ruleVersion: f.ruleVersion };
+  const under = issueUnder(f, change.ownCalls);
+  const from = Object.hasOwn(change.carried, f.ruleId) && f.status !== "issue" ? change.carried[f.ruleId] : undefined;
+  return { ruleVersion: f.ruleVersion, ...(under ? { issueUnder: under } : {}), ...(from !== undefined ? { carriedFrom: from } : {}) };
 }
 
 /**
@@ -360,7 +365,7 @@ export function buildDigest({ report, pseudonyms, inventory, madeAt }: DigestFor
         ? { status: "measured", score: overall.score, grade: overall.grade, areaDomains: overall.areas.map((a) => a.domain), ...(scoreCaveatFor(report) ? { caveat: scoreCaveatFor(report)! } : {}) }
         : { status: "not_measurable", reason: overall.status === "not_measurable" ? overall.reason : "The overall score couldn't be kept." },
     areas: digestAreas(report),
-    findings: report.teamFindings.map(digestFinding),
+    findings: report.teamFindings.map((f) => digestFinding(f, { ownCalls: run.budget.callsMade, carried: report.progress?.carried ?? {} })),
     metrics: report.metrics.map(digestMetric),
     value: digestValue(report),
     plan: {

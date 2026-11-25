@@ -1,3 +1,4 @@
+import { RULE_CHANGES_FILE } from "../progress/compare.ts";
 import { existsSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import { FACTS_FILE } from "../extract/facts.ts";
 import { keptLimitsReadAt, LIMITS_AT_START_FILE } from "../extract/types.ts";
@@ -172,6 +173,10 @@ export function loadRun(dir: string, options: { baseline?: boolean; baselineRows
   const limitsAt = readOptional<unknown>(join(dir, LIMITS_AT_START_FILE));
   const keptAt = limitsAt === null ? null : keptLimitsReadAt(limitsAt, input.run.startedAt);
   if (keptAt) input.limitsReadAt = keptAt;
+  // What a comparison kept apart (DECISIONS.md 732), for the next run that takes this one as its baseline. A folder without one carries nothing.
+  const kept = readOptional<unknown>(join(dir, RULE_CHANGES_FILE));
+  const carried = z.object({ carried: z.record(z.string().min(1), z.number().int().positive()) }).safeParse(kept);
+  if (carried.success) input.carried = carried.data.carried;
   let baselineRowsUnread = false;
   let baselineGone = false;
   if (options.baseline !== false) {
@@ -341,4 +346,15 @@ export async function printDocuments(
   } finally {
     await browser.close();
   }
+}
+
+/**
+ * Keeps what this run's comparison set apart (DECISIONS.md 732) in its folder, for
+ * the next run that takes it as its baseline; takes away a file an earlier
+ * attempt left when there is nothing to keep now.
+ */
+export function keepRuleChanges(dir: string, carried: Readonly<Record<string, number>> | undefined): void {
+  const file = join(dir, RULE_CHANGES_FILE);
+  if (carried && Object.keys(carried).length) writeFileSync(file, `${JSON.stringify({ carried }, null, 2)}\n`, { mode: 0o600 });
+  else rmSync(file, { force: true });
 }

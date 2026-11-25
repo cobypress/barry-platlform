@@ -24,24 +24,34 @@ describe("the declarations (decision 732)", () => {
   });
 
   test("a declaration naming a version that doesn't exist, or an unknown rule, is refused", () => {
-    const at = (version: number, from: number[]) => ({ "int.api-usage": [{ version, from }] });
+    const at = (version: number, from: number[], on = "2026-11-25") => ({ "int.api-usage": [{ version, from, on }] });
     assert.match(loosenedProblems(at(4, [1, 2]), versions).join(), /version 4 isn't one the rule has had/);
     assert.match(loosenedProblems(at(3, [0, 2]), versions).join(), /from 0, which isn't an earlier version/);
     assert.match(loosenedProblems(at(3, [3]), versions).join(), /from 3, which isn't an earlier version/);
     assert.match(loosenedProblems(at(3, [2, 1]), versions).join(), /ascending/);
-    assert.match(loosenedProblems({ "no.such-rule": [{ version: 2, from: [1] }] }, versions).join(), /no rule has this id/);
+    assert.match(loosenedProblems({ "no.such-rule": [{ version: 2, from: [1], on: "2026-11-25" }] }, versions).join(), /no rule has this id/);
+    assert.match(loosenedProblems(at(3, [1, 2], "25 November"), versions).join(), /isn't a day/);
   });
 });
 
 describe("a pass after an issue (decision 732)", () => {
-  const pass = (share: number, ruleVersion = 3) => ({ ruleId: "int.api-usage", ruleVersion, status: "passed", facts: { DailyApiRequestsShare: share } });
+  const pass = (share: number, ruleVersion = 3) => ({ ruleId: "int.api-usage", ruleVersion, status: "passed", facts: { DailyApiRequestsShare: share, DailyApiRequestsUsed: share * 1000, DailyApiRequestsMax: 100_000 } });
 
   test("the pass's own reading against the old line: 88% would still have been raised under 1 and 2, 40% under neither", () => {
-    assert.deepEqual(issueUnder(pass(88)), [1, 2]);
-    assert.deepEqual(issueUnder(pass(40)), []);
-    assert.equal(issueUnder(pass(88, 2)), undefined, "a version 2 pass: no loosening at or below it");
-    assert.equal(issueUnder({ ...pass(88), status: "issue" }), undefined);
-    assert.equal(issueUnder({ ruleId: "tech.storage-use", ruleVersion: 3, status: "passed", facts: {} }), undefined);
+    assert.deepEqual(issueUnder(pass(88), 500), [1, 2]);
+    assert.deepEqual(issueUnder(pass(40), 500), []);
+    assert.equal(issueUnder(pass(88, 2), 500), undefined, "a version 2 pass: no loosening at or below it");
+    assert.equal(issueUnder({ ...pass(88), status: "issue" }, 500), undefined);
+    assert.equal(issueUnder({ ruleId: "tech.storage-use", ruleVersion: 3, status: "passed", facts: {} }, 500), undefined);
+  });
+
+  test("version 3 reads before the run's own calls and 1 and 2 after them: API requests within the run's calls of 80% would still have been raised", () => {
+    // 79.6% read first; the run made 500 calls of a 100,000 allowance, so version 2 could have read 80.1%.
+    assert.deepEqual(issueUnder(pass(79.6), 500), [1, 2]);
+    assert.deepEqual(issueUnder(pass(79.6), 300), [], "79.9%: below the old line however the calls fell");
+    assert.deepEqual(issueUnder(pass(79.6), undefined), [1, 2], "the run's calls unknown: taken as still raised");
+    // Background jobs: the run starts none, so their share is judged as read.
+    assert.deepEqual(issueUnder({ ruleId: "int.api-usage", ruleVersion: 3, status: "passed", facts: { DailyAsyncApexExecutionsShare: 79.9 } }, 100_000), []);
   });
 
   test("passed only because the rule changed: only across the loosening, and only where the old line would still raise it", () => {
@@ -56,8 +66,8 @@ describe("a pass after an issue (decision 732)", () => {
   });
 });
 
-describe("the digest carries the version and the verdict for a loosened rule only (decision 732)", () => {
-  test("int.api-usage's finding has its version, and nothing new on any other rule", async () => {
+describe("the digest carries every finding's version, and the verdict for a loosened rule only (decision 732)", () => {
+  test("every finding has its rule's version; only int.api-usage's pass has a verdict", async () => {
     const { dir } = await runFromRecording({ answers: loadAnswers() });
     const report = buildReport(loadRun(dir).input);
     const pseudonyms = new Pseudonymiser(JSON.parse(readFileSync(join(dir, "pseudonym-map.json"), "utf8")) as PseudonymEntry[]);
@@ -67,7 +77,7 @@ describe("the digest carries the version and the verdict for a loosened rule onl
         assert.equal(f.ruleVersion, 3);
         if (f.status === "passed") assert.ok(Array.isArray(f.issueUnder));
         else assert.equal(f.issueUnder, undefined);
-      } else assert.ok(!("ruleVersion" in f) && !("issueUnder" in f), f.ruleId);
+      } else assert.ok(f.ruleVersion === report.teamFindings.find((x) => x.id === f.id)!.ruleVersion && !("issueUnder" in f) && !("carriedFrom" in f), f.ruleId);
     }
     assert.ok(digest.findings.some((f) => f.ruleId === "int.api-usage"));
   });

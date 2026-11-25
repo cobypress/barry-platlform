@@ -13,7 +13,7 @@ import { progressPage } from "../../render/progress.ts";
 import { renderContext } from "../../render/html.ts";
 import { Pseudonymiser, type PseudonymEntry } from "../../privacy/pseudonymiser.ts";
 import { buildReport } from "../../narrative/sections.ts";
-import { loadRun } from "../../render/render-run.ts";
+import { keepRuleChanges, loadRun } from "../../render/render-run.ts";
 import { EARLIER_AS_OF, plantRecheck, stampLimitsReading } from "../../testing/recheck.ts";
 import { LIMITS_NO_PERMISSION } from "../../salesforce/refusal-words.ts";
 import type { Transport } from "../../salesforce/transport.ts";
@@ -256,12 +256,14 @@ describe("a re-check's storage comparison is dated by when the kept reading was 
 describe("a pass only the loosened rule allows isn't counted as fixed (decisions 726 and 732)", () => {
   const { input } = loadRun(dir);
   const report = buildReport(input);
-  const side = (findings: Finding[]): ProgressSide => ({ runId: "r", asOf: input.run.asOf, findings, scores: input.scores ?? [], overall: report.overall, value: report.value, limitsReadAt: null });
+  const side = (findings: Finding[]): ProgressSide => ({ runId: "r", asOf: input.run.asOf, findings, scores: input.scores ?? [], overall: report.overall, value: report.value, limitsReadAt: null, ownCalls: input.run.budget.callsMade });
   const usage = report.teamFindings.find((f) => f.ruleId === "int.api-usage")!;
-  const passing = (share: number, version = 3): Finding => ({ ...usage, status: "passed", ruleVersion: version, facts: { DailyApiRequestsShare: 1, DailyAsyncApexExecutionsShare: share } });
-  const earlier = (version: number, share: number): Finding => ({ ...usage, ruleVersion: version, facts: { DailyApiRequestsShare: 1, DailyAsyncApexExecutionsShare: share } });
+  const passing = (share: number, version = 3): Finding => ({ ...usage, status: "passed", ruleVersion: version, facts: { DailyApiRequestsShare: 1, DailyApiRequestsUsed: 1000, DailyApiRequestsMax: 100_000, DailyAsyncApexExecutionsShare: share } });
+  const raised = (share: number, version = 3): Finding => ({ ...usage, status: "issue", ruleVersion: version, facts: { DailyApiRequestsShare: 1, DailyApiRequestsUsed: 1000, DailyApiRequestsMax: 100_000, DailyAsyncApexExecutionsShare: share } });
+  const earlier = (version: number, share: number): Finding => ({ ...usage, ruleVersion: version, facts: { DailyApiRequestsShare: 1, DailyApiRequestsUsed: 1000, DailyApiRequestsMax: 100_000, DailyAsyncApexExecutionsShare: share } });
   const others = report.teamFindings.filter((f) => f.ruleId !== "int.api-usage");
   const progress = (then: Finding, now = passing(88)) => compareWithBaseline(side([...others, then]), side([...others, now]));
+  const after = (carried: Record<string, number>, then: Finding, now: Finding) => compareWithBaseline({ ...side([...others, then]), carried }, side([...others, now]));
   const where = (p: ReturnType<typeof progress>): string[] =>
     (["fixed", "remaining", "added", "unknown", "ruleChanged"] as const).filter((k) => (p[k] ?? []).some((c) => c.ruleId === "int.api-usage"));
 
@@ -294,8 +296,53 @@ describe("a pass only the loosened rule allows isn't counted as fixed (decisions
     const p = progress(earlier(2, 88));
     const built = { ...report, progress: p };
     const html = progressPage(renderContext(new Pseudonymiser(JSON.parse(readFileSync(join(dir, "pseudonym-map.json"), "utf8")) as PseudonymEntry[]), built.input.calibration.currency, false), built);
-    assert.match(html, /We changed how we check 1 more since then, and they pass now\. We can&#39;t say anything in your org changed, so they aren&#39;t counted as fixed\./);
+    assert.match(html, /<p class="note">We&#39;ve changed how we check one of the earlier issues, and it passes now\. We can&#39;t tell from this whether it was fixed, so we don&#39;t count it as fixed or as open\. The raw notes name it\.<\/p>/);
+    assert.deepEqual(p.carried, { "int.api-usage": 2 }, "kept for the next comparison");
     assert.ok(progressFigures(p).includes(1));
+  });
+});
+
+describe("an issue kept apart, run after run (decision 732)", () => {
+  const { input } = loadRun(dir);
+  const report = buildReport(input);
+  const side = (findings: Finding[]): ProgressSide => ({ runId: "r", asOf: input.run.asOf, findings, scores: input.scores ?? [], overall: report.overall, value: report.value, limitsReadAt: null, ownCalls: input.run.budget.callsMade });
+  const usage = report.teamFindings.find((f) => f.ruleId === "int.api-usage")!;
+  const others = report.teamFindings.filter((f) => f.ruleId !== "int.api-usage");
+  const as = (status: Finding["status"], share: number): Finding => ({ ...usage, status, ruleVersion: 3, facts: { DailyApiRequestsShare: 1, DailyApiRequestsUsed: 1000, DailyApiRequestsMax: 100_000, DailyAsyncApexExecutionsShare: share } });
+  const after = (then: Finding, now: Finding, carried: Record<string, number> = { "int.api-usage": 2 }) => compareWithBaseline({ ...side([...others, then]), carried }, side([...others, now]));
+  const where = (p: ReturnType<typeof after>): string[] =>
+    (["fixed", "remaining", "added", "unknown", "ruleChanged"] as const).filter((k) => (p[k] ?? []).some((c) => c.ruleId === "int.api-usage"));
+
+  test("still passing only by the change: still apart, and kept for the next", () => {
+    const p = after(as("passed", 88), as("passed", 90));
+    assert.deepEqual(where(p), ["ruleChanged"]);
+    assert.deepEqual(p.carried, { "int.api-usage": 2 });
+  });
+  test("a later pass the old line would pass too: fixed, counted, and nothing kept", () => {
+    const p = after(as("passed", 88), as("passed", 40));
+    assert.deepEqual(where(p), ["fixed"]);
+    assert.equal(p.carried, undefined);
+    assert.equal(buildPulseResult({ ...report, progress: p }).counts.fixed, p.fixed.length);
+  });
+  test("raised again: still open, never new", () => {
+    assert.deepEqual(where(after(as("passed", 88), as("issue", 96))), ["remaining"]);
+  });
+  test("not measured: nothing said, still kept apart", () => {
+    const p = after(as("passed", 88), as("not_measurable", 0));
+    assert.deepEqual(where(p), []);
+    assert.deepEqual(p.carried, { "int.api-usage": 2 });
+  });
+  test("a pass nothing was kept apart from: an ordinary pass, and an issue after it is new", () => {
+    assert.deepEqual(where(after(as("passed", 88), as("passed", 40), {})), []);
+    assert.deepEqual(where(after(as("passed", 88), as("issue", 96), {})), ["added"]);
+  });
+  test("kept in the run folder and read back as the next run's baseline", () => {
+    const folder = mkdtempSync(join(tmpdir(), "hc-rule-changes-"));
+    plantRecheck(dir, folder);
+    keepRuleChanges(folder, { "int.api-usage": 2 });
+    assert.deepEqual(loadRun(folder, { baseline: false }).input.carried, { "int.api-usage": 2 });
+    keepRuleChanges(folder, undefined);
+    assert.equal(loadRun(folder, { baseline: false }).input.carried, undefined, "nothing kept: the file goes");
   });
 });
 

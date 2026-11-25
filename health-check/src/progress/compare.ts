@@ -42,6 +42,13 @@ export type Progress = {
    * comparison stored before it reads as before.
    */
   ruleChanged?: RuleChange[];
+  /**
+   * By rule, the version of the issue each pass in ruleChanged stands apart from,
+   * and for a rule this run didn't check that the baseline carried, the baseline's:
+   * kept in the run folder, so the next comparison can go on from it (DECISIONS.md
+   * 732). Only when there are any.
+   */
+  carried?: Record<string, number>;
   areas: Array<{ domain: string; before: number | null; after: number | null }>;
   /** Storage then and now (DECISIONS.md 500). Null when this run has no storage finding, so nothing is said. */
   storage: StorageProgress | null;
@@ -54,7 +61,23 @@ export type StorageNotCompared = "not_read_then" | "unreadable_now" | "unreadabl
 export type StorageProgress = { compared: StorageChange[] } | { notCompared: StorageNotCompared };
 
 /** `limitsReadAt` is when the run's `api-limits` step finished: when its storage was read. */
-export type ProgressSide = { runId: string; asOf: string; findings: Finding[]; scores: Score[]; overall: OverallScore; value: ValueModel; limitsReadAt: string | null };
+export type ProgressSide = {
+  runId: string;
+  asOf: string;
+  findings: Finding[];
+  scores: Score[];
+  overall: OverallScore;
+  value: ValueModel;
+  limitsReadAt: string | null;
+  /** The run's own API calls, for judging a loosened rule's pass against its old line (DECISIONS.md 732). */
+  ownCalls?: number;
+  /**
+   * The baseline's only: by rule, the version of the issue each of its passes
+   * still stood apart from (RULE_CHANGES_FILE in its folder, DECISIONS.md 732):
+   * passing only because we loosened the rule since that issue.
+   */
+  carried?: Readonly<Record<string, number>>;
+};
 
 const byRule = (findings: Finding[]): Map<string, Finding[]> => {
   const map = new Map<string, Finding[]>();
@@ -93,6 +116,9 @@ function fixedAsRead(then: Finding[], now: Finding[]): boolean {
   return (pass.facts.alreadyListed ?? 0) === 0;
 }
 
+/** The run folder's file that keeps a comparison's `carried` for the next one (DECISIONS.md 732). */
+export const RULE_CHANGES_FILE = "rule-changes.json";
+
 /**
  * Whether a rule's pass now passed only because the rule changed since the
  * earlier issue (DECISIONS.md 732, replacing 726's case for int.api-usage):
@@ -100,11 +126,11 @@ function fixedAsRead(then: Finding[], now: Finding[]): boolean {
  * run's reading would still have been an issue under it. Not fixed, still open,
  * new or can't tell: listed apart once.
  */
-function passedOnlyByRuleChange(thenIssues: Finding[], nowFindings: Finding[]): boolean {
+function passedOnlyByRuleChange(issueVersions: number[], ruleId: string, nowFindings: Finding[], ownCalls: number | undefined): boolean {
   const pass = nowFindings.find((f) => f.status === "passed");
   if (!pass) return false;
-  const under = issueUnder(pass);
-  return thenIssues.every((f) => passedOnlyByChange(f.ruleId, f.ruleVersion, pass.ruleVersion, under));
+  const under = issueUnder(pass, ownCalls);
+  return issueVersions.length > 0 && issueVersions.every((v) => passedOnlyByChange(ruleId, v, pass.ruleVersion, under));
 }
 
 export function compareWithBaseline(baseline: ProgressSide, current: ProgressSide): Progress {
@@ -116,6 +142,22 @@ export function compareWithBaseline(baseline: ProgressSide, current: ProgressSid
   const unknown: RuleChange[] = [];
   const newlyMeasured: RuleChange[] = [];
   const ruleChanged: RuleChange[] = [];
+  const carried: Record<string, number> = {};
+  const carriedThen = baseline.carried ?? {};
+  // An issue standing apart in the baseline (DECISIONS.md 732): the baseline passed it only because we loosened the
+  // rule. Still apart while every pass is; fixed at a pass the old line would pass too; raised again, still open, not
+  // new; not checked, it stays apart.
+  for (const [ruleId, version] of Object.entries(carriedThen)) {
+    if ((before.get(ruleId) ?? []).some((f) => f.status === "issue")) continue;
+    const nowFindings = now.get(ruleId) ?? [];
+    const nowIssues = nowFindings.filter((f) => f.status === "issue");
+    if (nowIssues.length) remaining.push(change(ruleId, nowIssues));
+    else if (!nowFindings.some((f) => f.status === "passed")) carried[ruleId] = version;
+    else if (passedOnlyByRuleChange([version], ruleId, nowFindings, current.ownCalls)) {
+      ruleChanged.push(change(ruleId, nowFindings));
+      carried[ruleId] = version;
+    } else fixed.push(change(ruleId, nowFindings));
+  }
   for (const [ruleId, then] of before) {
     const thenIssues = then.filter((f) => f.status === "issue");
     if (thenIssues.length === 0) continue;
@@ -124,8 +166,9 @@ export function compareWithBaseline(baseline: ProgressSide, current: ProgressSid
     // without it, says nothing of them, never "can't tell" (DECISIONS.md 673).
     if (MEASURED_LATER.has(ruleId) && nowFindings.length === 0) continue;
     const nowIssues = nowFindings.filter((f) => f.status === "issue");
-    if (!nowIssues.length && passedOnlyByRuleChange(thenIssues, nowFindings)) {
+    if (!nowIssues.length && passedOnlyByRuleChange(thenIssues.map((f) => f.ruleVersion), ruleId, nowFindings, current.ownCalls)) {
       ruleChanged.push(change(ruleId, thenIssues));
+      carried[ruleId] = Math.min(...thenIssues.map((f) => f.ruleVersion));
       continue;
     }
     if (nowIssues.length) remaining.push(change(ruleId, nowIssues));
@@ -136,7 +179,7 @@ export function compareWithBaseline(baseline: ProgressSide, current: ProgressSid
     const nowIssues = nowFindings.filter((f) => f.status === "issue");
     if (!nowIssues.length) continue;
     const then = before.get(ruleId) ?? [];
-    if (then.some((f) => f.status === "issue")) continue;
+    if (then.some((f) => f.status === "issue") || Object.hasOwn(carriedThen, ruleId)) continue;
     // New only if the earlier run checked the rule, as the portal's alerts decide (DECISIONS.md 661, 673).
     if (MEASURED_LATER.has(ruleId) && !then.some((f) => f.status === "passed")) newlyMeasured.push(change(ruleId, nowIssues));
     else added.push(change(ruleId, nowIssues));
@@ -158,6 +201,7 @@ export function compareWithBaseline(baseline: ProgressSide, current: ProgressSid
     // Only when there are some, so a comparison without them is as it was.
     ...(newlyMeasured.length ? { newlyMeasured } : {}),
     ...(ruleChanged.length ? { ruleChanged } : {}),
+    ...(Object.keys(carried).length ? { carried } : {}),
     areas: domains.map((domain) => ({ domain, before: scoreOf(baseline.scores, domain), after: scoreOf(current.scores, domain) })).filter((a) => a.before !== null || a.after !== null),
     storage: compareStorage(baseline, current),
   };
