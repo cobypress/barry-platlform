@@ -4,12 +4,13 @@ import type { ScanResult } from "../scan/result.ts";
 import type { PulseResult } from "../pulse/result.ts";
 import { DIGEST_KEYS, type RunDigest } from "../schemas/digest.ts";
 import { isCurrencyCode } from "../schemas/calibration.ts";
+import { ORG_SETTINGS_CALIBRATOR } from "../connect/auto-calibration.ts";
 import { unstorableAt } from "./inventory.ts";
 import { Run, type BenchmarkRow, type Calibration, type ConnectLink, type Metric, type Release, type ReportSection } from "../schemas/index.ts";
 import { assertChecks, CONSOLE_CHECKS } from "./console-checks.ts";
 import { readLosses, type RunLosses } from "./release.ts";
 import { storedFromRow, waitingRow, type ConsoleSummariesRow, type SummariesToSave } from "../handbook/summary-row.ts";
-import { DISCONNECT_STEP, ORG_AWAITING_CONNECT, RunClosedError, SCAN_REVOKE_NOT_CONFIRMED, type ConnectJobInput, type DocumentsJobInput, type DocumentsJobReads, type DriveShare, type ShareJobInput, type DocumentsMade, type LinkConnected, type LinkState, type PulseRun, type ReleasedRun, type RunJobInput, type RunOutputRecord, type RunProgress, type WorkerStore, type RunDelivery, type AutomaticOutcome, type AutomaticRunState, RUN_FAILED_FLAG, STOPPED_BUDGET_FLAG, DOCUMENTS_HELD_FLAG, type PortalDocumentRow } from "./types.ts";
+import { DISCONNECT_STEP, ORG_AWAITING_CONNECT, RunClosedError, SCAN_REVOKE_NOT_CONFIRMED, type ConnectJobInput, type DocumentsJobInput, type DocumentsJobReads, type DriveShare, type ShareJobInput, type DocumentsMade, type LinkConnected, type LinkState, type PulseRun, type ReleasedRun, type RunJobInput, type RunOutputRecord, type RunProgress, type WorkerStore, type CurrencyWas, type RunDelivery, type AutomaticOutcome, type AutomaticRunState, RUN_FAILED_FLAG, STOPPED_BUDGET_FLAG, DOCUMENTS_HELD_FLAG, type PortalDocumentRow } from "./types.ts";
 
 // The WorkerStore for tests: the console's tables as plain maps, with the same
 // rules a database store must keep. Writes replace; a run in review or
@@ -343,6 +344,21 @@ export class MemoryWorkerStore implements WorkerStore {
     // No detail: the stage names are the org's own.
     this.writes.push({ method: "saveCalibration", id: runId });
     return "saved";
+  }
+
+  /** Set: nameCalibrationCurrency throws, as a database that refuses the write would. */
+  failCurrencyName = false;
+
+  /** As the Postgres store's one guarded statement (DECISIONS.md 745): the currency and its standing only. */
+  async nameCalibrationCurrency(runId: string, was: CurrencyWas, code: string): Promise<"updated" | "unchanged"> {
+    if (!isCurrencyCode(code)) throw new StoreError("the currency to save isn't a code on the engine's list");
+    if (this.failCurrencyName) throw new StoreError("the console's database refused the calibration's currency (SQLSTATE 57014)");
+    const c = this.runs.get(runId)?.calibration;
+    if (!c || c.source !== "org_settings" || c.confirmedBy !== ORG_SETTINGS_CALIBRATOR || c.currency !== was.currency || c.currencyFrom !== was.currencyFrom) return "unchanged";
+    const { currencySuggested: _suggested, ...rest } = c;
+    this.runs.get(runId)!.calibration = { ...rest, currency: code, currencyFrom: "connect_api" };
+    this.writes.push({ method: "nameCalibrationCurrency", id: runId, detail: code });
+    return "updated";
   }
 
   /** The currencies customers named in the portal (KAN-41), by the org's 15-character id. */

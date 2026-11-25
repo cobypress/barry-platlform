@@ -382,7 +382,7 @@ export const HOLD_CAUSE_WORDS: Record<HoldCause, string> = { stages_unread: "no 
  * Salesforce's stands. A store that can't answer costs the answer, never the
  * calibration.
  */
-async function answeredCurrency(currency: OrgCurrency | null, orgId: string, deps: WorkerDeps, log: (line: string) => void): Promise<string | null> {
+export async function answeredCurrency(currency: OrgCurrency | null, orgId: string, deps: WorkerDeps, log: (line: string) => void): Promise<string | null> {
   if (currency?.kind !== "single" && currency?.kind !== "settings") return null;
   try {
     return await deps.store.customerCurrency(orgId.slice(0, 15));
@@ -394,7 +394,7 @@ async function answeredCurrency(currency: OrgCurrency | null, orgId: string, dep
 }
 
 /** What the calibration's currency is, for the log: a code only, never a locale or any other value the org chose. */
-function logCurrency(runId: string, calibration: Calibration, answered: string | null, log: (line: string) => void): void {
+export function logCurrency(runId: string, calibration: Calibration, answered: string | null, log: (line: string) => void): void {
   const standing = currencyStanding(calibration);
   if (standing === "connect_api") {
     log(`Automatic run ${runId}'s org has one currency, which its settings name: ${calibration.currency}.`);

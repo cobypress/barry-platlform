@@ -90,6 +90,9 @@ export type RunJobInput = {
  * reference, who made it, benchmark consent, modules, org) is the console's,
  * and the worker never writes it.
  */
+/** A saved calibration's currency as a run read it, for nameCalibrationCurrency's guard (DECISIONS.md 745). */
+export type CurrencyWas = { currency: string; currencyFrom: "org" | "customer" };
+
 export type RunProgress = Pick<Run, "status" | "ruleSetVersion" | "calibrationHash" | "asOf" | "analysisWindow" | "apiVersion" | "budget" | "steps" | "isSandbox" | "finishedAt">;
 
 export function progressOf(run: Run): RunProgress {
@@ -441,6 +444,17 @@ export interface WorkerStore {
    * confirmation). Throws StoreError, naming no stage.
    */
   saveCalibration(runId: string, calibration: Calibration): Promise<"saved" | "exists" | "no_source_column">;
+  /**
+   * Names a saved automatic calibration's currency from the org's settings
+   * (DECISIONS.md 745): the "currency" column and the standing in "fields"
+   * (currencyFrom "connect_api", no suggestion) and nothing else, in one
+   * statement, only while the row is as the caller read it: from the org's
+   * settings, confirmed by no person, with the same currency and standing.
+   * "updated" when this wrote it; "unchanged" when the row no longer matched
+   * (another delivery named it, or a person confirmed one), so nothing was
+   * written. Throws StoreError by SQLSTATE alone.
+   */
+  nameCalibrationCurrency(runId: string, was: CurrencyWas, code: string): Promise<"updated" | "unchanged">;
   /**
    * The currency the org's customer named in the portal (KAN-41; the
    * console's HealthCheckCustomerAnswer, migration 20261219): the newest
