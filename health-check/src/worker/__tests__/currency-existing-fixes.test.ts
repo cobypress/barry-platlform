@@ -12,7 +12,9 @@ import { FAKE, FakeTokenEndpoint } from "../../testing/fake-oauth.ts";
 import { Simulator } from "../../testing/simulator.ts";
 import { CONNECTED_USER, ORG_ID } from "../../testing/synthetic-org.ts";
 import { MemoryWorkerStore } from "../memory-store.ts";
-import { CURRENCY_READ_FILE, unnamedBySalesforce } from "../name-currency.ts";
+import { CURRENCY_READ_FILE, nameCurrencyBeforeRun, unnamedBySalesforce } from "../name-currency.ts";
+import { OAuthConnectionProvider } from "../../salesforce/oauth-provider.ts";
+import { approvedFromConsole } from "../run-job.ts";
 import type { CurrencyWas, RunJobInput } from "../types.ts";
 import { createJobHandler } from "../worker.ts";
 import { baseDeps, consoleRun, FlakyTransport, oauthClient, RUN_ID, runInput, syntheticConnection } from "./helpers.ts";
@@ -227,5 +229,34 @@ describe("the real cause of a failed currency query, and the eligibility branche
     const { currency: _c, currencyFrom: _f, currencySuggested: _s, ...rest } = await automaticSyntheticCalibration();
     const off = Calibration.parse({ ...rest, currency: "QQQ", currencyFrom: "customer" });
     assert.equal(unnamedBySalesforce({ run: consoleRun({ reviewMode: "automatic" }), calibration: off }), null);
+  });
+});
+
+describe("745, second fix round", () => {
+  test("the last delivery after a write that may have committed and a reload that failed says the stored row may name the code", async () => {
+    const r = await sequence({ write: "committed then threw", failReload: true, crashAfter: null, firstFinal: true });
+    assert.equal(r.calibration.currency, "GBP", "the row was named");
+    assert.equal(r.folder!.currency, "XXX", "the run used the one it had");
+    assert.ok(r.lines.includes(`Automatic run ${RUN_ID}'s stored calibration may name GBP from the org's settings while this run used the one it had (amounts in plain numbers): a calibration page that disagrees with the run's results is this.`));
+  });
+
+  test("the wait for the naming step's token work is bounded: past it, one line and the run starts as before", async () => {
+    const fake = new FakeTokenEndpoint();
+    fake.orgId = ORG_ID;
+    const { verifier, challenge } = newPkce();
+    const code = fake.issueCode(authorisationUrl({ loginUrl: FAKE.loginUrl, client: oauthClient, state: newState(), codeChallenge: challenge }), CONNECTED_USER.id);
+    const tokens = await exchangeCode({ transport: fake, loginUrl: FAKE.loginUrl, client: oauthClient, code, codeVerifier: verifier });
+    const slow = new SlowRefresh(fake);
+    slow.delayMs = 1_500;
+    const deps = baseDeps({ dataTransport: new ExpiredFirst(single(), tokens.accessToken), oauthTransport: slow, automatic: ON, stagesTimeoutMs: 50 });
+    const stored = syntheticConnection({ instanceUrl: FAKE.instanceUrl, accessToken: tokens.accessToken, refreshToken: tokens.refreshToken });
+    await deps.tokens.save(stored);
+    const input = runInput({ run: consoleRun({ reviewMode: "automatic" }), calibration: await unnamed(), intake: null, answers: [] });
+    const provider = new OAuthConnectionProvider("synthetic-co", { store: deps.tokens, client: oauthClient, transport: slow, env: approvedFromConsole("synthetic-co") });
+    const started = Date.now();
+    const c = await nameCurrencyBeforeRun({ runId: RUN_ID, input, stored, provider, dir: join(deps.runsDir, RUN_ID), deps, log: (l) => deps.lines.push(l), settleMs: 200 });
+    assert.ok(Date.now() - started < 1_200, "it didn't wait for the refresh");
+    assert.deepEqual(c, await unnamed());
+    assert.ok(deps.lines.some((l) => /connection for the org's settings was still refreshing its token after 0 seconds, so the run starts without waiting for it/.test(l)), deps.lines.join("\n"));
   });
 });

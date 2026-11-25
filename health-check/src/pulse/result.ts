@@ -38,7 +38,16 @@ function cantTellByKind(unknown: RuleChange[]): { cantTellByKind?: Partial<Recor
   return Object.keys(out).length ? { cantTellByKind: out } : {};
 }
 
-export function buildPulseResult(report: BuiltReport): PulseResult {
+/**
+ * How a listed title is shown: as read, or as the checked digest serves it, or
+ * left out (null). Left out, the issue is still counted. An automatic
+ * customer's pulse passes one (src/pulse/served.ts, DECISIONS.md 746); every
+ * other pulse lists titles as read, as before.
+ */
+export type PulseTitle = (item: { title: string; findingId?: string; baselineFinding?: Finding }) => string | null;
+const asRead: PulseTitle = (item) => item.title;
+
+export function buildPulseResult(report: BuiltReport, titleOf: PulseTitle = asRead): PulseResult {
   const { run } = report.input;
   const team = report.teamFindings;
   const p = report.progress;
@@ -51,14 +60,20 @@ export function buildPulseResult(report: BuiltReport): PulseResult {
     .map((c) => issuesOf(team).filter((f) => f.ruleId === c.ruleId).sort(bySeverity)[0])
     .filter((f): f is Finding => f !== undefined && !TOKEN.test(f.title))
     .sort(bySeverity)
-    .slice(0, PULSE_LISTED)
-    .map((f) => ({ title: f.title, severity: f.severity, area: domainLabel(f.domain) }));
+    .flatMap((f) => {
+      const title = titleOf({ title: f.title, findingId: f.id });
+      return title === null ? [] : [{ title, severity: f.severity, area: domainLabel(f.domain) }];
+    })
+    .slice(0, PULSE_LISTED);
   // A fixed rule's area is where the baseline found it.
   const baseline = report.input.baseline?.findings ?? [];
   const fixed = (p?.fixed ?? [])
     .filter((c) => !TOKEN.test(c.title))
-    .slice(0, PULSE_LISTED)
-    .map((c) => ({ title: c.title, area: domainLabel(baseline.find((f) => f.ruleId === c.ruleId)?.domain ?? team.find((f) => f.ruleId === c.ruleId)?.domain ?? "") }));
+    .flatMap((c) => {
+      const title = titleOf({ title: c.title, baselineFinding: baseline.find((f) => c.findingIds.includes(f.id)) ?? baseline.find((f) => f.ruleId === c.ruleId && f.title === c.title) });
+      return title === null ? [] : [{ title, area: domainLabel(baseline.find((f) => f.ruleId === c.ruleId)?.domain ?? team.find((f) => f.ruleId === c.ruleId)?.domain ?? "") }];
+    })
+    .slice(0, PULSE_LISTED);
 
   return {
     version: 1,

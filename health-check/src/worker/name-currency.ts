@@ -112,14 +112,21 @@ export class CalibrationUnsettled extends Error {}
  * changed. On the last delivery an unreadable row costs nothing more than
  * before: the run goes on with the calibration it had, and nothing resumes it.
  */
-export async function nameCurrencyBeforeRun(o: { runId: string; input: RunJobInput; stored: StoredConnection; provider: ConnectionProvider; dir: string; deps: WorkerDeps; log: (line: string) => void; readThisStart?: boolean; final?: boolean }): Promise<Calibration> {
+export async function nameCurrencyBeforeRun(o: { runId: string; input: RunJobInput; stored: StoredConnection; provider: ConnectionProvider; dir: string; deps: WorkerDeps; log: (line: string) => void; readThisStart?: boolean; final?: boolean; settleMs?: number }): Promise<Calibration> {
   const provider = new SettlingProvider(o.provider);
   try {
     return await naming({ ...o, provider });
   } finally {
-    await provider.settled();
+    // Bounded: a refresh still running after this is left, and the run starts as it would have before 745.
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const late = await Promise.race([provider.settled().then(() => false), new Promise<boolean>((resolve) => (timer = setTimeout(() => resolve(true), o.settleMs ?? SETTLE_MS)))]);
+    clearTimeout(timer);
+    if (late) o.log(`Automatic run ${o.runId}'s connection for the org's settings was still refreshing its token after ${Math.round((o.settleMs ?? SETTLE_MS) / 1000)} seconds, so the run starts without waiting for it.`);
   }
 }
+
+/** The longest the run waits for the naming step's token work to finish (745, second fix round). */
+export const SETTLE_MS = 15_000;
 
 async function naming(o: { runId: string; input: RunJobInput; stored: StoredConnection; provider: ConnectionProvider; dir: string; deps: WorkerDeps; log: (line: string) => void; readThisStart?: boolean; final?: boolean }): Promise<Calibration> {
   const { runId, input, stored, deps, log } = o;
@@ -184,7 +191,7 @@ async function naming(o: { runId: string; input: RunJobInput; stored: StoredConn
     // The write may have been committed before the error reached us (a connection dropped after COMMIT): the row decides.
     const reason = err instanceof StoreError ? err.message : "an unexpected error";
     log(`Automatic run ${runId}'s currency from the org's settings (${currency.code}) may not have been saved (${reason}), so the run goes on with the calibration as stored.`);
-    return asStored(o, c);
+    return asStored(o, c, currency.code);
   }
   if (saved === "unchanged") {
     // Another delivery named it, or a person confirmed one, since this run read it: the store's is the one kept.
@@ -201,7 +208,7 @@ async function naming(o: { runId: string; input: RunJobInput; stored: StoredConn
  * will make again stops here, before the run's folder records any calibration;
  * the last goes on with the one it had, as before 745.
  */
-async function asStored(o: { runId: string; deps: WorkerDeps; log: (line: string) => void; final?: boolean }, c: Calibration): Promise<Calibration> {
+async function asStored(o: { runId: string; deps: WorkerDeps; log: (line: string) => void; final?: boolean }, c: Calibration, maySay?: string): Promise<Calibration> {
   let now: Awaited<ReturnType<WorkerDeps["store"]["loadRunJob"]>>;
   try {
     now = await o.deps.store.loadRunJob(o.runId);
@@ -211,5 +218,7 @@ async function asStored(o: { runId: string; deps: WorkerDeps; log: (line: string
   if (now?.calibration) return now.calibration;
   if (!o.final) throw new CalibrationUnsettled(`Automatic run ${o.runId}'s calibration couldn't be read again after the currency from the org's settings was saved, so this delivery stops before the run starts and the queue delivers it again.`);
   o.log(`Automatic run ${o.runId}'s calibration couldn't be read again after the currency from the org's settings was saved, and this is the last delivery, so the run goes on with the calibration it had.`);
+  // The write may have been committed: then the calibration page names the code while this run's results don't.
+  if (maySay) o.log(`Automatic run ${o.runId}'s stored calibration may name ${maySay} from the org's settings while this run used the one it had (${c.currency === "XXX" ? "amounts in plain numbers" : c.currency}): a calibration page that disagrees with the run's results is this.`);
   return c;
 }
