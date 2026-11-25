@@ -15,20 +15,29 @@ import { ORG_CURRENCY_SOQL, ORG_LOCALE_SOQL, readOrgCurrency } from "../org-curr
 
 type Answer = { field?: unknown } | { error: string } | "hang";
 
-/** An org answering the two Organization reads as told, through the real client and allowlist. */
+/** What the org's settings answer is listed as among the reads (DECISIONS.md 740). */
+const SETTINGS = "GET connect/organization";
+
+/** An org answering the two Organization reads, and its settings (404 unless told), as told, through the real client and allowlist. */
 class Org implements Transport {
   readonly asked: string[] = [];
   readonly currency: Answer;
   readonly locale: Answer;
-  constructor(currency: Answer, locale: Answer = { error: "NOT_ASKED" }) {
+  readonly settings: TransportResponse;
+  constructor(currency: Answer, locale: Answer = { error: "NOT_ASKED" }, settings?: unknown) {
     this.currency = currency;
     this.locale = locale;
+    this.settings = settings === undefined ? { status: 404, header: () => null, text: JSON.stringify([{ errorCode: "NOT_FOUND", message: "The requested resource does not exist" }]) } : { status: 200, header: () => null, text: JSON.stringify(settings) };
   }
   async send(request: TransportRequest): Promise<TransportResponse> {
     const url = new URL(request.url);
     const ok = (json: unknown): TransportResponse => ({ status: 200, header: () => null, text: JSON.stringify(json) });
     if (url.pathname === "/services/data/") return ok([{ version: "68.0" }]);
     if (url.pathname.endsWith("/limits")) return ok({ DailyApiRequests: { Max: 1000, Remaining: 990 } });
+    if (url.pathname.endsWith("/connect/organization")) {
+      this.asked.push(SETTINGS);
+      return this.settings;
+    }
     const q = url.searchParams.get("q") ?? "";
     this.asked.push(q);
     const answer = q === ORG_CURRENCY_SOQL ? this.currency : q === ORG_LOCALE_SOQL ? this.locale : { error: "UNEXPECTED" };
@@ -64,7 +73,8 @@ describe("the currency read at connect", () => {
     const org = new Org({ error: "INVALID_FIELD" }, { field: "en_GB" });
     const { currency, lines } = await read(org);
     assert.deepEqual(currency, { kind: "single", suggested: "GBP" });
-    assert.deepEqual(org.asked, [ORG_CURRENCY_SOQL, ORG_LOCALE_SOQL]);
+    // Its settings first (740): here they can't say (404), so the locale is read as before.
+    assert.deepEqual(org.asked, [ORG_CURRENCY_SOQL, SETTINGS, ORG_LOCALE_SOQL]);
     // Said as the normal answer it is, never as a failure; the locale itself is never logged.
     assert.ok(lines.some((l) => /The org has one currency: Salesforce has no DefaultCurrencyIsoCode on its Organization/.test(l)), lines.join("\n"));
     assert.ok(!lines.some((l) => /wasn't read/.test(l)));
@@ -90,6 +100,32 @@ describe("the currency read at connect", () => {
     assert.ok(lines.some((l) => /default locale wasn't read \(INSUFFICIENT_ACCESS\)/.test(l)));
     assert.deepEqual((await read(new Org({ field: "pounds" }))).currency, { kind: "unread" });
     assert.deepEqual((await read(new Org("hang"), 20)).currency, { kind: "unread" });
+  });
+
+  // DECISIONS.md 740: the org's settings are read only where the query showed one currency.
+  test("the settings are never read on a multi-currency org, nor after a failed read, whatever they would say", async () => {
+    const named = { defaultCurrencyIsoCode: "USD", multiCurrency: false };
+    for (const org of [new Org({ field: "EUR" }, undefined, named), new Org({ error: "INSUFFICIENT_ACCESS" }, undefined, named), new Org({ field: "pounds" }, undefined, named), new Org({ field: null }, undefined, named)]) {
+      const { currency } = await read(org);
+      assert.ok(!org.asked.includes(SETTINGS), JSON.stringify(currency));
+      assert.notEqual(currency.kind, "settings");
+    }
+    const slow = new Org("hang", undefined, named);
+    await read(slow, 20);
+    assert.ok(!slow.asked.includes(SETTINGS));
+  });
+
+  test("a single-currency org whose settings name its currency: that code, the locale never read", async () => {
+    const org = new Org({ error: "INVALID_FIELD" }, { field: "en_US" }, { defaultCurrencyIsoCode: "GBP", multiCurrency: false });
+    const { currency, lines } = await read(org);
+    assert.deepEqual(currency, { kind: "settings", code: "GBP" });
+    assert.deepEqual(org.asked, [ORG_CURRENCY_SOQL, SETTINGS]);
+    assert.ok(lines.includes("The org's settings name its one currency: GBP (Connect REST API, at the top level)."), lines.join("\n"));
+  });
+
+  test("the locale's suggestion is never the currency when the settings can't say", async () => {
+    const { currency } = await read(new Org({ error: "INVALID_FIELD" }, { field: "en_US" }, { defaultCurrencyIsoCode: "QQQ", multiCurrency: false }));
+    assert.deepEqual(currency, { kind: "single", suggested: "USD" });
   });
 });
 

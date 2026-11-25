@@ -82,8 +82,10 @@ export const Calibration = z
     // connect couldn't tell; the run decides from its opportunities. Absent: the
     // code is the org's own, as before 700, or a person's. "customer": the org
     // has one currency, and its customer named it in the portal (KAN-41): a
-    // real code, printed as the org's own would be.
-    currencyFrom: z.enum(["org", "unread", "customer"]).optional(),
+    // real code, printed as the org's own would be. "connect_api": the org has
+    // one currency, and its settings named it through the Connect REST API
+    // (DECISIONS.md 740): a real code, printed as the org's own would be.
+    currencyFrom: z.enum(["org", "unread", "customer", "connect_api"]).optional(),
     // The currency the org's default locale suggests, for the question the
     // portal asks. Never printed as the currency and never formats an amount.
     currencySuggested: z.string().regex(/^[A-Z]{3}$/).optional(),
@@ -115,6 +117,10 @@ export const Calibration = z
     // place on the list is checked where an answer comes in and where one is read, never here: a stored row must parse.
     if (c.currencyFrom === "customer" && (c.source !== "org_settings" || !currencyShaped(c.currency))) {
       ctx.addIssue({ code: "custom", path: ["currencyFrom"], message: "A currency the customer named is a currency code, on a calibration read from the org's settings" });
+    }
+    // A currency the org's settings named (DECISIONS.md 740): the same, and checked against the list where it is read.
+    if (c.currencyFrom === "connect_api" && (c.source !== "org_settings" || !currencyShaped(c.currency))) {
+      ctx.addIssue({ code: "custom", path: ["currencyFrom"], message: "A currency the org's settings named is a currency code, on a calibration read from the org's settings" });
     }
     const seen = new Set<string>();
     for (const stage of c.stages) {

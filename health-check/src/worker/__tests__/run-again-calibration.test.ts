@@ -30,7 +30,10 @@ class SingleCurrencyOrg implements Transport {
   /** Set: once the locale is read, every request fails as an outage would, until it is cleared. */
   outageAfterLocale = false;
   #down = false;
+  /** The org's settings through the Connect API (DECISIONS.md 740): unset, the replay has no answer for them, so they can't say. */
+  settings: unknown = undefined;
   async send(request: TransportRequest): Promise<TransportResponse> {
+    if (this.settings !== undefined && new URL(request.url).pathname.endsWith("/connect/organization")) return { status: 200, header: () => null, text: JSON.stringify(this.settings) };
     const q = new URL(request.url).searchParams.get("q") ?? "";
     if (this.#down && this.outageAfterLocale) return { status: 503, header: () => null, text: "unavailable" };
     if (q === ORG_LOCALE_SOQL && this.outageAfterLocale) this.#down = true;
@@ -198,5 +201,35 @@ describe("Run again with a currency the customer named in the portal (KAN-41)", 
     deps.store.customerCurrencies.set(ORG15, "CHF");
     await handle({ kind: "run", runId: RUN_ID }, AGAIN);
     assert.equal(deps.store.runs.get(RUN_ID)!.calibration!.currency, "CHF");
+  });
+});
+
+describe("Run again with a currency the org's settings name (740)", () => {
+  test("the rebuilt calibration names it as the settings', over the customer's answer, and the released run's digest names it with no note", async () => {
+    const { org, deps, handle } = await pressed();
+    org.settings = { features: { defaultCurrencyIsoCode: "GBP", multiCurrency: false } };
+    deps.store.customerCurrencies.set(ORG15, "EUR");
+    const outcome = await handle({ kind: "run", runId: RUN_ID }, AGAIN);
+    assert.equal(outcome.outcome, "done", outcome.detail);
+    const c = deps.store.runs.get(RUN_ID)!.calibration!;
+    assert.deepEqual([c.currency, c.currencyFrom, c.currencySuggested], ["GBP", "connect_api", undefined]);
+    assert.ok(!org.asked.includes(ORG_LOCALE_SOQL), "the locale isn't read once the settings name the currency");
+    assert.ok(deps.lines.some((l) => /customer named EUR in the portal, but the org's settings name GBP/.test(l)));
+    assert.equal(deps.store.runs.get(RUN_ID)!.run.status, "released");
+    const digest = deps.store.digests.get(RUN_ID)!.digest;
+    assert.equal(digest.value.currency, "GBP");
+    assert.equal(digest.value.currencyNote, undefined);
+    assert.equal(digest.value.currencySuggested, undefined);
+    assert.ok(digest.findings.every((f) => f.amountsUnnamed === undefined));
+  });
+
+  test("settings that can't say: the run is rebuilt exactly as before 740, one currency unnamed, the locale's suggestion kept apart", async () => {
+    const { org, deps, handle } = await pressed();
+    org.settings = { defaultCurrencyIsoCode: "GBP" };
+    await handle({ kind: "run", runId: RUN_ID }, AGAIN);
+    const c = deps.store.runs.get(RUN_ID)!.calibration!;
+    assert.deepEqual([c.currency, c.currencyFrom, c.currencySuggested], ["XXX", "org", "GBP"]);
+    assert.ok(org.asked.includes(ORG_LOCALE_SOQL));
+    assert.ok(deps.store.digests.get(RUN_ID)!.digest.value.currencyNote);
   });
 });
