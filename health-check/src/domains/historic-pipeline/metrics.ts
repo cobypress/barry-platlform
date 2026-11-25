@@ -1,5 +1,5 @@
 import type { RuleContext } from "../../engine/rule.ts";
-import { said } from "../../engine/org-words.ts";
+import { joinSaid, org, said } from "../../engine/org-words.ts";
 import { pct } from "../../engine/rule.ts";
 import { orgExtractor } from "../../extract/configuration.ts";
 import type { DateRange, Evidence, Metric, MetricSegment, SeriesPoint } from "../../schemas/index.ts";
@@ -211,7 +211,7 @@ function stageConversion(ctx: Ctx, data: Ready): Metric[] {
   // eleven retired stages read as 100% steps nobody took.
   const used = openStages.filter((stage) => withStages.some((d) => d.history.some((h) => h.StageName === stage)));
   const unused = openStages.filter((stage) => !used.includes(stage));
-  if (unused.length > 0) exclusions.push(`Stages no closed deal in the window was in: ${unused.join(", ")}`);
+  if (unused.length > 0) exclusions.push(said`Stages no closed deal in the window was in: ${joinSaid(unused.map((s) => said`${org(s)}`), ", ")}`);
   const steps = used.map((stage) => orderOf(stage)!);
   const reaching = (step: number): Deal[] => (step >= steps.length ? withStages.filter((d) => d.category === "won") : withStages.filter((d) => furthest(d)! >= steps[step]!));
   const segments: MetricSegment[] = [];

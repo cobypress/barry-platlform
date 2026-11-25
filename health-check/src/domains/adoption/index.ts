@@ -91,12 +91,13 @@ const activeOn = (activity: LoginActivity, users: UserRow[], days: (day: string)
  * people Salesforce says logged in during the window have a login in the
  * history, it isn't the whole org's, and nothing is built from it.
  */
-export function partialHistory(users: UserRow[], activity: LoginActivity): Said | null {
+/** `mid` says it after words of a sentence already begun, its first word in lower case, its marks kept (DECISIONS.md 739). */
+export function partialHistory(users: UserRow[], activity: LoginActivity, mid = false): Said | null {
   const from = new Date(`${activity.from}T00:00:00Z`);
   const expected = users.filter((u) => u.LastLoginDate && new Date(u.LastLoginDate.replace(/\+0000$/, "Z")) >= from).length;
   const seen = users.filter((u) => activity.days[u.Id]).length;
   if (expected === 0 || seen * 2 >= expected) return null;
-  return said`The login history shows logins for ${seen} of the ${expected} people who logged in during the window, so the connection can probably see only its own logins. Give the connected user the Monitor Login History permission, then run the check again.`;
+  return said`${mid ? "the" : "The"} login history shows logins for ${seen} of the ${expected} people who logged in during the window, so the connection can probably see only its own logins. Give the connected user the Monitor Login History permission, then run the check again.`;
 }
 
 type Loaded = { status: "ok"; users: UserRow[]; activity: LoginActivity; evidence: Evidence[] } | { status: "not_measurable"; reason: string; evidence: Evidence[] };

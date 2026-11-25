@@ -1,4 +1,5 @@
 import { editionIsWhy } from "../../salesforce/refusal-words.ts";
+import { said } from "../../engine/org-words.ts";
 import { apexExtractor, metadataExtractor, type ApexTriggerRow } from "../../extract/automation.ts";
 import { userKinds } from "../user-kinds.ts";
 import { loginActivityExtractor } from "../../extract/adoption.ts";
@@ -204,7 +205,7 @@ function automation(ctx: Ctx): Metric {
       }
       for (const step of triggerSteps(t)) items.push({ object, step, name: t.Name, active: t.Status === "Active", described: t.commented });
     }
-    if (unnamed) exclusions.push(`${unnamed} Apex triggers on custom objects we couldn't name`);
+    if (unnamed) exclusions.push(said`${unnamed} Apex triggers on custom objects we couldn't name`);
   } else exclusions.push(editionIsWhy(triggers.reason) ? "Apex triggers, which Professional Edition doesn't allow the org to have of its own" : `Apex triggers, which couldn't be read: ${triggers.reason}`);
   if (duplicates.status === "ok") for (const d of duplicates.data) items.push({ object: d.SobjectType, step: "duplicate", name: d.DeveloperName, active: d.IsActive, described: null });
   else exclusions.push(`Duplicate rules, which couldn't be read: ${duplicates.reason}`);
@@ -267,9 +268,9 @@ function integrations(ctx: Ctx): Metric {
   } else exclusions.push(`Integration users, because users couldn't be read: ${users.reason}`);
 
   // A connection without Monitor Login History sees only its own logins (DECISIONS.md 112).
-  const partial = users.status === "ok" && activity.status === "ok" ? partialHistory(users.data.filter((u) => u.IsActive), activity.data) : null;
+  const partial = users.status === "ok" && activity.status === "ok" ? partialHistory(users.data.filter((u) => u.IsActive), activity.data, true) : null;
   if (logins.status !== "ok") exclusions.push(`API logins, because login history couldn't be read: ${logins.reason}`);
-  else if (partial) exclusions.push(`API logins, because ${partial.charAt(0).toLowerCase()}${partial.slice(1)}`);
+  else if (partial) exclusions.push(said`API logins, because ${partial}`);
   else {
     const byApp = new Map<string, { logins: number; users: number }>();
     for (const api of Object.values(logins.data.apiByUser)) {

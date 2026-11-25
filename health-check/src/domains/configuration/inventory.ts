@@ -1,4 +1,5 @@
 import { editionIsWhy } from "../../salesforce/refusal-words.ts";
+import { said } from "../../engine/org-words.ts";
 import { apexExtractor, metadataExtractor } from "../../extract/automation.ts";
 import { unreadReason } from "../../extract/metadata-parse.ts";
 import { CORE_OBJECTS, customObjectsExtractor, isOwnCustomField, layoutsExtractor, recordCountsExtractor, schemaExtractor } from "../../extract/configuration.ts";
@@ -106,8 +107,11 @@ export function objectInventoryMetric(ctx: Ctx): Metric[] {
   const triggerCount = triggers.status === "ok" ? countBy(activeTriggers, (t) => objectOf(t.TableEnumOrId)) : null;
   const unnamedLayouts = layouts.status === "ok" ? layouts.data.filter((l) => objectOf(l.EntityDefinitionId) === null).length : 0;
   const unnamedTriggers = activeTriggers.filter((t) => objectOf(t.TableEnumOrId) === null).length;
+  // Said, so an automatic run's marks know the counts as the only things put in (DECISIONS.md 739); the list's
+  // reason is passed on in its own text, which the passed-on route knows by its head (702).
   if (unnamedLayouts + unnamedTriggers > 0) {
-    exclusions.push(`Page layouts (${unnamedLayouts}) and Apex triggers (${unnamedTriggers}) on custom objects we couldn't name${ids.status === "ok" ? "" : `, because the list of custom objects couldn't be read: ${ids.reason}`}`);
+    exclusions.push(said`Page layouts (${unnamedLayouts}) and Apex triggers (${unnamedTriggers}) on custom objects we couldn't name`);
+    if (ids.status !== "ok") exclusions.push(`The names of custom objects, because the list of custom objects couldn't be read: ${ids.reason}`);
   }
   if (layouts.status !== "ok") exclusions.push(`Page layouts, which couldn't be read: ${layouts.reason}`);
   if (triggers.status !== "ok") exclusions.push(editionIsWhy(triggers.reason) ? "Apex triggers, which Professional Edition doesn't allow the org to have of its own" : `Apex triggers, which couldn't be read: ${triggers.reason}`);
