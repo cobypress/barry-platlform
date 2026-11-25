@@ -105,7 +105,7 @@ export const RiskyPermissionHoldersRow = z.union([
       permission: Name,
       /** The check that judges this permission, where one does: its finding is the verdict, and its count is this one. */
       rule: RuleId.nullable(),
-      /** Active users holding it, each once, however many profiles, permission sets or groups grant it. */
+      /** Active users of the standard type holding it, each once, however many profiles, permission sets or groups grant it. */
       holders: Count,
       /** Of them, those holding it through their profile. */
       byProfile: Count,
@@ -115,12 +115,16 @@ export const RiskyPermissionHoldersRow = z.union([
       byGroup: Count.nullable(),
       /** Of them, integration accounts: calibrated as one, on an integration licence, or set to API only. Null when who is API only couldn't be read. */
       integration: Count.nullable(),
-      /** Of them, those who haven't logged in for the dormant period, or never have, as the dormant-user checks tell it. */
+      /**
+       * Of them, those who haven't logged in for the dormant period, or never have, as the
+       * dormant-user checks tell it: anyone set up within the period, and anyone on an
+       * integration licence (counted under `integration`), is left out, as those checks leave them.
+       */
       notLoggedIn: Count,
       /**
        * Active users not counted who are assigned a permission set group holding a set
        * that grants it. A group can mute a permission and mutes aren't read, so we
-       * can't say they hold it. Null when the groups couldn't be read.
+       * can't say they hold it. Null when the groups, or who is assigned one, couldn't be read.
        */
       unconfirmedThroughGroups: Count.nullable(),
     })

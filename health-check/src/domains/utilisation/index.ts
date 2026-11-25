@@ -18,7 +18,7 @@ import { USER_GUARD_BLOCKERS, userGuards } from "../../guards/user-guards.ts";
 import { notSized, pct, plural, type RecordList, type Rule, type RuleContext, type RuleResult } from "../../engine/rule.ts";
 import type { Guard, Value } from "../../schemas/index.ts";
 import type { DomainModule } from "../types.ts";
-import { judged, lapse, lapseByDate, type Lapse } from "../logins.ts";
+import { judged, lapse, lapseByDate, onIntegrationLicence, type Lapse } from "../logins.ts";
 import { REPORT_RECENT_DAYS } from "../adoption/index.ts";
 import { calibratedHours } from "../value.ts";
 import { labelsOf } from "../labels.ts";
@@ -35,9 +35,6 @@ import { moneySaid, seatsSaid } from "../../engine/said-forms.ts";
 // on from an extract quotes Salesforce and stays plain: unknown.
 
 const MIN_SPARE_SEATS = 2;
-// API-only licences. Their users never log in by design, so not logging in says nothing.
-// A real org showed the Sales Insights integration user as a licence to release.
-const isIntegrationLicence = (licence: string): boolean => /\bintegration\b/i.test(licence);
 const SPARE_SEAT_SHARE = 10;
 const UNUSED_REPORT_SHARE = 50;
 const MIN_REPORTS = 50;
@@ -354,7 +351,8 @@ function dormantRule(
       if (users.status !== "ok") return { outcome: "not_measurable", reason: `Users couldn't be read: ${users.reason}`, evidence: [ctx.ev(users.source, { count: null })] };
       const days = ctx.calibration.dormantDays;
       const cutoff = daysBefore(ctx.now, days);
-      const active = users.data.filter((u) => u.IsActive && judged(u, cutoff) && !isIntegrationLicence(licenceOf(u)));
+      // The inventory's holders count who has stopped logging in from the same users (DECISIONS.md 735).
+      const active = users.data.filter((u) => u.IsActive && judged(u, cutoff) && !onIntegrationLicence(u));
       // The login log is the fuller record: a user it shows logging in inside the
       // period hasn't stopped, whatever LastLoginDate says, so isn't counted (DECISIONS.md 361).
       const logins = ctx.data(loginsExtractor);

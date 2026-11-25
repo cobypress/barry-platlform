@@ -3,7 +3,7 @@ import { BudgetStopError } from "../salesforce/budget.ts";
 import { classifyError, isUnavailable, runStoppedWords, type OrgLimit, type SalesforceError } from "../salesforce/client.ts";
 import { INVENTORY_VERSION, NAME_MAX, type ConnectedAppRow, type FillRateObject, type Inventory, type LimitRow, type PackageRow, type RiskyPermissionHoldersRow, type RiskyPermissionRow } from "../schemas/inventory.ts";
 import type { Calibration } from "../schemas/index.ts";
-import { lapse } from "../domains/logins.ts";
+import { lapse, onIntegrationLicence } from "../domains/logins.ts";
 import { apiOnlyExtractor, apiOnlyOf, type ApiOnlyData } from "./integrations.ts";
 import type { RunScope } from "../schemas/index.ts";
 import { CORE_OBJECTS, recordCountsExtractor, schemaExtractor } from "./configuration.ts";
@@ -502,8 +502,8 @@ export const USERS_NOT_READ = "Users weren't read in this run, so who is active 
 export const FROZEN_NOT_READ = "Whether a user is frozen isn't read, so a frozen user who is still active is counted, as every check counts them.";
 export const MUTES_NOT_READ =
   "A permission set group can mute a permission one of its sets grants, and mutes aren't read. People who might hold a permission only through a group are counted apart, never as holders.";
-// As the integration checks tell an integration licence.
-const isIntegrationLicence = (u: UserRow): boolean => /\bintegration\b/i.test(u.Profile?.UserLicense?.Name ?? "Unknown");
+export const NOT_IN_ORG = "Not in this org's permissions, so not counted.";
+export const STANDARD_USERS_ONLY = "Only users of the standard type are counted, as the checks count them: the users read holds no portal or community users.";
 /** The label of each permission a check judges, and its field in that check's read. */
 const PRIVILEGED_BY_LABEL = new Map(RISKY_PERMISSIONS.flatMap((p) => (p.field in PRIVILEGED_RULES ? [[p.label, p.field as PrivilegedPermission] as const] : [])));
 
@@ -515,7 +515,7 @@ const PRIVILEGED_BY_LABEL = new Map(RISKY_PERMISSIONS.flatMap((p) => (p.field in
  */
 export function holderCounts(input: HoldersInput): HoldersData {
   const { assignments, groupComponents } = input.access;
-  const notes: string[] = [FROZEN_NOT_READ];
+  const notes: string[] = [STANDARD_USERS_ONLY, FROZEN_NOT_READ];
   // A group's assignment carries the group's own set, where Salesforce gives one (DECISIONS.md 487).
   const groupSets = assignments.status === "ok" ? new Set(assignments.data.flatMap((a) => (a.PermissionSetGroupId && a.PermissionSetId ? [a.PermissionSetId] : []))) : null;
   const groupsOf = new Map<string, Set<string>>();
@@ -524,7 +524,7 @@ export function holderCounts(input: HoldersInput): HoldersData {
   if (groupComponents.status === "ok") for (const c of groupComponents.data) inGroup.set(c.PermissionSetGroupId, [...(inGroup.get(c.PermissionSetGroupId) ?? []), c.PermissionSetId]);
   const apiOnly = input.apiOnly ? apiOnlyOf(input.apiOnly) : null;
   const kinds = new Map(input.kinds.map((k) => [k.userId.slice(0, 15), k.kind]));
-  const isIntegration = apiOnly ? (u: UserRow): boolean => kinds.get(u.Id.slice(0, 15)) === "integration" || isIntegrationLicence(u) || apiOnly(u) : null;
+  const isIntegration = apiOnly ? (u: UserRow): boolean => kinds.get(u.Id.slice(0, 15)) === "integration" || onIntegrationLicence(u) || apiOnly(u) : null;
   const cutoff = daysBefore(input.now, input.dormantDays);
   const logins = input.logins ?? undefined;
   let unconfirmedAny = false;
@@ -544,7 +544,8 @@ export function holderCounts(input: HoldersInput): HoldersData {
       byPermissionSet: groupSets ? h.holders.filter((u) => viaSet.has(u.Id)).length : null,
       byGroup: groupSets ? h.holders.filter((u) => viaGroup.has(u.Id)).length : null,
       integration: isIntegration ? h.holders.filter(isIntegration).length : null,
-      notLoggedIn: h.holders.filter((u) => lapse(u, logins, cutoff) !== null).length,
+      // As the dormant-user checks take them: integration licences aren't, and are under integration.
+      notLoggedIn: h.holders.filter((u) => !onIntegrationLicence(u) && lapse(u, logins, cutoff) !== null).length,
       unconfirmedThroughGroups: unconfirmed,
     };
   };
@@ -568,13 +569,17 @@ export function holderCounts(input: HoldersInput): HoldersData {
   });
 
   const measured = rows.some((r) => "holders" in r);
-  if (measured && assignments.status !== "ok") notes.push(`Which permission sets belong to a permission set group couldn't be read, so holders through a set and through a group aren't told apart: ${assignments.reason}`);
+  if (measured && assignments.status !== "ok") {
+    notes.push(`Which permission sets belong to a permission set group couldn't be read, so holders through a set and through a group aren't told apart: ${assignments.reason}`);
+    notes.push(`Who is assigned a permission set group couldn't be read, so nobody is counted as possibly holding a permission through one: ${assignments.reason}`);
+  }
   if (measured && groupComponents.status !== "ok") notes.push(`What each permission set group holds couldn't be read, so nobody is counted as possibly holding a permission through one: ${groupComponents.reason}`);
   if (unconfirmedAny) notes.push(MUTES_NOT_READ);
   if (measured && !input.apiOnly) notes.push("Who is set to API only wasn't read in this run, so integration accounts aren't counted.");
   else if (measured && !apiOnly) notes.push("Who is set to API only couldn't be read, so integration accounts aren't counted.");
   else if (measured && input.kinds.length === 0) notes.push("Nobody has told us which of your users are integration accounts, so only those on an integration licence or set to API only are counted as integrations.");
-  if (measured && input.logins?.status !== "ok") notes.push("The login log couldn't be read, so not logging in is told by each user's last-login date alone.");
+  if (measured && !input.logins) notes.push("The login log wasn't read in this run, so not logging in is told by each user's last-login date alone.");
+  else if (measured && input.logins?.status !== "ok") notes.push("The login log couldn't be read, so not logging in is told by each user's last-login date alone.");
   return { rows, notes, dormantDays: input.dormantDays };
 }
 
@@ -659,7 +664,15 @@ function holderRows(data: RiskyPermissionsData): NonNullable<Inventory["riskyPer
   if (data.sets.status !== "ok") return { unavailable: data.sets.reason };
   // A step's output from before the count was made has none.
   if (!data.holders) return { unavailable: "Each permission's holders weren't counted in this run." };
-  return { rows: data.holders.rows, notes: data.holders.notes, dormantDays: data.holders.dormantDays };
+  // A permission the org doesn't have keeps its place in the list, saying so, never as nobody.
+  const missing = new Set(data.notInOrg);
+  const counted = new Map(data.holders.rows.map((r) => [r.permission, r]));
+  const rows = RISKY_PERMISSIONS.flatMap((p): RiskyPermissionHoldersRow[] => {
+    const row = counted.get(p.label);
+    if (row) return [row];
+    return missing.has(p.label) ? [{ permission: p.label, rule: null, unavailable: NOT_IN_ORG }] : [];
+  });
+  return { rows, notes: data.holders.notes, dormantDays: data.holders.dormantDays };
 }
 
 // ---------------------------------------------------------------------------
