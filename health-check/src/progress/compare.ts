@@ -129,12 +129,14 @@ function fixedAsRead(then: Finding[], now: Finding[]): boolean {
 
 /**
  * Whether a rule's issues now, after the earlier run passed it, were found only
- * because we tightened the rule since (DECISIONS.md 754): every pass then and every
- * issue now are across a tightening from the pass's version, and no issue's reading
- * would have been raised under it. One issue the old line would also raise is new.
+ * because we tightened the rule since (DECISIONS.md 754): the earlier run passed
+ * every reading it made of the rule (a segment it couldn't measure then has no pass
+ * to stand on, so its issue now is new), every pass then and every issue now are
+ * across a tightening from the pass's version, and no issue's reading is shown
+ * raised under it. One issue the old line would also raise is new.
  */
-function foundByStricterCheck(passes: Finding[], issues: Finding[], ruleId: string, ownCalls: number | undefined): boolean {
-  return passes.length > 0 && passes.every((p) => issues.every((i) => foundByStricter(ruleId, p.ruleVersion, i.ruleVersion, passedUnder(i, ownCalls))));
+function foundByStricterCheck(then: Finding[], issues: Finding[], ruleId: string, ownCalls: number | undefined): boolean {
+  return then.length > 0 && then.every((p) => p.status === "passed" && issues.every((i) => foundByStricter(ruleId, p.ruleVersion, i.ruleVersion, passedUnder(i, ownCalls))));
 }
 
 /** The run folder's file that keeps a comparison's `carried` for the next one (DECISIONS.md 732). */
@@ -205,7 +207,7 @@ export function compareWithBaseline(baseline: ProgressSide, current: ProgressSid
     // New only if the earlier run checked the rule, as the portal's alerts decide (DECISIONS.md 661, 673).
     if (MEASURED_LATER.has(ruleId) && !then.some((f) => f.status === "passed")) newlyMeasured.push(change(ruleId, nowIssues));
     // Passed then, raised now only because we tightened the rule since: open, never new (DECISIONS.md 754).
-    else if (foundByStricterCheck(then.filter((f) => f.status === "passed"), nowIssues, ruleId, current.ownCalls)) stricter.push(change(ruleId, nowIssues));
+    else if (foundByStricterCheck(then, nowIssues, ruleId, current.ownCalls)) stricter.push(change(ruleId, nowIssues));
     else added.push(change(ruleId, nowIssues));
   }
   const domains = [...new Set([...baseline.scores, ...current.scores].map((s) => s.domain))];
@@ -376,8 +378,8 @@ export const progressTitles = (p: Progress): string[] => [p.fixed, p.remaining, 
 /** The deck's note: one sentence set for one rule, another for several. */
 export const stricterNote = (n: number): Said =>
   n === 1
-    ? said`We've made one of our checks stricter since your last health check, and it raised an issue it may not have raised before. We count it as open, not as new. The raw notes name it.`
-    : said`We've made ${n} of our checks stricter since your last health check, and they raised issues they may not have raised before. We count them as open, not as new. The raw notes name them.`;
+    ? said`We've made one of our checks stricter since your last health check, and it raised an issue it may not have raised before. It's open, but we don't count it as new. The raw notes name it.`
+    : said`We've made ${n} of our checks stricter since your last health check, and they raised issues they may not have raised before. They're open, but we don't count them as new. The raw notes name them.`;
 
 /** The raw notes' heading for the list. */
 export const stricterHeading = (n: number): Said => said`Found by a stricter check (${n}), so not counted as new:`;

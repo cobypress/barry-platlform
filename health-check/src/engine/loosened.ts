@@ -160,9 +160,13 @@ function changeProblems(table: Readonly<Record<string, readonly { version: numbe
 // An issue after a pass is "found by a stricter check" when a version after the
 // pass's, up to the issue's, tightened the rule from the pass's version, and the
 // issue's own reading would have passed under that earlier version. Judged on the
-// issue, for the same reason a loosening is judged on the pass. A tightening that
-// can't judge a reading (no passedBefore) says every such issue is found by a
-// stricter check: never "new" when we can't show it. It is still open.
+// issue, for the same reason a loosening is judged on the pass, and per earlier
+// version: only the tightenings that name the pass's own version speak for it, so
+// an older tightening, or one from other versions, never settles it. A tightening
+// that can't judge a reading (no passedBefore) leaves its versions unsettled, and
+// an unsettled issue is found by a stricter check: never "new" when we can't show
+// it. It is still open. A judge that throws fails the run, as a loosening's does:
+// loud, never a silent verdict.
 //
 // A version may loosen some readings and tighten others, so the two tables are
 // apart and a version can be in both: a pass after an issue reads only LOOSENED,
@@ -178,10 +182,12 @@ export type Tightening = {
   /** The earlier versions under which some readings it raises would have passed, ascending. */
   from: readonly number[];
   /**
-   * Whether an issue's reading, by its facts, would have passed under the versions
-   * in `from`. `ownCalls` as in Loosening. Written per version against each earlier one.
+   * Whether an issue's reading, by its facts, would have passed under `earlier`, one
+   * of the versions in `from`: asked once for each, so a reading can pass under one
+   * earlier version and be raised under another. A judge that ignores `earlier`
+   * answers alike for all of them. `ownCalls` as in Loosening.
    */
-  passedBefore?: (facts: Readonly<Record<string, number>>, ownCalls: number | undefined) => boolean;
+  passedBefore?: (facts: Readonly<Record<string, number>>, ownCalls: number | undefined, earlier: number) => boolean;
 };
 
 export const TIGHTENED: Readonly<Record<string, readonly Tightening[]>> = {};
@@ -204,27 +210,33 @@ export function tightenedFrom(ruleId: string): Record<string, number[]> | undefi
 export const hasTightened = (ruleId: string): boolean => tightenings(ruleId).length > 0;
 
 /**
- * For an issue under a rule that tightened at or before the issue's version: the
- * earlier versions under which its reading would have passed, ascending (empty: it
- * would have been raised under every one, so after any earlier pass it is new).
- * Undefined for anything else, or when a tightening can't judge a reading.
+ * For an issue under a rule that tightened at or before the issue's version: of the
+ * earlier versions the tightenings up to it name, ascending, those under which its
+ * reading is not shown to have been raised. An earlier version is left out only when
+ * a tightening up to the issue's version that names it judges the reading raised
+ * there; one that names it with no judge leaves it in (unsettled, never "new" we
+ * can't show). The tightenings that name a version are exactly those crossed from a
+ * pass under it, so this is the verdict for whichever version the pass was under.
+ * Empty: raised under every one, so after any earlier pass it is new. Undefined for
+ * a pass, or a rule not tightened at or before the issue's version.
  */
 export function passedUnder(f: { ruleId: string; ruleVersion: number; status: string; facts: Readonly<Record<string, number>> }, ownCalls: number | undefined): number[] | undefined {
   if (f.status !== "issue") return undefined;
   const upTo = tightenings(f.ruleId).filter((t) => t.version <= f.ruleVersion);
-  if (!upTo.length || upTo.some((t) => !t.passedBefore)) return undefined;
-  return [...new Set(upTo.filter((t) => t.passedBefore!(f.facts, ownCalls)).flatMap((t) => t.from))].sort((a, b) => a - b);
+  if (!upTo.length) return undefined;
+  const earlier = [...new Set(upTo.flatMap((t) => t.from))].sort((a, b) => a - b);
+  return earlier.filter((v) => upTo.every((t) => !t.from.includes(v) || !t.passedBefore || t.passedBefore(f.facts, ownCalls, v)));
 }
 
 /**
  * Whether an issue after a pass under the same rule was found by a stricter
  * check: a version after the pass's, up to the issue's, tightened it from the
- * pass's version, and the issue's reading would have passed there (`under`, from
- * passedUnder). An unknown version matches any tightening, and with it a reading
- * that would have passed under any earlier version is found by a stricter check:
- * only one the judge says every earlier version would also raise is new. An
- * unknown verdict can't show the org got worse. The console reads the same rule
- * from rule-where.json and the digest.
+ * pass's version, and the issue's reading isn't shown to have been raised under
+ * the pass's version (`under`, from passedUnder). An unknown version matches any
+ * tightening, and is found by a stricter check unless the reading is shown raised
+ * under every earlier version. No verdict at all (a digest without passedUnder)
+ * can't show the org got worse. The console reads the same rule from
+ * rule-where.json and the digest.
  */
 export function foundByStricter(ruleId: string, passVersion: number | undefined, issueVersion: number | undefined, under: readonly number[] | undefined): boolean {
   const between = tightenings(ruleId).filter((t) => (passVersion === undefined || (t.version > passVersion && t.from.includes(passVersion))) && (issueVersion === undefined || t.version <= issueVersion));

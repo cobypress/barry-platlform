@@ -116,7 +116,45 @@ describe("an issue after a pass, judged on the issue's own reading (decision 754
       assert.equal(passedUnder({ ...issue(22), status: "passed" }, undefined), undefined, "a pass carries none");
       assert.equal(passedUnder(issue(22, 1), undefined), undefined, "an issue before the tightening");
     });
-    await withDeclared(tightened(unjudged()), () => assert.equal(passedUnder(issue(22), undefined), undefined, "no judge: unknown"));
+    await withDeclared(tightened(unjudged()), () => assert.deepEqual(passedUnder(issue(22), undefined), [1], "no judge: its versions stay unsettled, never shown raised"));
+  });
+
+  test("an older tightening with no judge never silences a newer one's judge (review case A)", async () => {
+    // 2 tightened from 1 with no judge; 3 tightened from 2, judging a reading of 10% or more raised under 2 too.
+    const a = { tightened: { [RULE]: [unjudged(2, [1]), { version: 3, on: "2026-11-25", from: [2], passedBefore: (f: Readonly<Record<string, number>>) => (f.rate ?? 100) < 10 }] } };
+    await withDeclared(a, () => {
+      assert.deepEqual(passedUnder(issue(35, 3), undefined), [1], "unsettled under 1, shown raised under 2");
+      assert.equal(foundByStricter(RULE, 2, 3, passedUnder(issue(35, 3), undefined)), false, "a pass under 2 then an issue under 3 the judge says 2 raises too: new");
+      assert.equal(foundByStricter(RULE, 1, 3, passedUnder(issue(35, 3), undefined)), true, "a pass under 1 crosses the unjudged tightening: found by a stricter check");
+      assert.deepEqual(passedUnder(issue(5, 3), undefined), [1, 2], "a reading the judge passes under 2");
+    });
+  });
+
+  test("a judge answers per earlier version, and the pass's own version decides (review case E)", async () => {
+    // 3 tightened from 1 and 2: the reading passes under 2's line but is raised under 1's.
+    const perVersion: Tightening = { version: 3, on: "2026-11-25", from: [1, 2], passedBefore: (_f, _c, earlier) => earlier === 2 };
+    await withDeclared({ tightened: { [RULE]: [perVersion] } }, () => {
+      assert.deepEqual(passedUnder(issue(22, 3), undefined), [2]);
+      assert.equal(foundByStricter(RULE, 2, 3, [2]), true);
+      assert.equal(foundByStricter(RULE, 1, 3, [2]), false, "raised under 1 as well: new");
+    });
+    // 2 says "passes under 1"; 3, also from 1, says "raised under 1 and 2". A tightening that shows it raised under the pass's version decides: new.
+    await withDeclared({ tightened: { [RULE]: [{ version: 2, on: "2026-11-01", from: [1], passedBefore: () => true }, { version: 3, on: "2026-11-25", from: [1, 2], passedBefore: () => false }] } }, () => {
+      assert.deepEqual(passedUnder(issue(35, 3), undefined), []);
+      assert.equal(foundByStricter(RULE, 1, 3, []), false);
+    });
+    // The simple form, one answer for every earlier version, still works.
+    await withDeclared({ tightened: { [RULE]: [{ ...judged(3, [1, 2]) }] } }, () => assert.deepEqual(passedUnder(issue(22, 3), undefined), [1, 2]));
+  });
+
+  test("a judge that throws fails the comparison, loudly, as a loosening's does", async () => {
+    const { built } = report(consultant);
+    const side = (findings: Finding[]): ProgressSide => ({ runId: "r", asOf: built.input.run.asOf, findings, scores: built.input.scores ?? [], overall: built.overall, value: built.value, limitsReadAt: null });
+    const own = built.teamFindings.find((f) => f.ruleId === RULE)!;
+    const others = built.teamFindings.filter((f) => f.ruleId !== RULE);
+    await withDeclared({ tightened: { [RULE]: [{ version: 2, on: "2026-11-25", from: [1], passedBefore: () => { throw new Error("judge broke"); } }] } }, () => {
+      assert.throws(() => compareWithBaseline(side([...others, { ...own, status: "passed", ruleVersion: 1 }]), side(built.teamFindings)), /judge broke/);
+    });
   });
 
   test("foundByStricter: only across a tightening from the pass's version, and only where the old line would pass", async () => {
@@ -167,7 +205,7 @@ describe("a re-check after a tightening, the org unchanged (decision 754)", () =
       assert.ok(!pulse.newIssues.some((i) => i.title === "Leads are going unworked"), "not in the email's new titles");
       assert.equal(pulse.counts.openNow, new Set(built.teamFindings.filter((f) => f.status === "issue").map((f) => f.ruleId)).size, "counted open");
       const html = deck(built, loaded);
-      assert.match(html, /<p class="note">We&#39;ve made one of our checks stricter since your last health check, and it raised an issue it may not have raised before\. We count it as open, not as new\. The raw notes name it\.<\/p>/);
+      assert.match(html, /<p class="note">We&#39;ve made one of our checks stricter since your last health check, and it raised an issue it may not have raised before\. It&#39;s open, but we don&#39;t count it as new\. The raw notes name it\.<\/p>/);
       assert.equal(html.match(NOTE)?.length, 1, "said once");
       assert.ok(!/New since then[^<]*<\/h3><ul>(?:(?!<\/ul>).)*Leads are going unworked/.test(html), "not listed as new");
       assert.match(rawNotes(built), /Found by a stricter check \(1\), so not counted as new:\\nLeads are going unworked/);
@@ -185,7 +223,7 @@ describe("a re-check after a tightening, the org unchanged (decision 754)", () =
     await withDeclared({ tightened: { [RULE]: [judged()], [other]: [unjudged()] } }, () => {
       const { built, loaded } = report(plant(consultant, (f) => (f.ruleId === RULE || f.ruleId === other ? { ...f, status: "passed", ruleVersion: 1 } : f)));
       assert.deepEqual(built.progress!.stricter!.map((c) => c.ruleId).sort(), [other, RULE].sort());
-      assert.match(deck(built, loaded), /We&#39;ve made 2 of our checks stricter since your last health check, and they raised issues they may not have raised before\. We count them as open, not as new\. The raw notes name them\./);
+      assert.match(deck(built, loaded), /We&#39;ve made 2 of our checks stricter since your last health check, and they raised issues they may not have raised before\. They&#39;re open, but we don&#39;t count them as new\. The raw notes name them\./);
       assert.match(rawNotes(built), /Found by a stricter check \(2\), so not counted as new:/);
     });
   });
@@ -232,6 +270,22 @@ describe("the cases that stay new, or stay as they were (decision 754)", () => {
     await withDeclared({ tightened: { "tech.lint-tests": [unjudged()] } }, () => {
       assert.deepEqual(where(compareWithBaseline(side(built.teamFindings), side([...built.teamFindings, lint])), "tech.lint-tests"), ["newlyMeasured"]);
       assert.deepEqual(where(compareWithBaseline(side([...built.teamFindings, { ...lint, status: "passed", ruleVersion: 1 }]), side([...built.teamFindings, lint])), "tech.lint-tests"), ["stricter"], "but passed then: found by a stricter check");
+    });
+  });
+
+  test("segments: one the old line would also raise makes the rule new; one not measured before has no pass to stand on, so new", async () => {
+    const { built } = report(consultant);
+    const side = (findings: Finding[]): ProgressSide => ({ runId: "r", asOf: built.input.run.asOf, findings, scores: built.input.scores ?? [], overall: built.overall, value: built.value, limitsReadAt: null });
+    const own = built.teamFindings.find((f) => f.ruleId === RULE)!;
+    const others = built.teamFindings.filter((f) => f.ruleId !== RULE);
+    const at = (status: Finding["status"], ruleVersion: number, rate: number, id = own.id, extra: Partial<Finding> = {}): Finding => ({ ...own, id, status, ruleVersion, facts: { ...own.facts, rate }, ...extra });
+    await withDeclared(tightened(judged()), () => {
+      const b = compareWithBaseline(side([...others, at("passed", 1, 20), at("passed", 1, 20, "f-000000000002")]), side([...others, at("issue", 2, 22), at("issue", 2, 40, "f-000000000002")]));
+      assert.deepEqual(where(b), ["added"], "review case B");
+      const c = compareWithBaseline(side([...others, at("passed", 1, 20), at("not_measurable", 1, 0, "f-000000000002", { notMeasurableReason: "The leads couldn't be read." })]), side([...others, at("issue", 2, 22), at("issue", 2, 22, "f-000000000002")]));
+      assert.deepEqual(where(c), ["added"], "review case C");
+      const both = compareWithBaseline(side([...others, at("passed", 1, 20), at("passed", 1, 20, "f-000000000002")]), side([...others, at("issue", 2, 22), at("issue", 2, 22, "f-000000000002")]));
+      assert.deepEqual(where(both), ["stricter"], "every segment passed then and passes the old line");
     });
   });
 
@@ -289,6 +343,20 @@ describe("a pulse, and an automatic customer's gated pulse (decisions 746, 754)"
       assert.ok(!gated.newIssues.some((i) => i.title === "Leads are going unworked"));
       assert.match(fullReportHtml(built, loaded.pseudonyms), /one of our checks stricter/);
     });
+  });
+
+  test("test declarations can't overlap: a second call while one is open is refused, and the tables come back empty (review overlap.ts)", async () => {
+    let inner: unknown;
+    const first = withDeclared({ tightened: { b: [] } }, async () => {
+      await new Promise((r) => setTimeout(r, 5));
+    });
+    await assert.rejects(withDeclared({ tightened: { a: [] } }, async () => (inner = Object.keys(TIGHTENED))), /already open/);
+    await first;
+    assert.equal(inner, undefined, "the second never ran");
+    await assert.rejects(withDeclared(tightened(judged()), () => withDeclared(tightened(judged()), () => 0)), /already open/, "nested");
+    assert.deepEqual(TIGHTENED, {});
+    await withDeclared(tightened(judged()), () => assert.ok(RULE in TIGHTENED, "open again after a refusal"));
+    assert.deepEqual(TIGHTENED, {});
   });
 
   test("every new sentence is made by said, so an automatic run knows it as ours, with none of the org's words", () => {

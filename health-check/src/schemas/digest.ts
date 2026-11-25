@@ -150,12 +150,13 @@ export const DigestFinding = z.object({
    */
   carriedFrom: z.number().int().positive().optional(),
   /**
-   * Only on an issue of a rule we have tightened (DECISIONS.md 754), where the engine can
-   * judge it: the earlier versions, ascending, under which this issue's reading would have
-   * passed. After a pass under one of them it was found by a stricter check: open, never
-   * new. Empty: it would have been raised under every one, so after any earlier pass it is
-   * new. Absent on a tightened rule's issue: unknown, never "new" we can't show. Absent on
-   * every other finding, and everywhere until a tightening is declared.
+   * Only on an issue of a rule we have tightened at or before its version (DECISIONS.md
+   * 754): of the earlier versions the tightenings name, ascending, those under which this
+   * issue's reading isn't shown to have been raised (judged per version; a tightening with
+   * no judge leaves its versions in). After a pass under one of them, across a tightening
+   * that names it, it was found by a stricter check: open, never new. Empty: raised under
+   * every one, so after any earlier pass it is new. Absent on every other finding, and
+   * everywhere until a tightening is declared.
    */
   passedUnder: z.array(z.number().int().positive()).optional(),
   /** Its amounts are plain numbers in a currency not known by name (DECISIONS.md 700): show value.currencyNote beside them. Absent otherwise. */
