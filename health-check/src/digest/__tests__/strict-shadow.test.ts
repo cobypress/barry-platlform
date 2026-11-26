@@ -5,7 +5,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { checkedDigest, digestDataset, type CheckedDigest } from "../checked.ts";
 import { buildDigest } from "../build.ts";
-import { notFigureSpans, RUN_DATES, ShadowTimeout, strictDataset, strictScope, strictShadow, strictUntraced, STRICT_SHADOW_FILE, unitOf, type StrictShadow } from "../strict.ts";
+import { notFigureSpans, shadowLines, RUN_DATES, ShadowTimeout, strictDataset, strictScope, strictShadow, strictUntraced, STRICT_SHADOW_FILE, unitOf, type StrictShadow } from "../strict.ts";
 import { markSentence, said, word } from "../../engine/org-words.ts";
 import { aside, named, namedFor, namedIn, NAMED_VALUES_FILE, notFiguresIn, withNamedValues } from "../../engine/named.ts";
 import { buildReport, type ReportInput } from "../../narrative/sections.ts";
@@ -298,10 +298,12 @@ describe("the shadow changes nothing a run serves, stores or decides", () => {
   test("the worker logs one line of counts and keeps the figures in the run folder only; a failure, one line and no file", () => {
     const dir = mkdtempSync(join(tmpdir(), "hc-shadow-"));
     const lines: string[] = [];
-    keepStrictShadow(dir, "hc-run", real.strictShadow, (l) => lines.push(l));
-    assert.equal(lines.length, 1);
-    assert.match(lines[0]!, /^Run hc-run: the strict check \(shadow\) would mask \d+ of \d+ figures/);
-    assert.doesNotMatch(lines[0]!, /4,321/);
+    keepStrictShadow(dir, "hc-run", real.strictShadow, (l) => lines.push(l), { masks: real.masks, held: real.held });
+    assert.equal(lines.length, 2);
+    assert.match(lines[0]!, /^Run hc-run: strict trace would mask \d+ of \d+ figures .*; current check masks \d+; would hold: (?:yes|no)\.$/);
+    assert.match(lines[1]!, /^Run hc-run: strict trace untraced by rule: /);
+    assert.doesNotMatch(lines.join("\n"), /4,321/);
+    lines.length = 1;
     const kept = JSON.parse(readFileSync(join(dir, STRICT_SHADOW_FILE), "utf8")) as StrictShadow;
     assert.ok(kept.figures.some((f) => f.figure === "4,321"));
     keepStrictShadow(dir, "hc-run", { ok: false, failed: "RangeError" }, (l) => lines.push(l));
@@ -314,6 +316,27 @@ describe("the shadow changes nothing a run serves, stores or decides", () => {
     keepStrictShadow(dir, "hc-run", unwritable, (l) => lines.push(l));
     assert.equal(existsSync(join(dir, STRICT_SHADOW_FILE)), false);
     assert.match(lines.at(-1)!, /couldn't be kept \(TypeError\)/);
+  });
+
+  test("the production log lines carry ids and counts only, whatever the org's words hold (DECISIONS.md 775)", () => {
+    // A finding whose summary quotes the org's words, digits among them, and plants a figure of its own. (A person's
+    // name would have the digest serve its fixed named-people sentence instead, so none is planted here.)
+    const hostile = "Acme Holdings 4,321 Ltd Stage9 of 12";
+    const text = `${hostile} has 9,876 open deals.`;
+    const input = inputWith((f) => (f.id === first.id ? { ...f, summary: text, orgWords: { ...f.orgWords, summary: markSentence(text, [{ start: 0, end: hostile.length }])! } } : f));
+    const checked = check(input);
+    const shadow = (checked.strictShadow as { shadow: StrictShadow }).shadow;
+    assert.ok(shadow.figures.some((f) => f.figure === "9,876"));
+    // And an owner that isn't one of our ids, as if one slipped through: counted, never named.
+    const lines = shadowLines("hc-run", { ...shadow, figures: [...shadow.figures, { ruleId: "Acme Holdings 4,321", kind: "summary", figure: "1" }] }, { masks: checked.masks, held: checked.held });
+    const idsAndCounts = /^Run hc-run: (?:strict trace would mask \d+ of \d+ figures(?: \((?:[a-zA-Z]+ \d+)(?:, [a-zA-Z]+ \d+)*\))?; current check masks \d+; would hold: (?:yes|no)|strict trace untraced by rule: (?:[a-z0-9._:#-]+ \d+)(?:, [a-z0-9._:#-]+ \d+)*)\.$/;
+    for (const line of lines) {
+      assert.match(line, idsAndCounts, line);
+      assert.doesNotMatch(line, /Acme|Holdings|Stage9|4,321|9,876|of 12/);
+    }
+    assert.match(lines[1]!, /\bother 1\b/);
+    // Past the ceiling, were strict enforced, the run would be held.
+    assert.match(shadowLines("hc-run", { ...shadow, untraced: 11, byKind: { summary: { checked: 11, untraced: 11 } } }, { masks: 0, held: null })[0]!, /would hold: yes\.$/);
   });
 
   test("an email, a link, a record id or a word with digits is recorded as \"(identifier)\", by its kind, never as written", () => {

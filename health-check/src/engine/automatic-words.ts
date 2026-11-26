@@ -53,6 +53,28 @@ export const AUTOMATIC_REWRITES: ReadonlyArray<readonly [RegExp, string]> = [
 /** Whole texts that are untrue on such a run and are left out: nothing marks any account, so none is excluded as marked. */
 export const AUTOMATIC_DROPPED: ReadonlySet<string> = new Set(["Shared, system, integration and test accounts, as the calibration marks them", "Accounts calibrated as shared, system, integration or test"]);
 
+/**
+ * Number words the rewrites write that claim nothing, for the strict shadow
+ * (DECISIONS.md 773, 775): each rewritten sentence that holds one, and where the
+ * word sits. "how long one report takes" means a report, not a count of them.
+ */
+const REWRITTEN_WORDS: readonly RegExp[] = [/You haven't told us how long (?<w>one) [a-z ]+ takes your team, and we won't guess\./g];
+
+/** The rewrites' own number words in these texts, by sentence, as said records a word() piece. Null when none. */
+export function rewrittenNotFigures(texts: ReadonlyArray<string | null | undefined>): Array<{ sentence: string; spans: Array<{ start: number; end: number }> }> | null {
+  const out: Array<{ sentence: string; spans: Array<{ start: number; end: number }> }> = [];
+  for (const text of texts) {
+    if (!text) continue;
+    for (const re of REWRITTEN_WORDS) {
+      for (const m of text.matchAll(re)) {
+        const at = m[0].indexOf(m.groups!.w!, m[0].indexOf("long "));
+        if (!out.some((o) => o.sentence === m[0])) out.push({ sentence: m[0], spans: [{ start: at, end: at + m.groups!.w!.length }] });
+      }
+    }
+  }
+  return out.length > 0 ? out : null;
+}
+
 /** The text said for an automatic run, with its marks carried through, or unknown. */
 export function rewordMarked(m: Marked): Marked {
   return AUTOMATIC_REWRITES.reduce((out, [pattern, by]) => (new RegExp(pattern.source).test(out.text) ? replaceMarked(out, new RegExp(pattern.source, "g"), (match, ...groups) => match.replace(new RegExp(pattern.source), by.replace(/\$(\d)/g, (_x, n: string) => String(groups[Number(n) - 1] ?? ""))), true) : out), m);

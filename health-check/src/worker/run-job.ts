@@ -28,7 +28,7 @@ import { recalibrateForRunAgain, type Recalibrated } from "./connect-job.ts";
 import { CalibrationUnsettled, nameCurrencyBeforeRun } from "./name-currency.ts";
 import { setStagesBeforeRun } from "./stage-answer.ts";
 import { checkedDigest, type CheckedDigest } from "../digest/checked.ts";
-import { shadowLine, STRICT_SHADOW_FILE } from "../digest/strict.ts";
+import { shadowLines, STRICT_SHADOW_FILE } from "../digest/strict.ts";
 import { NAMED_VALUES_FILE, NOT_FIGURES_FILE, type NamedValues, type NotFigures } from "../engine/named.ts";
 import { checkSections, decidePulse, decideRelease, lossesOf, SHOWABLE_PULSE_HOLDS, type PulseDecision, sameAsLast, SERVER_FAULT_CODES, type ReleaseDecision, type RunLosses, type SameAsLast } from "./release.ts";
 import { letGoAfterRun, type SeenRun } from "./scan-release.ts";
@@ -693,7 +693,8 @@ async function runLocked(runId: string, deps: WorkerDeps, attempt: Attempt, seen
     // An automatic customer's pulse: its digest checked, marked and masked as an automatic check's, and released or held by the same checks (746).
     const checkedPulse = gatedPulse ? checkedDigest({ input: reportInput, pseudonyms, inventory, madeAt: now().toISOString(), named, notFigures }) : null;
     // What the strict check would have masked, in shadow (DECISIONS.md 768): counts in the log, the figures in the run folder, nothing else.
-    keepStrictShadow(dir, runId, (checkedOne ?? checkedPulse)?.strictShadow, log);
+    const shadowFor = checkedOne ?? checkedPulse;
+    keepStrictShadow(dir, runId, shadowFor?.strictShadow, log, shadowFor ? { masks: shadowFor.masks, held: shadowFor.held } : undefined);
     const digest = input.run.product === "pulse" ? (checkedPulse ? checkedPulse.digest : digestOf(runId, () => buildDigest({ report, pseudonyms, inventory, madeAt: now().toISOString() }), log)) : (checkedOne?.digest ?? null);
     const sections = outputs.flatMap((o) => o.sections);
     // The engine's own, without any survey metric: those go apart, in a savepoint of their own.
@@ -795,14 +796,14 @@ export function namedValuesOf(dir: string): NamedValues {
  * shown. A shadow that failed is logged once, by the error's name; nothing here
  * can cost the run anything.
  */
-export function keepStrictShadow(dir: string, runId: string, shadow: CheckedDigest["strictShadow"], log: (line: string) => void): void {
+export function keepStrictShadow(dir: string, runId: string, shadow: CheckedDigest["strictShadow"], log: (line: string) => void, current?: { masks: number; held: string | null }): void {
   if (!shadow) return;
   try {
     if (!shadow.ok) {
       rmSync(join(dir, STRICT_SHADOW_FILE), { force: true });
       return log(`Run ${runId}: the strict check (shadow) couldn't be worked out (${shadow.failed}), and the run went on without it.`);
     }
-    log(shadowLine(runId, shadow.shadow));
+    for (const line of shadowLines(runId, shadow.shadow, current)) log(line);
     writeFileSync(join(dir, STRICT_SHADOW_FILE), `${JSON.stringify(shadow.shadow, null, 2)}\n`, { mode: 0o600 });
   } catch (err) {
     // An earlier delivery's file never stands in for this one's.
