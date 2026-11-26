@@ -1,5 +1,5 @@
 import { editionIsWhy } from "../../salesforce/refusal-words.ts";
-import { loginDaysOf } from "../../extract/users.ts";
+import { LOGIN_DAYS, loginDaysOf } from "../../extract/users.ts";
 import { named as valued } from "../../engine/named.ts";
 import { passedOn, said, type Said } from "../../engine/org-words.ts";
 import { apexExtractor, metadataExtractor, type ApexTriggerRow } from "../../extract/automation.ts";
@@ -293,7 +293,12 @@ function integrations(ctx: Ctx): Metric {
   return measured(DEFINITIONS.integrations, evidence, points, segments, {
     exclusions,
     // The period the logins read covers, not a fixed 90: the dormant period widens it (DECISIONS.md 773).
-    assumptions: [valued(said`API logins are successful logins with an API type in the last ${loginDays} days. A user with several applications has their logins under the first`, { loginDays: [loginDays, "day"] })],
+    // A whole literal while the period is the read's least, so a consultant-led run's texts are known as ours as before.
+    assumptions: [
+      loginDays === LOGIN_DAYS
+        ? valued("API logins are successful logins with an API type in the last 90 days. A user with several applications has their logins under the first", { loginDays: [LOGIN_DAYS, "day"] })
+        : valued(said`API logins are successful logins with an API type in the last ${loginDays} days. A user with several applications has their logins under the first`, { loginDays: [loginDays, "day"] }),
+    ],
     stats: { connectedApps: kinds("connected app"), namedCredentials: kinds("named credential"), remoteSites: kinds("remote site"), ...(apiTotal === null ? {} : { apiLogins: apiTotal }) },
   });
 }
