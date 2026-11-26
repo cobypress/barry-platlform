@@ -1,6 +1,7 @@
 import { AsyncLocalStorage } from "node:async_hooks";
 import { createHash } from "node:crypto";
 import { passedOnSpans } from "./passed-on.ts";
+import { notFigures } from "./named.ts";
 
 // Which characters of a finding's sentence were chosen inside the customer's org
 // (DECISIONS.md 655): a flow's label, a field's name, a stage. The connector
@@ -24,6 +25,19 @@ export type Said = string & { readonly [SAID]: true };
 const ORG = Symbol("org words");
 /** A value the org chose, wrapped for `said`. */
 export type OrgWords = { readonly [ORG]: string };
+
+const WORD = Symbol("not a figure");
+/** A word of ours that reads as a number but claims none, wrapped for `said` (DECISIONS.md 773). */
+export type NotAFigure = { readonly [WORD]: string };
+
+/**
+ * A number word of ours that is no claim: "we don't impute one", "count them
+ * twice", "one trigger per object". The text is ours as written; said records
+ * where it sits so the strict check (DECISIONS.md 773, in shadow) sets it aside.
+ * Nothing else reads it: the reader and every served check see the word as before.
+ * A lint test refuses it around a digit or anything but one literal.
+ */
+export const word = (text: string): NotAFigure => ({ [WORD]: text });
 
 /** Marks a value the org chose: a label, an API name, a stage, a picklist value. */
 export const org = (text: string): OrgWords => ({ [ORG]: text });
@@ -53,7 +67,7 @@ const PASSED = Symbol("passed on");
 export type PassedOn = { readonly [PASSED]: { text: string; spans: OrgSpan[] | null; passed: OrgSpan[] } };
 
 /** What `said` takes: a number, org words, a reason passed on, a sentence already made, or a literal. Never `any`. */
-type Piece<T> = 0 extends 1 & T ? never : T extends number | OrgWords | PassedOn | Said ? T : Literal<T>;
+type Piece<T> = 0 extends 1 & T ? never : T extends number | OrgWords | PassedOn | Said | NotAFigure ? T : Literal<T>;
 
 /**
  * One analysis's sentences and their spans. A text made twice with different
@@ -194,10 +208,11 @@ function push(spans: OrgSpan[], start: number, end: number): void {
  * the ledger doesn't hold. Unknown goes up through every level that quotes it.
  * A sentence with org words made anywhere but the open ledger is unknown here.
  */
-function piecesOf(strings: readonly string[], pieces: readonly unknown[], sentences = false): { text: string; spans: OrgSpan[] | null; passed: OrgSpan[] } {
+function piecesOf(strings: readonly string[], pieces: readonly unknown[], sentences = false): { text: string; spans: OrgSpan[] | null; passed: OrgSpan[]; words: OrgSpan[] } {
   let text = strings[0]!;
   const spans: OrgSpan[] = [];
   const passed: OrgSpan[] = [];
+  const words: OrgSpan[] = [];
   let known = true;
   pieces.forEach((piece, i) => {
     const at = text.length;
@@ -210,6 +225,10 @@ function piecesOf(strings: readonly string[], pieces: readonly unknown[], senten
       passed.push({ start: at, end: text.length });
       // A reason passed on twice keeps where the first one sits, so it too is held to the org's values.
       for (const r of inner) passed.push({ start: at + r.start, end: at + r.end });
+    } else if (piece !== null && typeof piece === "object" && WORD in piece) {
+      // Our own word, and no figure: no span of the org's, only where it sits (DECISIONS.md 773).
+      text += (piece as NotAFigure)[WORD];
+      words.push({ start: at, end: text.length });
     } else if (piece !== null && typeof piece === "object" && ORG in piece) {
       const words = (piece as OrgWords)[ORG];
       text += words;
@@ -233,7 +252,7 @@ function piecesOf(strings: readonly string[], pieces: readonly unknown[], senten
     }
     text += strings[i + 1]!;
   });
-  return { text, spans: known ? spans : null, passed };
+  return { text, spans: known ? spans : null, passed, words };
 }
 
 function record(text: string, spans: OrgSpan[] | null, passed: OrgSpan[] = []): void {
@@ -244,8 +263,9 @@ function record(text: string, spans: OrgSpan[] | null, passed: OrgSpan[] = []): 
 
 /** A sentence with the characters it took from the org marked. Returns the plain string. */
 export function said<const P extends readonly unknown[]>(strings: TemplateStringsArray, ...pieces: P & { readonly [K in keyof P]: Piece<P[K]> }): Said {
-  const { text, spans, passed } = piecesOf(strings, pieces);
+  const { text, spans, passed, words } = piecesOf(strings, pieces);
   record(text, spans, passed);
+  if (words.length > 0) notFigures(text, words);
   return text as Said;
 }
 

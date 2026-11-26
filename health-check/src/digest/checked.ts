@@ -11,7 +11,7 @@ import type { Inventory } from "../schemas/inventory.ts";
 import { buildDigest, READINESS_CODE_PATHS } from "./build.ts";
 import { PATHS_CODE_PATHS } from "./paths.ts";
 import { spansIfCurrent, type MarkedSentence } from "../engine/org-words.ts";
-import type { NamedValues } from "../engine/named.ts";
+import type { NamedValues, NotFigures } from "../engine/named.ts";
 import { strictShadow, type StrictShadow } from "./strict.ts";
 
 // An automatic run's digest, checked before the run is released (DECISIONS.md
@@ -72,6 +72,8 @@ export type CheckedDigestFor = {
   build?: (input: ReportInput) => BuiltReport;
   /** The run folder's named values (named-values.json), for the strict shadow alone. */
   named?: NamedValues;
+  /** The run folder's not-figures (not-figures.json), for the strict shadow alone (DECISIONS.md 773). */
+  notFigures?: NotFigures;
   /** How the strict shadow is worked out. strictShadow unless a test says otherwise. */
   strict?: typeof strictShadow;
 };
@@ -407,17 +409,17 @@ export function settlePaths(digest: RunDigest, set: FigureSet): { digest: RunDig
 }
 
 /** The strict shadow, caught whole: whatever goes wrong in it, the run goes on as it would without it (DECISIONS.md 768). */
-function shadowOf(strict: typeof strictShadow, digest: RunDigest, report: BuiltReport, set: FigureSet, named: NamedValues): NonNullable<CheckedDigest["strictShadow"]> {
+function shadowOf(strict: typeof strictShadow, digest: RunDigest, report: BuiltReport, set: FigureSet, named: NamedValues, notFigures: NotFigures): NonNullable<CheckedDigest["strictShadow"]> {
   try {
     // Copies of all it reads, so nothing the shadow does can reach the digest, report or set the run goes on with.
-    return { ok: true, shadow: strict(structuredClone(digest), structuredClone(report), structuredClone(set), structuredClone(named)) };
+    return { ok: true, shadow: strict(structuredClone(digest), structuredClone(report), structuredClone(set), structuredClone(named), undefined, undefined, structuredClone(notFigures)) };
   } catch (err) {
     // The error's name alone: a message can quote a text.
     return { ok: false, failed: err instanceof Error ? err.name : typeof err };
   }
 }
 
-export function checkedDigest({ input, pseudonyms, inventory, madeAt, build = buildReport, named = {}, strict = strictShadow }: CheckedDigestFor): CheckedDigest {
+export function checkedDigest({ input, pseudonyms, inventory, madeAt, build = buildReport, named = {}, notFigures = {}, strict = strictShadow }: CheckedDigestFor): CheckedDigest {
   const none: CheckedDigest = { digest: null, masks: 0, unmatched: 0, unmarked: 0, held: "no_digest", readinessWithheld: 0 };
   let report: BuiltReport;
   let digest: RunDigest;
@@ -430,7 +432,7 @@ export function checkedDigest({ input, pseudonyms, inventory, madeAt, build = bu
   // The set the data as stored gives, so a mask never makes another figure untraceable (682).
   const set = digestDataset(report, pseudonyms);
   // Counted on the digest as first made, before any mask, and read by nothing below (DECISIONS.md 768).
-  const shadow = shadowOf(strict, digest, report, set, named);
+  const shadow = shadowOf(strict, digest, report, set, named, notFigures);
   // Every count reads the digest without AI readiness, so the block can never change one, nor what is masked (742).
   const raws = untraced(counted(digest), set);
   if (raws.length > 0) {

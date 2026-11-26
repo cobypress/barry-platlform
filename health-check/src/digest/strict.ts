@@ -22,7 +22,7 @@ import { digestTextsAt, marksOf, type DigestText } from "./checked.ts";
 // another finding's figures, never the org's words (orgFree). It changes
 // nothing: it only counts what it would have masked.
 
-import type { NamedUnit, NamedValues } from "../engine/named.ts";
+import type { NamedUnit, NamedValues, NotFigures } from "../engine/named.ts";
 import { extractFigures } from "../numbercheck/extract.ts";
 export { NAMED_VALUES_FILE, type NamedValues } from "../engine/named.ts";
 /** The strict check's shadow counts, written by the worker. Run folder only: never in the digest, never stored, never shown. */
@@ -317,7 +317,25 @@ export class ShadowTimeout extends Error {
  * (DECISIONS.md 768). Only marked texts are read: one with no marks is never
  * served as traced (withheld whole, or the run held) whatever it holds.
  */
-export function strictShadow(digest: RunDigest, report: BuiltReport, set: FigureSet, named: NamedValues = {}, budgetMs = SHADOW_BUDGET_MS, now: () => number = () => performance.now()): StrictShadow {
+/** The id whose word() marks a text may use: its finding's, metric's or insight's. */
+function wordsOwner(digest: RunDigest, t: DigestText): string | null {
+  const at = t.at[0]!;
+  if (t.path.startsWith("findings[].")) return digest.findings[at]!.id;
+  if (t.path.startsWith("metrics[].")) return digest.metrics[at]!.id;
+  if (t.path.startsWith("paths.insights[].")) return digest.paths!.insights[at]!.id;
+  return null;
+}
+
+/** Where in a text its own sentences' word() pieces sit (DECISIONS.md 773): each sentence, wherever the text holds it whole. */
+export function notFigureSpans(text: string, marks: NotFigures[string] | undefined): OrgSpan[] {
+  const out: OrgSpan[] = [];
+  for (const { sentence, spans } of marks ?? []) {
+    for (let at = text.indexOf(sentence); at !== -1; at = text.indexOf(sentence, at + 1)) for (const s of spans) out.push({ start: at + s.start, end: at + s.end });
+  }
+  return out.sort((a, b) => a.start - b.start);
+}
+
+export function strictShadow(digest: RunDigest, report: BuiltReport, set: FigureSet, named: NamedValues = {}, budgetMs = SHADOW_BUDGET_MS, now: () => number = () => performance.now(), notFigures: NotFigures = {}): StrictShadow {
   const until = now() + budgetMs;
   const strict = strictDataset(report, set, named);
   const scopes = new Map<string, FigureSet>();
@@ -335,7 +353,10 @@ export function strictShadow(digest: RunDigest, report: BuiltReport, set: Figure
     const marks = marksOf(digest, t);
     if (!marks || t.text === "") continue;
     const kind = strictKindOf(t.path);
-    const out = strictUntraced(t.text, marks.orgWords, scoped(strictScope(digest, report, t)));
+    // A number word of ours that claims nothing is set aside, as a figure in the org's words is (764).
+    const owner = wordsOwner(digest, t);
+    const aside = owner ? notFigureSpans(t.text, notFigures[owner]) : [];
+    const out = strictUntraced(t.text, aside.length ? [...marks.orgWords, ...aside].sort((a, b) => a.start - b.start) : marks.orgWords, scoped(strictScope(digest, report, t)));
     const k = (shadow.byKind[kind] ??= { checked: 0, untraced: 0 });
     k.checked += out.checked;
     k.untraced += out.unmatched.length;

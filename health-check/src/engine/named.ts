@@ -73,15 +73,40 @@ export function each<T>(items: readonly T[], values: (item: T) => Readonly<Recor
   return out;
 }
 
+/** Where in a sentence of ours a number word claims nothing (word(), DECISIONS.md 773), by sentence. */
+export type NotFigures = Readonly<Record<string, ReadonlyArray<{ sentence: string; spans: ReadonlyArray<{ start: number; end: number }> }>>>;
+/** Where a run keeps them, by finding or metric id. Run folder only. */
+export const NOT_FIGURES_FILE = "not-figures.json";
+type WordEntry = { text: string; spans: Array<{ start: number; end: number }>; owner: string | null };
+let words: WordEntry[] | null = null;
+const fixedWords = new Map<string, Array<{ start: number; end: number }>>();
+
+/** Records where a sentence's word() pieces sit, as said makes it. */
+export function notFigures(text: string, spans: Array<{ start: number; end: number }>): void {
+  if (words) words.push({ text, spans, owner });
+  else if (fixedWords.size < FIXED_MAX && !fixedWords.has(text)) fixedWords.set(text, spans);
+}
+
+/** The sentences these texts hold whole that carry word() pieces, made while `by` ran or at a module's load. */
+export function notFiguresIn(texts: ReadonlyArray<string | null | undefined>, by: string): Array<{ sentence: string; spans: Array<{ start: number; end: number }> }> | null {
+  if (!words) return null;
+  const own = texts.filter((t): t is string => typeof t === "string" && t.trim() !== "");
+  const out = new Map<string, Array<{ start: number; end: number }>>();
+  for (const [text, spans] of fixedWords) if (own.some((t) => t.includes(text))) out.set(text, spans);
+  for (const e of words) if (e.owner === by && !out.has(e.text) && own.some((t) => t.includes(e.text))) out.set(e.text, e.spans);
+  return out.size > 0 ? [...out].map(([sentence, spans]) => ({ sentence, spans })) : null;
+}
+
 /** Runs one analysis with its own ledger, as `said`'s marks are (DECISIONS.md 655). */
 export function withNamedValues<T>(run: () => T): T {
-  const [outerLedger, outerOwner] = [ledger, owner];
+  const [outerLedger, outerOwner, outerWords] = [ledger, owner, words];
   ledger = [];
+  words = [];
   owner = null;
   try {
     return run();
   } finally {
-    [ledger, owner] = [outerLedger, outerOwner];
+    [ledger, owner, words] = [outerLedger, outerOwner, outerWords];
   }
 }
 

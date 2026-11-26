@@ -29,7 +29,7 @@ import { CalibrationUnsettled, nameCurrencyBeforeRun } from "./name-currency.ts"
 import { setStagesBeforeRun } from "./stage-answer.ts";
 import { checkedDigest, type CheckedDigest } from "../digest/checked.ts";
 import { shadowLine, STRICT_SHADOW_FILE } from "../digest/strict.ts";
-import { NAMED_VALUES_FILE, type NamedValues } from "../engine/named.ts";
+import { NAMED_VALUES_FILE, NOT_FIGURES_FILE, type NamedValues, type NotFigures } from "../engine/named.ts";
 import { checkSections, decidePulse, decideRelease, lossesOf, SHOWABLE_PULSE_HOLDS, type PulseDecision, sameAsLast, SERVER_FAULT_CODES, type ReleaseDecision, type RunLosses, type SameAsLast } from "./release.ts";
 import { letGoAfterRun, type SeenRun } from "./scan-release.ts";
 import { progressOf, RunClosedError, runOverall, DELIVERY_OUTCOMES, type RunJobInput } from "./types.ts";
@@ -688,9 +688,10 @@ async function runLocked(runId: string, deps: WorkerDeps, attempt: Attempt, seen
     // A pulse's digest, from the report its result is made from, with its results (DECISIONS.md 632). A check's waits for its documents.
     // An automatic run's, checked, masked or held, written with its release (DECISIONS.md 693): its portal has nothing else to show.
     const named = automatic || gatedPulse ? namedValuesOf(dir) : {};
-    const checkedOne = automatic ? checkedDigest({ input: reportInput, pseudonyms, inventory, madeAt: now().toISOString(), named }) : null;
+    const notFigures = automatic || gatedPulse ? notFiguresOf(dir) : {};
+    const checkedOne = automatic ? checkedDigest({ input: reportInput, pseudonyms, inventory, madeAt: now().toISOString(), named, notFigures }) : null;
     // An automatic customer's pulse: its digest checked, marked and masked as an automatic check's, and released or held by the same checks (746).
-    const checkedPulse = gatedPulse ? checkedDigest({ input: reportInput, pseudonyms, inventory, madeAt: now().toISOString(), named }) : null;
+    const checkedPulse = gatedPulse ? checkedDigest({ input: reportInput, pseudonyms, inventory, madeAt: now().toISOString(), named, notFigures }) : null;
     // What the strict check would have masked, in shadow (DECISIONS.md 768): counts in the log, the figures in the run folder, nothing else.
     keepStrictShadow(dir, runId, (checkedOne ?? checkedPulse)?.strictShadow, log);
     const digest = input.run.product === "pulse" ? (checkedPulse ? checkedPulse.digest : digestOf(runId, () => buildDigest({ report, pseudonyms, inventory, madeAt: now().toISOString() }), log)) : (checkedOne?.digest ?? null);
@@ -761,6 +762,19 @@ async function runLocked(runId: string, deps: WorkerDeps, attempt: Attempt, seen
   if (pulseDecision?.kind === "hold") return { outcome: "done", detail: `Pulse ${runId} is held: ${pulseDecision.reason}` };
   if (decision) return { outcome: "done", detail: decision.kind === "release" ? `Run ${runId} is released` : `Run ${runId} is held: ${decision.reason}` };
   return { outcome: "done", detail: `Run ${runId} is ${result.run.status.replace("_", " ")}` };
+}
+
+/** The run folder's not-figures (DECISIONS.md 773), or none: a missing or unreadable file only makes the shadow count more. */
+export function notFiguresOf(dir: string): NotFigures {
+  try {
+    const path = join(dir, NOT_FIGURES_FILE);
+    if (!existsSync(path)) return {};
+    const span = z.object({ start: z.number().int().nonnegative(), end: z.number().int().positive() });
+    const parsed = z.record(z.string(), z.array(z.object({ sentence: z.string(), spans: z.array(span) }))).safeParse(JSON.parse(readFileSync(path, "utf8")));
+    return parsed.success ? parsed.data : {};
+  } catch {
+    return {};
+  }
 }
 
 /** The run folder's named values (DECISIONS.md 768), or none: a missing or unreadable file only makes the shadow count more. */
