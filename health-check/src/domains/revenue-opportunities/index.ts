@@ -103,13 +103,13 @@ const winBacks: Rule = {
     const evidence: Evidence[] = [{ ...data.evidence[0]!, count: candidates.length, dateRange: { from: oldest.toISOString().slice(0, 10), to: newest.toISOString().slice(0, 10) }, exclusions, note: `Lost or no decision between ${WIN_BACK_MIN_MONTHS} and ${WIN_BACK_MAX_MONTHS} months ago` }];
     const segmentsChecked = [...dealSegments(ctx, closed), { dimension: "outcome", segments: distinct(closed.map((d) => d.category ?? "Unknown")) }];
     if (closed.length === 0) return { outcome: "pass", summary: said`No deals have been lost in the window.`, evidence, segmentExemptReason: "There are no lost deals to segment." };
-    if (candidates.length < MIN_DEALS) return { outcome: "pass", summary: said`${plural(candidates.length, "lost deal")} from ${WIN_BACK_MIN_MONTHS} to ${WIN_BACK_MAX_MONTHS} months ago could be revisited, under the ${MIN_DEALS} we'd call a pattern.`, evidence, segmentsChecked, facts: { candidates: candidates.length } };
+    if (candidates.length < MIN_DEALS) return { outcome: "pass", summary: named(said`${plural(candidates.length, "lost deal")} from ${WIN_BACK_MIN_MONTHS} to ${WIN_BACK_MAX_MONTHS} months ago could be revisited, under the ${MIN_DEALS} we'd call a pattern.`, { candidates: candidates.length, winBackMinMonths: WIN_BACK_MIN_MONTHS, winBackMaxMonths: [WIN_BACK_MAX_MONTHS, "month"], minDeals: MIN_DEALS }), evidence, segmentsChecked, facts: { candidates: candidates.length } };
     const amount = total(candidates);
     const noDecision = candidates.filter((d) => d.category === "no_decision").length;
     const value = atOwnWinRate(ctx, amount, {
       multiCurrency: data.multiCurrency,
       period: "one-off, if these deals are reopened",
-      basis: said`${plural(candidates.length, "deal")} with a total Amount of ${moneySaid(amount, ctx.calibration.currency)}, at the amount quoted then`,
+      basis: named(said`${plural(candidates.length, "deal")} with a total Amount of ${moneySaid(amount, ctx.calibration.currency)}, at the amount quoted then`, { candidates: candidates.length, amount: [amount, "money"] }),
       caveat: said`Assumes a win-back wins as often as a new deal. We don't have your win-back history, so treat this as a ceiling, and the reason each deal was lost may still stand`,
     });
     return {
@@ -152,7 +152,7 @@ const dormantAccounts: Rule = {
     const evidence = [ctx.ev(accounts.source, { count: dormant.length, exclusions: ["Accounts with an open deal", `Accounts with activity in the last ${dormantDays} days`], note: `Calibrated dormant period of ${dormantDays} days` })];
     const segmentsChecked = [{ dimension: "team", segments: distinct(accounts.data.map((a) => roles.get(a.OwnerId) ?? "No role")) }, { dimension: "owner", segments: distinct(accounts.data.map((a) => a.OwnerId)) }];
     if (accounts.data.length === 0) return { outcome: "not_measurable", reason: said`No account has a won deal, so there are no past customers to check.`, evidence };
-    if (dormant.length < MIN_DEALS) return { outcome: "pass", summary: said`${plural(dormant.length, "past customer")} of ${accounts.data.length} ${dormant.length === 1 ? "has" : "have"} gone quiet, under the ${MIN_DEALS} we'd call a pattern.`, evidence, segmentsChecked, facts: { dormant: dormant.length, accounts: accounts.data.length } };
+    if (dormant.length < MIN_DEALS) return { outcome: "pass", summary: named(said`${plural(dormant.length, "past customer")} of ${accounts.data.length} ${dormant.length === 1 ? "has" : "have"} gone quiet, under the ${MIN_DEALS} we'd call a pattern.`, { dormant: dormant.length, data: accounts.data.length, minDeals: MIN_DEALS }), evidence, segmentsChecked, facts: { dormant: dormant.length, accounts: accounts.data.length } };
     const wonAmounts = wonDeals.flatMap((d) => (d.Amount === null ? [] : [d.Amount]));
     const typical = wonAmounts.length >= ctx.calibration.minSample ? median(wonAmounts) : null;
     const typicalWon = typical === null ? null : Math.round(typical);

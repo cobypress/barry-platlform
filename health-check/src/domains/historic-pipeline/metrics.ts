@@ -139,7 +139,7 @@ function winRate(ctx: Ctx, data: Ready): Metric[] {
   const unsplit = unsplitLostReason(data, ctx, [definitions.count.id, definitions.value.id, definitions.noDecision.id]);
   const won = decided.filter((d) => d.category === "won");
   const rate = (group: Deal[]): number => pct(group.filter((d) => d.category === "won").length, group.length);
-  const thin = (n: number): Said => said`${n} closed deals is below the calibrated minimum of ${minSample}.`;
+  const thin = (n: number): Said => named(said`${n} closed deals is below the calibrated minimum of ${minSample}.`, { n, minSample });
   const dims = dimensions(ctx);
   const metrics: Metric[] = [];
 
@@ -206,7 +206,7 @@ function stageConversion(ctx: Ctx, data: Ready): Metric[] {
   const neverOpen = closed.length - withStages.length;
   const exclusions = [...definition.exclusions, ...(neverOpen ? [said`${neverOpen} deals with no recorded open stage`] : [])];
   const { minSample } = ctx.calibration;
-  if (withStages.length < minSample) return [notMeasurable({ ...definition, exclusions }, said`${withStages.length} closed deals with stage history is below the calibrated minimum of ${minSample}.`)];
+  if (withStages.length < minSample) return [notMeasurable({ ...definition, exclusions }, named(said`${withStages.length} closed deals with stage history is below the calibrated minimum of ${minSample}.`, { withStages: withStages.length, minSample }))];
 
   // Only stages a deal in the window actually sat in. A retired stage earlier in
   // the order would otherwise show every deal passing through it: on a real org,
@@ -264,7 +264,7 @@ function salesCycle(ctx: Ctx, data: Ready): Metric[] {
     const deals = inWindow.filter((d) => (d.history.length === 0 || hasOpenStage(d, data)) && rawDays(d) >= -1);
     const unusable = inWindow.length - deals.length;
     const exclusions = [...definition.exclusions, ...(unusable ? [said`${unusable} deals created already closed, or closed before they were created`] : [])];
-    if (deals.length < minSample) return notMeasurable({ ...definition, exclusions }, said`${deals.length} ${outcome} deals is below the calibrated minimum of ${minSample}.`);
+    if (deals.length < minSample) return notMeasurable({ ...definition, exclusions }, named(said`${deals.length} ${outcome} deals is below the calibrated minimum of ${minSample}.`, { deals: deals.length, minSample }));
     const days = (d: Deal): number => Math.max(0, rawDays(d));
     const all = deals.map(days);
     const fallback = deals.filter((d) => d.closedAtSource === "close_date").length;
@@ -311,7 +311,7 @@ function slippage(ctx: Ctx, data: Ready): Metric[] {
   const missing = deals.length - withHistory.length;
   const exclusions = [...data.exclusions, ...(missing ? [said`${missing} deals with no recorded open stage`] : [])];
   if (withHistory.length < minSample) {
-    const reason = said`${withHistory.length} closed deals with history is below the calibrated minimum of ${minSample}.`;
+    const reason = named(said`${withHistory.length} closed deals with history is below the calibrated minimum of ${minSample}.`, { withHistory: withHistory.length, minSample });
     return [rateDefinition, quarterDefinition, daysDefinition].map((d) => notMeasurable({ ...d, exclusions }, reason));
   }
   const dims = dimensions(ctx);
@@ -325,7 +325,7 @@ function slippage(ctx: Ctx, data: Ready): Metric[] {
       ? notMeasurable({ ...quarterDefinition, exclusions }, "The org's fiscal year couldn't be read, and the calibration doesn't set one.")
       : measured({ ...quarterDefinition, exclusions }, { value: crossRate(withHistory), n: withHistory.length, dateRange: ctx.window, segments: segment(withHistory, dims, minSample, crossRate) }),
   ];
-  if (slipped.length < minSample) metrics.push(notMeasurable({ ...daysDefinition, exclusions }, said`${slipped.length} slipped deals is below the calibrated minimum of ${minSample}.`));
+  if (slipped.length < minSample) metrics.push(notMeasurable({ ...daysDefinition, exclusions }, named(said`${slipped.length} slipped deals is below the calibrated minimum of ${minSample}.`, { slipped: slipped.length, minSample })));
   else metrics.push(measured({ ...daysDefinition, exclusions }, { value: round1(median(slipped.map(totalDays))), n: slipped.length, dateRange: ctx.window, segments: segment(slipped, dims, minSample, (group) => round1(median(group.map(totalDays)))), stats: meanStat(slipped.map(totalDays)) }));
   return metrics;
 }
@@ -407,7 +407,7 @@ function pointInTime(ctx: Ctx, data: Ready): Metric[] {
     // Judged month by month. One old row shouldn't make earlier months look
     // measured when most deals that existed then have no history yet.
     if (pct(gapped, gapped + placed) > MAX_MISSING_HISTORY_PCT) {
-      const reason = said`${gapped} of ${gapped + placed} deals that existed then have no stage history yet`;
+      const reason = named(said`${gapped} of ${gapped + placed} deals that existed then have no stage history yet`, { gapped });
       countSeries.push({ date: day, value: null, n: 0, notMeasurableReason: reason });
       valueSeries.push({ date: day, value: null, n: 0, notMeasurableReason: reason });
       continue;
@@ -416,7 +416,7 @@ function pointInTime(ctx: Ctx, data: Ready): Metric[] {
     countSeries.push({ date: day, value: open.length, n: open.length, notMeasurableReason: null });
     const blank = open.filter((o) => o.snapshot.amount === null).length;
     if (pct(blank, open.length) > MAX_MISSING_AMOUNT_PCT) {
-      valueSeries.push({ date: day, value: null, n: open.length, notMeasurableReason: said`${blank} of ${open.length} open deals had no amount` });
+      valueSeries.push({ date: day, value: null, n: open.length, notMeasurableReason: named(said`${blank} of ${open.length} open deals had no amount`, { blank, open: open.length }) });
     } else {
       valueSeries.push({ date: day, value: Math.round(open.reduce((sum, o) => sum + (o.snapshot.amount ?? 0), 0)), n: open.length, notMeasurableReason: null });
     }

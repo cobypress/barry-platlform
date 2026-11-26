@@ -1,4 +1,5 @@
 import { metadataExtractor, scheduledJobsExtractor } from "../../extract/automation.ts";
+import { named } from "../../engine/named.ts";
 import { userKinds } from "../user-kinds.ts";
 import { componentChangesExtractor } from "../../extract/component-changes.ts";
 import { ownershipExtractor, usersExtractor, type UserRow } from "../../extract/users.ts";
@@ -38,7 +39,7 @@ const MIN_SEGMENT = 5;
 const OWNER_SKEW_RECORDS = 10_000;
 
 const confidenceOf = (practice: Practice): IssueResult["confidence"] => (practice.basis === "docs" ? "high" : "medium");
-const noted = (practice: Practice): Said => said`Salesforce's position: ${practice.position} Source: ${practice.source}, checked ${practice.checkedOn}${practice.basis === "secondary" ? ", from secondary sources" : ""}.`;
+const noted = (practice: Practice): Said => named(said`Salesforce's position: ${practice.position} Source: ${practice.source}, checked ${practice.checkedOn}${practice.basis === "secondary" ? ", from secondary sources" : ""}.`, { checkedOn: [practice.checkedOn, "date"] });
 
 export const ROLE_PRACTICE: Practice = {
   position: said`The forecast hierarchy is generated from the role hierarchy, and role-based sharing and reporting rely on it too.`,
@@ -68,12 +69,12 @@ const usersWithoutRole: Rule = {
     if (people.length === 0) return { outcome: "pass", summary: said`There are no people in scope to check.`, evidence, segmentExemptReason: "There are no users to segment." };
     const result = segmentRate(people, (u) => u.UserRole === null, { profile: (u) => u.Profile?.Name ?? "No profile", licence: (u) => u.Profile?.UserLicense?.Name ?? "Unknown" }, { segmentLimit: 25, minSegment: MIN_SEGMENT });
     if (result.rate <= ROLE_GAP_LIMIT && result.hotspots.length === 0) {
-      return { outcome: "pass", summary: said`People with no role: ${result.hits} of ${result.n} (${result.rate}%), with no profile above 25%. ${noted(ROLE_PRACTICE)}`, evidence, segmentsChecked: result.segmentsChecked, facts: { hits: result.hits, n: result.n, rate: result.rate } };
+      return { outcome: "pass", summary: named(said`People with no role: ${result.hits} of ${result.n} (${result.rate}%), with no profile above 25%. ${noted(ROLE_PRACTICE)}`, { hits: result.hits, n: result.n, rate: [result.rate, "percent"] }), evidence, segmentsChecked: result.segmentsChecked, facts: { hits: result.hits, n: result.n, rate: result.rate } };
     }
     return {
       outcome: "issue",
       title: said`Some people sit outside the role hierarchy`,
-      summary: said`People with no role: ${result.hits} of ${result.n} (${result.rate}%). Their deals won't roll up to a manager's forecast. ${noted(ROLE_PRACTICE)}`,
+      summary: named(said`People with no role: ${result.hits} of ${result.n} (${result.rate}%). Their deals won't roll up to a manager's forecast. ${noted(ROLE_PRACTICE)}`, { hits: result.hits, n: result.n, rate: [result.rate, "percent"] }),
       recommendation: said`Give each of these people a role, or confirm with the business that they don't sell or need to see team data.`,
       recommendationType: "change",
       severity: "medium",
@@ -116,13 +117,13 @@ const ownershipSkew: Rule = {
     const segments = [{ dimension: "object", segments: ownership.scanned.length }, { dimension: "owner", segments: Object.keys(ownership.byOwner).length }];
     if (skewed.length === 0) {
       if (ownership.incomplete.length > 0) return { outcome: "not_measurable", reason: said`No skew in what we could read, but these objects couldn't be read: ${joinSaid(ownership.incomplete.map((o) => said`${org(o)}`), ", ")}.`, evidence };
-      return { outcome: "pass", summary: said`No owner holds more than ${OWNER_SKEW_RECORDS} records of any scanned object. ${noted(SKEW_PRACTICE)}`, evidence, segmentsChecked: segments };
+      return { outcome: "pass", summary: named(said`No owner holds more than ${OWNER_SKEW_RECORDS} records of any scanned object. ${noted(SKEW_PRACTICE)}`, { ownerSkewRecords: OWNER_SKEW_RECORDS }), evidence, segmentsChecked: segments };
     }
     const labelOf = (id: string): string => (id.startsWith("005") ? ctx.userLabel(id) : "A queue");
     return {
       outcome: "issue",
       title: said`A few owners hold enough records to slow sharing changes`,
-      summary: said`${plural(skewed.length, "owner and object pair")} above ${grouped(OWNER_SKEW_RECORDS)} records. The largest is ${grouped(skewed[0]!.records)} ${org(labelsOf(ctx).object(skewed[0]!.object))} records. ${noted(SKEW_PRACTICE)}`,
+      summary: named(said`${plural(skewed.length, "owner and object pair")} above ${grouped(OWNER_SKEW_RECORDS)} records. The largest is ${grouped(skewed[0]!.records)} ${org(labelsOf(ctx).object(skewed[0]!.object))} records. ${noted(SKEW_PRACTICE)}`, { skewed: skewed.length, ownerSkewRecords: OWNER_SKEW_RECORDS }),
       recommendation: said`Spread these records across more owners. If one owner has to stay, keep it out of the role hierarchy's lower levels and out of public groups used in sharing rules.`,
       recommendationType: "change",
       severity: "medium",
@@ -160,11 +161,11 @@ const afterSaveSameRecord: Rule = {
     const evidence = [ctx.ev({ kind: "metadata", path: "flows/*.flow" }, { count: afterSave.length, exclusions: ["Inactive flows", "Flows that aren't record-triggered after save"], note: noted(SAME_RECORD_PRACTICE) })];
     const segments = [{ dimension: "object", segments: new Set(afterSave.map((f) => f.object ?? "Unknown")).size }];
     if (afterSave.length === 0) return { outcome: "pass", summary: said`There are no active after-save record-triggered flows.`, evidence, segmentExemptReason: "There are no flows to segment." };
-    if (hits.length === 0) return { outcome: "pass", summary: said`None of the ${afterSave.length} active after-save flows updates its own record. ${noted(SAME_RECORD_PRACTICE)}`, evidence, segmentsChecked: segments };
+    if (hits.length === 0) return { outcome: "pass", summary: named(said`None of the ${afterSave.length} active after-save flows updates its own record. ${noted(SAME_RECORD_PRACTICE)}`, { afterSave: afterSave.length }), evidence, segmentsChecked: segments };
     return {
       outcome: "issue",
       title: said`Flows are doing same-record updates the slow way`,
-      summary: said`${plural(hits.length, "active after-save flow")} of ${afterSave.length} ${hits.length === 1 ? "updates" : "update"} the record that triggered ${hits.length === 1 ? "it" : "them"}. ${noted(SAME_RECORD_PRACTICE)}`,
+      summary: named(said`${plural(hits.length, "active after-save flow")} of ${afterSave.length} ${hits.length === 1 ? "updates" : "update"} the record that triggered ${hits.length === 1 ? "it" : "them"}. ${noted(SAME_RECORD_PRACTICE)}`, { hits: hits.length, afterSave: afterSave.length }),
       recommendation: said`Move the same-record updates to a before-save flow. Keep the rest of the flow where it is if it needs after-save actions.`,
       recommendationType: "change",
       severity: "low",
@@ -204,11 +205,11 @@ const jobsOnInactiveOwners: Rule = {
     const evidence = [ctx.ev(jobs.source, { count: jobs.data.length, exclusions: ["Deleted and completed jobs"], note: noted(JOB_OWNER_PRACTICE) })];
     const segments = [{ dimension: "job type", segments: new Set(jobs.data.map((j) => j.CronJobDetail?.JobType ?? "Unknown")).size }];
     if (jobs.data.length === 0) return { outcome: "pass", summary: said`There are no scheduled jobs.`, evidence, segmentExemptReason: "There are no jobs to segment." };
-    if (hits.length === 0) return { outcome: "pass", summary: said`None of the ${jobs.data.length} scheduled jobs is owned by an inactive user. ${noted(JOB_OWNER_PRACTICE)}`, evidence, segmentsChecked: segments };
+    if (hits.length === 0) return { outcome: "pass", summary: named(said`None of the ${jobs.data.length} scheduled jobs is owned by an inactive user. ${noted(JOB_OWNER_PRACTICE)}`, { data: jobs.data.length }), evidence, segmentsChecked: segments };
     return {
       outcome: "issue",
       title: said`Scheduled jobs belong to people who've left`,
-      summary: said`Scheduled jobs owned by an inactive user: ${hits.length} of ${jobs.data.length}. ${noted(JOB_OWNER_PRACTICE)}`,
+      summary: named(said`Scheduled jobs owned by an inactive user: ${hits.length} of ${jobs.data.length}. ${noted(JOB_OWNER_PRACTICE)}`, { hits: hits.length, data: jobs.data.length }),
       recommendation: said`Check each job is still running, then reschedule it under a dedicated account.`,
       recommendationType: "investigate",
       severity: "medium",

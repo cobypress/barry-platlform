@@ -16,9 +16,15 @@ export const NAMED_VALUES_FILE = "named-values.json";
 export type NamedValues = Readonly<Record<string, Readonly<Record<string, number>>>>;
 
 /** A unit given with a value whose name doesn't carry it: `{ limit: [limit, "percent"] }`. */
-export const NAMED_UNITS = ["money", "percent", "points", "day", "hour", "week", "month", "minute", "year"] as const;
+export const NAMED_UNITS = ["money", "percent", "points", "ratio", "day", "hour", "week", "month", "minute", "year", "date"] as const;
 export type NamedUnit = (typeof NAMED_UNITS)[number];
-type Value = number | null | undefined | readonly [number | null | undefined, NamedUnit];
+type Value = number | null | undefined | readonly [number | null | undefined, Exclude<NamedUnit, "date">] | readonly [string | null | undefined, "date"];
+
+/** A date as kept: yyyymmdd, or yyyymm00 for a month, from an ISO date ("2025-12-31", "2026-02"). Null when it isn't one. */
+export function dateValue(iso: string): number | null {
+  const m = /^(\d{4})-(\d{2})(?:-(\d{2}))?/.exec(iso);
+  return m ? Number(m[1]) * 10000 + Number(m[2]) * 100 + Number(m[3] ?? 0) : null;
+}
 
 /** Who was making sentences when one was named: the rule or metric builder running, or null between them. */
 type Entry = { text: string; values: Record<string, number>; owner: string | null };
@@ -40,14 +46,16 @@ const FIXED_MAX = 5000;
 function kept(values: Readonly<Record<string, Value>>): Record<string, number> {
   const out: Record<string, number> = {};
   for (const [name, v] of Object.entries(values)) {
-    const [value, unit] = Array.isArray(v) ? v : [v, undefined];
+    const [raw, unit] = Array.isArray(v) ? v : [v, undefined];
+    // A date is kept as a number, yyyymmdd, under "name@date" (DECISIONS.md 772).
+    const value = unit === "date" ? (typeof raw === "string" ? dateValue(raw) : null) : raw;
     if (typeof value === "number" && Number.isFinite(value)) out[unit ? `${name}@${unit}` : name] = value;
   }
   return out;
 }
 
 /** The text, unchanged, with the values it writes named for the strict check. An empty or blank text names nothing. */
-export function named<T extends string>(text: T, values: Readonly<Record<string, Value>>): T {
+export function named<T extends string, const V extends Readonly<Record<string, Value>>>(text: T, values: V): T {
   if (text.trim() === "") return text;
   const k = kept(values);
   if (Object.keys(k).length === 0) return text;

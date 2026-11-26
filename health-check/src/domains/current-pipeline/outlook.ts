@@ -75,7 +75,7 @@ export function openStageMetrics(ctx: Ctx, data: Ready, deals: Deal[], evidence:
     { ...definitions.pastClose, ...shared, status: "measured", value: deals.filter((d) => d.CloseDate < today).length, n: deals.length, ...rest, segments: segment(deals, dims, 1, (group) => group.filter((d) => d.CloseDate < today).length) },
   ];
   const age = (group: Deal[]): number => round1(median(group.map((d) => ageDays(d, ctx.now))));
-  if (deals.length < minSample) metrics.push({ ...definitions.age, ...shared, status: "not_measurable", reason: said`${deals.length} open deals is below the calibrated minimum of ${minSample}.` });
+  if (deals.length < minSample) metrics.push({ ...definitions.age, ...shared, status: "not_measurable", reason: named(said`${deals.length} open deals is below the calibrated minimum of ${minSample}.`, { deals: deals.length, minSample }) });
   else metrics.push({ ...definitions.age, ...shared, status: "measured", value: age(deals), n: deals.length, ...rest, segments: segment(deals, dims, MIN_STAGE_DEALS, age), stats: meanStat(deals.map((d) => ageDays(d, ctx.now))) });
 
   const rates = stageWinRates(ctx, data);
@@ -83,7 +83,7 @@ export function openStageMetrics(ctx: Ctx, data: Ready, deals: Deal[], evidence:
   else {
     const weighted = weightedPipeline(deals, rates, minSample);
     const exclusions = [...data.exclusions, ...weighted.unweighted];
-    if (weighted.stages === 0) metrics.push({ ...definitions.weighted, ...shared, exclusions, status: "not_measurable", reason: said`No stage with open deals has ${minSample} closed deals to weight it by.` });
+    if (weighted.stages === 0) metrics.push({ ...definitions.weighted, ...shared, exclusions, status: "not_measurable", reason: named(said`No stage with open deals has ${minSample} closed deals to weight it by.`, { minSample }) });
     else metrics.push({ ...definitions.weighted, ...shared, exclusions, status: "measured", value: weighted.value, n: weighted.n, ...rest, segments: weighted.segments, stats: { stagesWeighted: weighted.stages } });
   }
   return metrics;
@@ -101,7 +101,7 @@ function weightedPipeline(deals: Deal[], rates: Map<string, Cohort>, minSample: 
       const closed = cohort?.n ?? 0;
       segments.push({ dimension: "stage", key: stage, n: group.length, value: null, notMeasurableReason: `${SEGMENT_NOTE}: ${closed} closed deals were in this stage, of ${minSample}` });
       // Said, so the stage is marked as the org's (DECISIONS.md 693).
-      unweighted.push(said`${group.length} open deals in ${org(stage)}, where too few closed deals were in the stage to weight it`);
+      unweighted.push(named(said`${group.length} open deals in ${org(stage)}, where too few closed deals were in the stage to weight it`, { group: group.length }));
       continue;
     }
     const weighted = (group.reduce((sum, d) => sum + (d.Amount ?? 0), 0) * cohort.rate) / 100;
@@ -126,7 +126,7 @@ export function deliveryOutlook(ctx: Ctx, data: Ready, deals: Deal[], evidence: 
     deals: { id: "current.delivery_outlook_deals", label: "Expected won deals by month", unit: "count" as const, definition: "The same outlook in deals. Each counts as its stage win rate, and each month and the total are rounded to whole deals." },
   };
   const won = wonFromOpen(ctx, data);
-  const gate = data.unmapped.finalStages.length > 0 ? unmappedReason("stages", data.unmapped.finalStages) : won.length < minSample ? said`${won.length} won deals with stage history is below the calibrated minimum of ${minSample}, so we can't say how late close dates run.` : null;
+  const gate = data.unmapped.finalStages.length > 0 ? unmappedReason("stages", data.unmapped.finalStages) : won.length < minSample ? named(said`${won.length} won deals with stage history is below the calibrated minimum of ${minSample}, so we can't say how late close dates run.`, { won: won.length, minSample }) : null;
   if (gate) return [{ ...definitions.value, ...shared, status: "not_measurable", reason: gate }, { ...definitions.deals, ...shared, status: "not_measurable", reason: gate }];
 
   const late = round1(median(won.map(daysLate)));
@@ -149,7 +149,7 @@ export function deliveryOutlook(ctx: Ctx, data: Ready, deals: Deal[], evidence: 
   const stats = { lateDays: late, months: OUTLOOK_MONTHS };
   const within = months.flatMap((m) => placed.get(m) ?? []);
   if (weighted.length === 0) {
-    const reason = said`No open deal is in a stage with ${minSample} closed deals to weight it by.`;
+    const reason = named(said`No open deal is in a stage with ${minSample} closed deals to weight it by.`, { minSample });
     return [{ ...definitions.value, ...shared, exclusions, status: "not_measurable", reason }, { ...definitions.deals, ...shared, exclusions, status: "not_measurable", reason }];
   }
   const build = (calculate: (group: Deal[]) => number) => ({

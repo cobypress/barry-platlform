@@ -58,7 +58,7 @@ function seatValue(ctx: RuleContext, users: UserRow[]): Value {
     amount: users.reduce((sum, u) => sum + costs[licenceOf(u)]!, 0),
     unit: ctx.calibration.currency,
     period: "per year",
-    assumptions: [...byLicence].sort().map(([licence, n]) => said`${seatsSaid(n, licence)} at ${costs[licence]!} ${org(ctx.calibration.currency)} a year, from the calibration`),
+    assumptions: [...byLicence].sort().map(([licence, n]) => valued(said`${seatsSaid(n, licence)} at ${costs[licence]!} ${org(ctx.calibration.currency)} a year, from the calibration`, { costs: costs[licence]! })),
   };
 }
 
@@ -102,7 +102,7 @@ function reclaimFindings(ctx: RuleContext, candidates: UserRow[], describe: Recl
       key: `${describe.key}-skipped`,
       // An automatic run asks no one, so there's no person's reason to quote (DECISIONS.md 693).
       reason: manual.answer
-        ? said`Whether ${plural(unanswered.length, "user")} can be released can't be measured, because the Default Workflow User step was skipped: ${org(String(manual.answer.skipReason))}`
+        ? valued(said`Whether ${plural(unanswered.length, "user")} can be released can't be measured, because the Default Workflow User step was skipped: ${org(String(manual.answer.skipReason))}`, { unanswered: unanswered.length })
         : valued(said`Whether ${plural(unanswered.length, "user")} can be released can't be measured, because the Default Workflow User can't be read by API, and on an automatic run nobody is asked for it.`, { unanswered: unanswered.length }),
       evidence: [manual.evidence],
       manualStepIds,
@@ -115,8 +115,8 @@ function reclaimFindings(ctx: RuleContext, candidates: UserRow[], describe: Recl
       outcome: "issue",
       key: `${describe.key}-clear`,
       title: said`Licences you can release: ${describe.label}`,
-      summary: said`Active users who ${describe.basis}: ${clear.length}. Every guard passed: no owned records, no references in automation, and nothing runs as them.${describe.note}`,
-      recommendation: said`Deactivate ${plural(clear.length, "user")} and release the ${clear.length === 1 ? "licence" : "licences"}.`,
+      summary: valued(said`Active users who ${describe.basis}: ${clear.length}. Every guard passed: no owned records, no references in automation, and nothing runs as them.${describe.note}`, { clear: clear.length }),
+      recommendation: valued(said`Deactivate ${plural(clear.length, "user")} and release the ${clear.length === 1 ? "licence" : "licences"}.`, { clear: clear.length }),
       blockedRecommendation: said`Check these users by hand before changing anything.`,
       recommendationType: "deactivate",
       // The seats' cost when the calibration prices them: with no price and a
@@ -140,12 +140,12 @@ function reclaimFindings(ctx: RuleContext, candidates: UserRow[], describe: Recl
 
   if (toCheck.length > 0) {
     const cost = seatValue(ctx, toCheck.map((a) => a.user));
-    const priced = cost.kind === "licence_cost" ? said` Their seats cost ${moneySaid(cost.amount, ctx.calibration.currency)} a year.` : said``;
+    const priced = cost.kind === "licence_cost" ? valued(said` Their seats cost ${moneySaid(cost.amount, ctx.calibration.currency)} a year.`, { amount: [cost.amount, "money"] }) : said``;
     results.push({
       outcome: "issue",
       key: `${describe.key}-check-by-hand`,
       title: said`Licences to check by hand: ${describe.label}`,
-      summary: said`Active users who ${describe.basis}: ${toCheck.length}. Every check we could make passed, but a set-up review doesn't read who owns which records.${priced}${describe.note}`,
+      summary: valued(said`Active users who ${describe.basis}: ${toCheck.length}. Every check we could make passed, but a set-up review doesn't read who owns which records.${priced}${describe.note}`, { toCheck: toCheck.length }),
       recommendation: said`Check by hand that each of these users owns no records, then deactivate them and release the licences.`,
       recommendationType: "investigate",
       severity: "low",
@@ -175,13 +175,13 @@ function reclaimFindings(ctx: RuleContext, candidates: UserRow[], describe: Recl
       // The guards' own phrases are ours; an id the table doesn't know is printed as the org's words, to be safe.
       // Own keys only, so an id such as "constructor" can't reach the object's prototype and pass as ours.
       const phrase: string | undefined = Object.hasOwn(USER_GUARD_BLOCKERS, id) ? USER_GUARD_BLOCKERS[id as keyof typeof USER_GUARD_BLOCKERS] : undefined;
-      return said`${phrase === undefined ? org(id) : eng(phrase)} (${n})`;
+      return valued(said`${phrase === undefined ? org(id) : eng(phrase)} (${n})`, { n });
     });
     results.push({
       outcome: "issue",
       key: `${describe.key}-blocked`,
       title: said`Licences that look unused but can't be released yet: ${describe.label}`,
-      summary: said`Active users who ${describe.basis}: ${blocked.length}. We aren't recommending removal yet.${named.length ? said` What's in the way: ${joinSaid(named, ", ")}.` : ""}${incomplete ? said` For ${plural(incomplete, "user")}, we couldn't complete every check.` : ""}${describe.note}`,
+      summary: valued(said`Active users who ${describe.basis}: ${blocked.length}. We aren't recommending removal yet.${named.length ? said` What's in the way: ${joinSaid(named, ", ")}.` : ""}${incomplete ? said` For ${plural(incomplete, "user")}, we couldn't complete every check.` : ""}${describe.note}`, { blocked: blocked.length }),
       recommendation: said`Work through each user's blockers. Reassign what they own and finish any open manual step before changing the account.`,
       recommendationType: "investigate",
       severity: "low",
@@ -230,7 +230,7 @@ const unassignedSeats: Rule = {
     });
     const evidence = [ctx.ev(userLicenses.source, { count: relevant.length, exclusions: ["Licence types with no active users and no price in the calibration"] })];
     const segments = [{ dimension: "licence", segments: relevant.length }];
-    if (spare.length === 0) return { outcome: "pass", summary: said`No licence type has ${SPARE_SEAT_SHARE}% or more of its seats unassigned.`, evidence, segmentsChecked: segments };
+    if (spare.length === 0) return { outcome: "pass", summary: valued(said`No licence type has ${SPARE_SEAT_SHARE}% or more of its seats unassigned.`, { spareSeatShare: [SPARE_SEAT_SHARE, "percent"] }), evidence, segmentsChecked: segments };
     const seats = spare.reduce((sum, l) => sum + l.TotalLicenses - l.UsedLicenses, 0);
     const costs = ctx.calibration.licenceCosts;
     const unpriced = spare.filter((l) => costs[l.Name] === undefined).map((l) => l.Name);
@@ -242,14 +242,14 @@ const unassignedSeats: Rule = {
             amount: spare.reduce((sum, l) => sum + (l.TotalLicenses - l.UsedLicenses) * costs[l.Name]!, 0),
             unit: ctx.calibration.currency,
             period: "per year",
-            assumptions: spare.map((l) => said`${seatsSaid(l.TotalLicenses - l.UsedLicenses, l.Name)} at ${costs[l.Name]!} ${org(ctx.calibration.currency)} a year, from the calibration`).concat(said`Assumes seats can be reduced at renewal`),
+            assumptions: spare.map((l) => valued(said`${seatsSaid(l.TotalLicenses - l.UsedLicenses, l.Name)} at ${costs[l.Name]!} ${org(ctx.calibration.currency)} a year, from the calibration`, { costs: costs[l.Name]! })).concat(said`Assumes seats can be reduced at renewal`),
           };
     // Each licence's free seats, worked out once for its sentence and the value it's named with (DECISIONS.md 768).
     const freeSeats = spare.map((l) => ({ l, free: l.TotalLicenses - l.UsedLicenses }));
     return {
       outcome: "issue",
       title: said`You're paying for seats nobody holds`,
-      summary: valued(said`Unassigned seats: ${seats}. ${joinSaid(freeSeats.map(({ l, free }) => said`${free} of ${l.TotalLicenses} ${org(l.Name)}`), "; ")}.`, each(freeSeats, (r) => ({ spare: r.free, of: r.l.TotalLicenses }))),
+      summary: valued(said`Unassigned seats: ${seats}. ${joinSaid(freeSeats.map(({ l, free }) => valued(said`${free} of ${l.TotalLicenses} ${org(l.Name)}`, { free, TotalLicenses: l.TotalLicenses })), "; ")}.`, each(freeSeats, (r) => ({ spare: r.free, of: r.l.TotalLicenses }))),
       recommendation: said`Reduce these seats at your next renewal, keeping whatever headroom your hiring plan needs.`,
       recommendationType: "change",
       severity: "medium",
@@ -293,7 +293,7 @@ const packageSeats: Rule = {
     const segments = [{ dimension: "installed app", segments: seated.length }];
     if (unused.length + spare.length === 0) {
       return seated.length
-        ? { outcome: "pass", summary: said`All ${plural(seated.length, "installed app")} with seats ${seated.length === 1 ? "has" : "have"} them assigned, with fewer than ${SPARE_SEAT_SHARE}% spare.`, evidence, segmentsChecked: segments }
+        ? { outcome: "pass", summary: valued(said`All ${plural(seated.length, "installed app")} with seats ${seated.length === 1 ? "has" : "have"} them assigned, with fewer than ${SPARE_SEAT_SHARE}% spare.`, { seated: seated.length, spareSeatShare: [SPARE_SEAT_SHARE, "percent"] }), evidence, segmentsChecked: segments }
         : { outcome: "pass", summary: said`No installed app is licensed by the seat.`, evidence, segmentExemptReason: "There are no seated apps to segment." };
     }
     const idle = (p: (typeof seated)[number]): number => p.AllowedLicenses - p.UsedLicenses;
@@ -312,8 +312,8 @@ const packageSeats: Rule = {
         };
     const idleSeats = spare.map((p) => ({ p, n: idle(p) }));
     const parts = [
-      unused.length ? said`${joinSaid(unused.map((p) => said`${named(p)} (${plural(p.AllowedLicenses, "seat")})`), ", ")} ${unused.length === 1 ? "has" : "have"} nobody assigned at all` : null,
-      spare.length ? valued(said`${joinSaid(idleSeats.map(({ p, n }) => said`${named(p)} has ${n} of ${p.AllowedLicenses} seats unassigned`), "; ")}`, each(idleSeats, (r) => ({ idle: r.n, of: r.p.AllowedLicenses }))) : null,
+      unused.length ? said`${joinSaid(unused.map((p) => valued(said`${named(p)} (${plural(p.AllowedLicenses, "seat")})`, { AllowedLicenses: p.AllowedLicenses })), ", ")} ${unused.length === 1 ? "has" : "have"} nobody assigned at all` : null,
+      spare.length ? valued(said`${joinSaid(idleSeats.map(({ p, n }) => valued(said`${named(p)} has ${n} of ${p.AllowedLicenses} seats unassigned`, { n, AllowedLicenses: p.AllowedLicenses })), "; ")}`, each(idleSeats, (r) => ({ idle: r.n, of: r.p.AllowedLicenses }))) : null,
     ].filter((part): part is Said => part !== null);
     return {
       outcome: "issue",
@@ -370,7 +370,7 @@ function dormantRule(
       }
       return {
         outcome: "pass",
-        summary: said`None of the ${active.length} active users ${basisFor(days)}.${note}`,
+        summary: valued(said`None of the ${active.length} active users ${basisFor(days)}.${note}`, { active: active.length }),
         evidence: [ctx.ev(users.source, { count: active.length })],
         segmentsChecked: [
           { dimension: "licence", segments: new Set(active.map(licenceOf)).size },
@@ -387,7 +387,7 @@ const dormantUsers = dormantRule(
   "dormant",
   said`dormant users`,
   (days) => valued(said`haven't logged in for ${days} days`, { dormantDays: days }),
-  (n, days) => said`${n === 1 ? "One more user's" : said`${n} more users'`} last-login date is over ${days} days old, but the login log shows ${n === 1 ? "them" : "each of them"} logging in since, so they aren't counted.`,
+  (n, days) => valued(said`${n === 1 ? "One more user's" : said`${n} more users'`} last-login date is over ${days} days old, but the login log shows ${n === 1 ? "them" : "each of them"} logging in since, so they aren't counted.`, { days: [days, "day"] }),
 );
 
 const neverLoggedIn = dormantRule(
@@ -412,7 +412,7 @@ const unusedReports: Rule = {
     const settled = reports.data.filter((r) => new Date(r.CreatedDate) < daysBefore(ctx.now, RECENT_REPORT_DAYS));
     const exclusions = [`Reports created in the last ${RECENT_REPORT_DAYS} days`, "Private reports the connected user can't see"];
     if (settled.length < MIN_REPORTS) {
-      return { outcome: "not_measurable", reason: said`${settled.length} reports is below the ${MIN_REPORTS} needed for a usage rate to mean anything.`, evidence: [ctx.ev(reports.source, { count: settled.length, exclusions })] };
+      return { outcome: "not_measurable", reason: valued(said`${settled.length} reports is below the ${MIN_REPORTS} needed for a usage rate to mean anything.`, { settled: settled.length, minReports: MIN_REPORTS }), evidence: [ctx.ev(reports.source, { count: settled.length, exclusions })] };
     }
     const isUnused = (r: { LastRunDate: string | null }): boolean => r.LastRunDate === null || new Date(r.LastRunDate) < cutoff;
     const unused = settled.filter(isUnused);
@@ -421,7 +421,7 @@ const unusedReports: Rule = {
     const range = { from: cutoff.toISOString().slice(0, 10), to: ctx.window.to };
     const evidence = [ctx.ev(reports.source, { count: unused.length, dateRange: range, exclusions })];
     const segments = [{ dimension: "folder", segments: folders.size }];
-    if (share < UNUSED_REPORT_SHARE) return { outcome: "pass", summary: said`${share}% of reports haven't been run in ${REPORT_RECENT_DAYS} days.`, evidence, segmentsChecked: segments, facts: { share } };
+    if (share < UNUSED_REPORT_SHARE) return { outcome: "pass", summary: valued(said`${share}% of reports haven't been run in ${REPORT_RECENT_DAYS} days.`, { share: [share, "percent"], reportRecentDays: [REPORT_RECENT_DAYS, "day"] }), evidence, segmentsChecked: segments, facts: { share } };
     return {
       outcome: "issue",
       title: said`Most reports aren't being used`,
@@ -454,11 +454,11 @@ const dashboardsOnInactiveUsers: Rule = {
     const affected = dashboards.data.filter((d) => d.RunningUserId && inactive.has(d.RunningUserId));
     const evidence = [ctx.ev(dashboards.source, { count: affected.length })];
     const segments = [{ dimension: "dashboard type", segments: new Set(dashboards.data.map((d) => d.Type)).size }];
-    if (affected.length === 0) return { outcome: "pass", summary: said`None of the ${dashboards.data.length} dashboards run as an inactive user.`, evidence, segmentsChecked: segments };
+    if (affected.length === 0) return { outcome: "pass", summary: valued(said`None of the ${dashboards.data.length} dashboards run as an inactive user.`, { data: dashboards.data.length }), evidence, segmentsChecked: segments };
     return {
       outcome: "issue",
       title: said`Dashboards are running as people who've left`,
-      summary: said`Dashboards running as an inactive user: ${affected.length} of ${dashboards.data.length}. They may show stale data or stop refreshing.`,
+      summary: valued(said`Dashboards running as an inactive user: ${affected.length} of ${dashboards.data.length}. They may show stale data or stop refreshing.`, { affected: affected.length, data: dashboards.data.length }),
       recommendation: said`Give these dashboards a current running user, or a dedicated reporting user.`,
       recommendationType: "change",
       severity: "medium",
@@ -514,11 +514,11 @@ const eacConnections: Rule = {
     const statuses = new Set(rows.data.map((r) => r.ConnectivityStatus ?? "Unknown"));
     const evidence = [ctx.ev(rows.source, { count: rows.data.length })];
     const segments = [{ dimension: "connection status", segments: statuses.size }];
-    if (broken.length === 0) return { outcome: "pass", summary: said`All ${rows.data.length} connected users are healthy.`, evidence, segmentsChecked: segments };
+    if (broken.length === 0) return { outcome: "pass", summary: valued(said`All ${rows.data.length} connected users are healthy.`, { data: rows.data.length }), evidence, segmentsChecked: segments };
     return {
       outcome: "issue",
       title: said`Some users' email and calendar aren't syncing`,
-      summary: said`Connected users in a state that stops activity being captured: ${broken.length} of ${rows.data.length}.`,
+      summary: valued(said`Connected users in a state that stops activity being captured: ${broken.length} of ${rows.data.length}.`, { broken: broken.length, data: rows.data.length }),
       recommendation: said`Reconnect these users. Salesforce shows a recommended action against each one.`,
       recommendationType: "change",
       severity: "high",

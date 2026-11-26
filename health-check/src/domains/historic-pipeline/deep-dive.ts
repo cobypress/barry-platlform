@@ -23,7 +23,7 @@ const QUARTERS = 8;
 const TOP_ACCOUNTS = [1, 3, 5, 10];
 const MULTI_CURRENCY = "The org is multi-currency, and amounts can't be added until historic rates are supplied.";
 
-const thinReason = (n: number, noun: "closed deals with stage history" | "won deals" | "lost and no decision deals with stage history" | "won deals with stage history", minSample: number): Said => said`${n} ${noun} is below the calibrated minimum of ${minSample}.`;
+const thinReason = (n: number, noun: "closed deals with stage history" | "won deals" | "lost and no decision deals with stage history" | "won deals with stage history", minSample: number): Said => named(said`${n} ${noun} is below the calibrated minimum of ${minSample}.`, { n, minSample });
 const amountOf = (d: Deal): number => d.Amount ?? 0;
 const total = (deals: Deal[]): number => Math.round(deals.reduce((sum, d) => sum + amountOf(d), 0));
 const tooManyBlank = (deals: Deal[]): boolean => pct(deals.filter((d) => d.Amount === null).length, deals.length) > MAX_MISSING_AMOUNT_PCT;
@@ -96,7 +96,7 @@ function quarterlyTrends(ctx: Ctx, data: Ready): Metric[] {
     });
     // The current quarter is still running, so the headline is the last whole one.
     const latest = series.slice(0, -1).filter((p) => p.value !== null).at(-1);
-    if (!latest) return notMeasurable(definition, "No whole quarter in the last 8 could be measured.");
+    if (!latest) return notMeasurable(definition, named(`No whole quarter in the last ${QUARTERS} could be measured.`, { quarters: QUARTERS }));
     return measured(definition, {
       value: latest.value!,
       n: latest.n,
@@ -262,7 +262,7 @@ function lostFrom(ctx: Ctx, data: Ready): Metric[] {
   ];
   const metrics = [measured({ ...countDefinition, exclusions }, { value: lost.length, n: lost.length, dateRange: ctx.window, segments: countSegments })];
   if (data.multiCurrency) metrics.push(notMeasurable({ ...valueDefinition, exclusions }, MULTI_CURRENCY));
-  else if (tooManyBlank(lost)) metrics.push(notMeasurable({ ...valueDefinition, exclusions }, said`${lost.filter((d) => d.Amount === null).length} of ${lost.length} lost deals have no amount, so the value lost would mislead.`));
+  else if (tooManyBlank(lost)) metrics.push(notMeasurable({ ...valueDefinition, exclusions }, named(said`${lost.filter((d) => d.Amount === null).length} of ${lost.length} lost deals have no amount, so the value lost would mislead.`, { lost: lost.length })));
   else {
     const blank = lost.filter((d) => d.Amount === null).length;
     metrics.push(measured({ ...valueDefinition, exclusions, assumptions: [...valueDefinition.assumptions, ...(blank ? [named(said`${blank} lost deals with no amount count as zero`, { blank })] : [])] }, { value: total(lost), n: lost.length, dateRange: ctx.window, segments: byStage.map(([key, group]) => ({ dimension: "stage left", key, n: group.length, value: total(group), notMeasurableReason: null })) }));

@@ -29,8 +29,6 @@ const LITERAL_PIECES: string[] = [
   "src/domains/historic-pipeline/index.ts: metricWords(metric.label) :: OrgWords | \"Win rate\" | \"Slippage rate\"",
   "src/domains/historic-pipeline/index.ts: metricWords(metric.label) :: OrgWords | \"Win rate\" | \"Slippage rate\"",
   // Fixed sentences and names of our own, declared as string literals (notes.ts, shared.ts, integrations' licence name).
-  "src/domains/automation/index.ts: END_OF_SUPPORT :: \"Salesforce ended support for Workflow Rules and Process Builder on 31 December 2025. They keep running, but any bug is yours to work around.\"",
-  "src/domains/automation/index.ts: END_OF_SUPPORT :: \"Salesforce ended support for Workflow Rules and Process Builder on 31 December 2025. They keep running, but any bug is yours to work around.\"",
   "src/domains/automation/index.ts: MIGRATE_TO_FLOW_NOTE :: \"Salesforce's Migrate to Flow tool handles the simple cases, but it isn't always a like-for-like move.\"",
   "src/domains/automation/index.ts: MIGRATE_TO_FLOW_NOTE :: \"Salesforce's Migrate to Flow tool handles the simple cases, but it isn't always a like-for-like move.\"",
   "src/domains/automation/shared.ts: count === 1 ? UNNAMED : \"custom objects we couldn't name\" :: \"a custom object we couldn't name\" | \"custom objects we couldn't name\"",

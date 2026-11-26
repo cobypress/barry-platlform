@@ -1,4 +1,5 @@
 import { notSized, pct, plural, type Rule, type RuleContext, type RuleResult } from "../../../engine/rule.ts";
+import { named } from "../../../engine/named.ts";
 import { org, said, type Said } from "../../../engine/org-words.ts";
 import { andList } from "../../../engine/said-forms.ts";
 import type { SegmentCheck } from "../../../schemas/index.ts";
@@ -370,7 +371,7 @@ export function comparisonsOf(ctx: Ctx, data: Extract<ReturnType<typeof loadPath
 
 const within = (c: Comparison): Said =>
   c.compared
-    ? said` The gap pointed the same way in ${c.held} of the ${c.compared} teams, record types and other groups we could check it in.`
+    ? named(said` The gap pointed the same way in ${c.held} of the ${c.compared} teams, record types and other groups we could check it in.`, { held: c.held, compared: c.compared })
     : said` We couldn't check this within teams, record types or other groups: these deals couldn't be split into groups big enough to compare on both sides.`;
 
 /**
@@ -384,15 +385,15 @@ function whoSaid(c: Comparison, stage: string, startedBefore: string | null, clo
   const open = c.open.group + c.open.other;
   const closed = c.group.n + c.other.n;
   const out = closedOut?.count ?? 0;
-  const between = said`between ${daySaid(c.from)} and ${daySaid(c.to)}`;
+  const between = named(said`between ${daySaid(c.from)} and ${daySaid(c.to)}`, { from: [c.from, "date"], to: [c.to, "date"] });
   const who = startedBefore ? said`deals created ${between} that started before ${org(startedBefore)} and reached ${org(stage)}` : said`deals created ${between} that reached ${org(stage)}`;
-  if (open === 0 && out === 0) return said`Of the ${closed} ${who},`;
+  if (open === 0 && out === 0) return named(said`Of the ${closed} ${who},`, { closed });
   const left =
     out === 0 ? said``
     : out === 1 ? said`1 whose last move, back to ${org(closedOut!.to)} on closing, closed it out is left out`
-    : said`${out} whose last move, back to ${org(closedOut!.to)} on closing, closed them out are left out`;
-  const still = open === 0 ? said`` : open === 1 ? said`1 is still open` : said`${open} are still open`;
-  return said`Of the ${closed + open + out} ${who}, ${left}${out && open ? said`, and ` : said``}${still}. Of the other ${closed},`;
+    : named(said`${out} whose last move, back to ${org(closedOut!.to)} on closing, closed them out are left out`, { out });
+  const still = open === 0 ? said`` : open === 1 ? said`1 is still open` : named(said`${open} are still open`, { open });
+  return named(said`Of the ${closed + open + out} ${who}, ${left}${out && open ? said`, and ` : said``}${still}. Of the other ${closed},`, { closed });
 }
 
 const stagesSaid = (stages: string[]): Said => andList(stages.map((s) => said`${org(s)}`));
@@ -465,12 +466,12 @@ export const pathInsights: Rule = {
       if (!raised(c, bar)) continue;
       const more = c.gap > 0;
       const before = p.standard[p.standard.indexOf(stage) - 1] ?? null;
-      const days = c.days?.clears ? said` Won deals that skipped ${org(stage)} took a median of ${c.days.group} days to win, against ${c.days.other} for won deals that went through it.` : said``;
+      const days = c.days?.clears ? named(said` Won deals that skipped ${org(stage)} took a median of ${c.days.group} days to win, against ${c.days.other} for won deals that went through it.`, { group: [c.days.group, "day"], other: c.days.other }) : said``;
       results.push({
         ...common(c),
         key: `skip:${stage}`,
         title: more ? said`Deals that skipped ${org(stage)} were won more often than deals that went through it` : said`Deals that skipped ${org(stage)} were won less often than deals that went through it`,
-        summary: said`${whoSaid(c, reached, before ? stage : null)} the ${c.group.n} that skipped ${org(stage)} were won ${c.group.rate}% of the time, against ${c.other.rate}% of the ${c.other.n} that went through it.${days}${within(c)}${NOT_A_CAUSE}`,
+        summary: named(said`${whoSaid(c, reached, before ? stage : null)} the ${c.group.n} that skipped ${org(stage)} were won ${c.group.rate}% of the time, against ${c.other.rate}% of the ${c.other.n} that went through it.${days}${within(c)}${NOT_A_CAUSE}`, { n: c.group.n, rate: [c.group.rate, "percent"], rate2: [c.other.rate, "percent"], n2: c.other.n }),
         recommendation: more
           ? said`Look at how the deals that skip ${org(stage)} are sold, and what they do instead, before deciding whether the stage is needed for them.`
           : said`Look at why deals move past ${org(stage)} without entering it, and whether the work the stage stands for is being done.`,
@@ -481,12 +482,12 @@ export const pathInsights: Rule = {
     for (const { from, to, c, closedOut } of backs) {
       if (!raised(c, bar)) continue;
       const more = c.gap > 0;
-      const days = c.days?.clears ? said` Won deals sent back to ${org(to)} took a median of ${c.days.group} days to win, against ${c.days.other} for the rest.` : said``;
+      const days = c.days?.clears ? named(said` Won deals sent back to ${org(to)} took a median of ${c.days.group} days to win, against ${c.days.other} for the rest.`, { group: [c.days.group, "day"], other: c.days.other }) : said``;
       results.push({
         ...common(c),
         key: `rework:${from}:${to}`,
         title: more ? said`Deals sent back from ${org(from)} to ${org(to)} were won more often than the rest that reached ${org(from)}` : said`Deals sent back from ${org(from)} to ${org(to)} were won less often than the rest that reached ${org(from)}`,
-        summary: said`${whoSaid(c, from, null, { count: closedOut, to })} the ${c.group.n} sent back to ${org(to)} were won ${c.group.rate}% of the time, against ${c.other.rate}% of the rest.${days}${within(c)}${NOT_A_CAUSE}`,
+        summary: named(said`${whoSaid(c, from, null, { count: closedOut, to })} the ${c.group.n} sent back to ${org(to)} were won ${c.group.rate}% of the time, against ${c.other.rate}% of the rest.${days}${within(c)}${NOT_A_CAUSE}`, { n: c.group.n, rate: [c.group.rate, "percent"], rate2: [c.other.rate, "percent"] }),
         recommendation: said`Look at what sends these deals back, and agree what has to be true before a deal leaves ${org(to)}.`,
         subjects: [{ type: "stage", label: from }, { type: "stage", label: to }],
       });
@@ -498,7 +499,7 @@ export const pathInsights: Rule = {
     const testedCs = all.flatMap((s) => (s.c ? [s.c] : []));
     const summary =
       testedCs.length > 0
-        ? said`We couldn't tell whether skipping a stage or being sent back went with winning more or less often. In the ${plural(tried, "comparison")} we could make, between deals that reached the same point, a gap in win rate would have had to be about ${smallestTellable(testedCs, bar)} points or more to tell it from chance, and none was, so a smaller difference may be there unseen.${untestedSaid(all, true)}`
+        ? named(said`We couldn't tell whether skipping a stage or being sent back went with winning more or less often. In the ${plural(tried, "comparison")} we could make, between deals that reached the same point, a gap in win rate would have had to be about ${smallestTellable(testedCs, bar)} points or more to tell it from chance, and none was, so a smaller difference may be there unseen.${untestedSaid(all, true)}`, { tried })
         : all.length === 0
           ? said`No deal skipped a stage of the usual path or was sent back to an earlier stage, so there was nothing to compare.`
           : all.every((s) => s.untested === "too few")

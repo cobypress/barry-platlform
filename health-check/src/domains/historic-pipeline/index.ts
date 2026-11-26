@@ -52,7 +52,7 @@ const unmappedStages: Rule = {
         evidence,
       };
     }
-    if (missing.length === 0) return { outcome: "pass", summary: said`The calibration covers all ${seen.size} stages seen in the org.`, evidence, segmentsChecked: [{ dimension: "stage", segments: seen.size }] };
+    if (missing.length === 0) return { outcome: "pass", summary: named(said`The calibration covers all ${seen.size} stages seen in the org.`, { size: seen.size }), evidence, segmentsChecked: [{ dimension: "stage", segments: seen.size }] };
     // Salesforce's flags stand in where a deal relies on one of them (DECISIONS.md 598), so the gap is still a gap to close.
     const flagged = new Set(stages.data.map((s) => s.ApiName));
     const unflagged = missing.filter((s) => !flagged.has(s));
@@ -62,7 +62,7 @@ const unmappedStages: Rule = {
     return {
       outcome: "issue",
       title: said`The calibration is missing stages`,
-      summary: said`${missing.length} stages in the org aren't in the calibration: ${stageList(missing)}. ${consequence}`,
+      summary: named(said`${missing.length} stages in the org aren't in the calibration: ${stageList(missing)}. ${consequence}`, { missing: missing.length }),
       recommendation: said`Add these stages to the calibration, then re-run.`,
       recommendationType: "change",
       severity: "high",
@@ -103,7 +103,7 @@ const calibrationContradiction: Rule = {
     const orgFiscal = orgRead.status === "ok" ? orgRead.data[0]?.FiscalYearStartMonth : undefined;
     const calibratedFiscal = ctx.calibration.fiscalYearStartMonth;
     if (calibratedFiscal && orgFiscal && calibratedFiscal !== orgFiscal) {
-      conflicts.push(said`The calibration starts the fiscal year in month ${calibratedFiscal}, but the org starts it in month ${orgFiscal}`);
+      conflicts.push(named(said`The calibration starts the fiscal year in month ${calibratedFiscal}, but the org starts it in month ${orgFiscal}`, { calibratedFiscal, orgFiscal }));
     }
     const evidence = [ctx.ev(stages.source, { count: stages.data.length })];
     const segments = [{ dimension: "stage", segments: ctx.calibration.stages.length }];
@@ -209,7 +209,7 @@ const segmentDivergence: Rule = {
         outcome: "issue" as const,
         key: `${metric.id}:${segment.dimension}:${segment.key}`,
         title: said`${metricWords(metric.label)} for ${segmentPhrase(segment.dimension, segment.key)} is well ${(segment.value ?? 0) < (metric.value ?? 0) ? "below" : "above"} the overall figure`,
-        summary: said`${metricWords(metric.label)} is ${segment.value!}% for ${segmentPhrase(segment.dimension, segment.key)} (${segment.n} deals), against ${metric.value}% overall, a gap of ${gap} points.${overlap}`,
+        summary: named(said`${metricWords(metric.label)} is ${segment.value!}% for ${segmentPhrase(segment.dimension, segment.key)} (${segment.n} deals), against ${metric.value}% overall, a gap of ${gap} points.${overlap}`, { value: [segment.value!, "percent"], n: segment.n, value2: [metric.value, "percent"], gap: [gap, "points"] }),
         recommendation: said`Look at what's different about these deals before drawing a conclusion: sample size, deal type and who's working them.`,
         recommendationType: "investigate" as const,
         severity: "high" as const,

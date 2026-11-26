@@ -1,4 +1,5 @@
 import { fieldDescribeExtractor } from "../../extract/fields.ts";
+import { named } from "../../engine/named.ts";
 import { userKinds } from "../user-kinds.ts";
 import { loginsExtractor, usersExtractor, type UserRow } from "../../extract/users.ts";
 import { customObjectsExtractor, orgExtractor, recordCountsExtractor, type SharingDefaults } from "../../extract/configuration.ts";
@@ -47,13 +48,13 @@ const healthScore: Rule = {
     const evidence = [ctx.ev(score.source, { count: 1, note: "Scored by Salesforce against its own baseline, unless the org has imported a custom one" })];
     if (value >= HEALTH_SCORE_TARGET) {
       // A good score can sit on a high risk the weighting hides, so it needs the settings behind it.
-      if (risks.status !== "ok") return { outcome: "not_measurable", reason: said`The score is ${value}, but the settings behind it couldn't be read: ${passedOn(risks.reason)}`, evidence };
-      return { outcome: "pass", summary: said`The Health Check score is ${value}, at or above our working target of ${HEALTH_SCORE_TARGET}.`, evidence, segmentsChecked: [{ dimension: "setting group", segments: riskGroups(risks.data) }], facts: { score: value } };
+      if (risks.status !== "ok") return { outcome: "not_measurable", reason: named(said`The score is ${value}, but the settings behind it couldn't be read: ${passedOn(risks.reason)}`, { value }), evidence };
+      return { outcome: "pass", summary: named(said`The Health Check score is ${value}, at or above our working target of ${HEALTH_SCORE_TARGET}.`, { value, healthScoreTarget: HEALTH_SCORE_TARGET }), evidence, segmentsChecked: [{ dimension: "setting group", segments: riskGroups(risks.data) }], facts: { score: value } };
     }
     return {
       outcome: "issue",
       title: said`Salesforce rates your security settings below target`,
-      summary: said`Your Health Check score is ${value}. We use ${HEALTH_SCORE_TARGET} as a working target, which is our judgement rather than a Salesforce threshold.`,
+      summary: named(said`Your Health Check score is ${value}. We use ${HEALTH_SCORE_TARGET} as a working target, which is our judgement rather than a Salesforce threshold.`, { value, healthScoreTarget: HEALTH_SCORE_TARGET }),
       recommendation: said`Work through the high-risk settings first, because they carry the most weight in the score.`,
       recommendationType: "change",
       severity: value < HEALTH_SCORE_POOR ? "high" : "medium",
@@ -85,12 +86,12 @@ const healthRisks: Rule = {
     const other = risks.data.filter((r) => !known.has(r.RiskType)).length;
     const evidence = [ctx.ev(risks.source, { count: risks.data.length, exclusions: other ? [`${plural(other, "setting")} with a risk type other than high, medium or meets standard`] : [] })];
     const segments = [{ dimension: "setting group", segments: riskGroups(risks.data) }, { dimension: "risk type", segments: new Set(risks.data.map((r) => r.RiskType)).size }];
-    if (high.length === 0 && medium.length === 0) return { outcome: "pass", summary: said`None of the ${risks.data.length} settings Salesforce checks is rated high or medium risk.`, evidence, segmentsChecked: segments };
+    if (high.length === 0 && medium.length === 0) return { outcome: "pass", summary: named(said`None of the ${risks.data.length} settings Salesforce checks is rated high or medium risk.`, { data: risks.data.length }), evidence, segmentsChecked: segments };
     const label = (r: HealthRiskRow): string => `${r.SettingGroup ?? "No group"}: ${r.Setting}${r.OrgValue || r.StandardValue ? ` (yours: ${r.OrgValue ?? "not set"}, standard: ${r.StandardValue ?? "not stated"})` : ""}`;
     return {
       outcome: "issue",
       title: high.length > 0 ? said`High-risk security settings need changing` : said`Some security settings are below Salesforce's standard`,
-      summary: said`Of ${plural(risks.data.length, "setting")} Salesforce checks, ${high.length} ${high.length === 1 ? "is" : "are"} rated high risk and ${medium.length} medium risk.`,
+      summary: named(said`Of ${plural(risks.data.length, "setting")} Salesforce checks, ${high.length} ${high.length === 1 ? "is" : "are"} rated high risk and ${medium.length} medium risk.`, { data: risks.data.length, high: high.length, medium: medium.length }),
       recommendation: said`Bring the high-risk settings up to Salesforce's standard value, then plan the medium-risk ones.`,
       recommendationType: "change",
       severity: high.length > 0 ? "high" : "low",
@@ -134,12 +135,12 @@ function privilegeRule(options: { id: (typeof PRIVILEGED_RULES)[PrivilegedPermis
       const tooMany = holders.length >= PRIVILEGED_MIN_USERS && result.rate > PRIVILEGED_SHARE_LIMIT;
       const evidence = [ctx.ev(sets.source, { count: granting.length }), ctx.ev(assignments.source, { count: assignments.data.length, exclusions: ["Inactive users", "Non-standard user types"] })];
       if (!tooMany && unexpected.length === 0) {
-        return { outcome: "pass", summary: said`${options.label}: ${holders.length} of ${active.length} active users, all of them admins or calibrated system accounts.`, evidence, segmentsChecked: result.segmentsChecked, facts: { holders: holders.length, active: active.length, unexpected: 0 } };
+        return { outcome: "pass", summary: named(said`${options.label}: ${holders.length} of ${active.length} active users, all of them admins or calibrated system accounts.`, { holders: holders.length, active: active.length }), evidence, segmentsChecked: result.segmentsChecked, facts: { holders: holders.length, active: active.length, unexpected: 0 } };
       }
       return {
         outcome: "issue",
         title: unexpected.length > 0 ? said`${options.label} is held by people outside your admin team` : said`Too many people hold ${options.label}`,
-        summary: said`${options.label}: ${holders.length} of ${active.length} active users (${result.rate}%), ${unexpected.length} of them outside the admin profile and the accounts calibrated as admin or system. ${options.why}`,
+        summary: named(said`${options.label}: ${holders.length} of ${active.length} active users (${result.rate}%), ${unexpected.length} of them outside the admin profile and the accounts calibrated as admin or system. ${options.why}`, { holders: holders.length, active: active.length, rate: [result.rate, "percent"], unexpected: unexpected.length }),
         recommendation: said`Remove ${options.label} from anyone who doesn't need it, and give them the specific object access they do need.`,
         recommendationType: "change",
         severity: options.severity,
@@ -190,7 +191,7 @@ const sharingDefaults: Rule = {
     const open = read.filter((r) => OPEN_ACCESS.has(r.access!));
     const evidence = [ctx.ev(sharing.source, { count: read.length, exclusions: ["Custom objects", "Sharing rules, which can only widen these defaults"] })];
     const segments = [{ dimension: "object", segments: read.length }];
-    if (open.length === 0) return { outcome: "pass", summary: said`None of the ${read.length} core objects is public read/write by default.`, evidence, segmentsChecked: segments };
+    if (open.length === 0) return { outcome: "pass", summary: named(said`None of the ${read.length} core objects is public read/write by default.`, { read: read.length }), evidence, segmentsChecked: segments };
     return {
       outcome: "issue",
       title: said`Everyone can edit some core records by default`,
@@ -258,10 +259,10 @@ const unusedAccess: Rule = {
     const segments = [{ dimension: "kind", segments: 2 }, { dimension: "profile", segments: custom.length }];
     const facts = { emptyProfiles: emptyProfiles.length, customProfiles: custom.length, emptySets: emptySets.length, ownSets: ours.size };
     if (emptyProfiles.length + emptySets.length === 0) {
-      return { outcome: "pass", summary: said`All ${plural(custom.length, "custom profile")} ${custom.length === 1 ? "has" : "have"} active users, and all ${plural(ours.size, "permission set")} of your own ${ours.size === 1 ? "is" : "are"} held by someone.`, evidence, segmentsChecked: segments, facts };
+      return { outcome: "pass", summary: named(said`All ${plural(custom.length, "custom profile")} ${custom.length === 1 ? "has" : "have"} active users, and all ${plural(ours.size, "permission set")} of your own ${ours.size === 1 ? "is" : "are"} held by someone.`, { custom: custom.length, size: ours.size }), evidence, segmentsChecked: segments, facts };
     }
-    const profilesPart = emptyProfiles.length ? said`${emptyProfiles.length} of ${plural(custom.length, "custom profile")} ${emptyProfiles.length === 1 ? "has" : "have"} no active users` : null;
-    const setsPart = emptySets.length ? said`${emptySets.length} of ${plural(ours.size, "permission set")} of your own ${emptySets.length === 1 ? "is" : "are"} held by nobody, directly or through a group` : null;
+    const profilesPart = emptyProfiles.length ? named(said`${emptyProfiles.length} of ${plural(custom.length, "custom profile")} ${emptyProfiles.length === 1 ? "has" : "have"} no active users`, { emptyProfiles: emptyProfiles.length, custom: custom.length }) : null;
+    const setsPart = emptySets.length ? named(said`${emptySets.length} of ${plural(ours.size, "permission set")} of your own ${emptySets.length === 1 ? "is" : "are"} held by nobody, directly or through a group`, { emptySets: emptySets.length, size: ours.size }) : null;
     const parts = profilesPart && setsPart ? said`${profilesPart}, and ${setsPart}` : (profilesPart ?? setsPart ?? said``);
     return {
       outcome: "issue",
@@ -317,13 +318,13 @@ const peerOutliers: Rule = {
     ];
     const segments = [{ dimension: "profile", segments: compared.length }, { dimension: "permission set", segments: ours.size }];
     const facts = { people: new Set(outliers.map((o) => o.user.Id)).size, grants: outliers.length, profiles: compared.length };
-    if (compared.length === 0) return { outcome: "pass", summary: said`No profile has ${MIN_PEERS} or more active users to compare.`, evidence, segmentExemptReason: `Profiles with fewer than ${MIN_PEERS} active users aren't compared.` };
-    if (outliers.length === 0) return { outcome: "pass", summary: said`Across ${plural(compared.length, "profile")} with ${MIN_PEERS} or more people, nobody holds a permission set of your own that no colleague on the same profile has.`, evidence, segmentsChecked: segments, facts };
+    if (compared.length === 0) return { outcome: "pass", summary: named(said`No profile has ${MIN_PEERS} or more active users to compare.`, { minPeers: MIN_PEERS }), evidence, segmentExemptReason: `Profiles with fewer than ${MIN_PEERS} active users aren't compared.` };
+    if (outliers.length === 0) return { outcome: "pass", summary: named(said`Across ${plural(compared.length, "profile")} with ${MIN_PEERS} or more people, nobody holds a permission set of your own that no colleague on the same profile has.`, { compared: compared.length, minPeers: MIN_PEERS }), evidence, segmentsChecked: segments, facts };
     const listed = outliers.slice(0, MAX_LISTED).map((o) => said`${org(o.set)} (${org(o.profile)})`);
     return {
       outcome: "issue",
       title: said`Some people hold access nobody else on their profile has`,
-      summary: said`${plural(facts.people, "person", "people")} ${facts.people === 1 ? "holds" : "hold"} a permission set that nobody else on their profile does: ${joinSaid(listed, ", ")}${outliers.length > MAX_LISTED ? said`, and ${outliers.length - MAX_LISTED} more` : ""}. Access given to one person for one job tends to stay after the job is done.`,
+      summary: named(said`${plural(facts.people, "person", "people")} ${facts.people === 1 ? "holds" : "hold"} a permission set that nobody else on their profile does: ${joinSaid(listed, ", ")}${outliers.length > MAX_LISTED ? said`, and ${outliers.length - MAX_LISTED} more` : ""}. Access given to one person for one job tends to stay after the job is done.`, { people: facts.people }),
       recommendation: said`Check with each person's manager whether they still need it, and remove it if not. If they do, write down why.`,
       recommendationType: "investigate",
       severity: "low",

@@ -1,4 +1,5 @@
 import { notSized, pct, plural, segmentRate, type NotMeasurableResult, type Rule, type RuleContext, type RuleResult } from "../../engine/rule.ts";
+import { named } from "../../engine/named.ts";
 import { schemaExtractor } from "../../extract/configuration.ts";
 import { pardotLeadsExtractor, pardotSetupExtractor, UNWORKED_DAYS, unworkedBefore, type SyncedLeadRow } from "../../extract/pardot.ts";
 import { daysBefore } from "../../extract/types.ts";
@@ -56,11 +57,11 @@ const scoringGrading: Rule = {
     const facts = { synced, ungraded, unscored, ungradedRate: pct(ungraded, synced), unscoredRate: pct(unscored, synced) };
     if (synced === 0) return { outcome: "pass", summary: said`No lead synced from Account Engagement was created in the window.`, evidence, segmentExemptReason: "There are no synced leads to segment.", facts };
     const segments = [{ dimension: "rating", segments: 2 }];
-    if (facts.ungradedRate < UNRATED_SHARE && facts.unscoredRate < UNRATED_SHARE) return { outcome: "pass", summary: said`Of ${plural(synced, "lead")} synced from Account Engagement in the window, ${facts.ungradedRate}% have no grade and ${facts.unscoredRate}% no score.`, evidence, segmentsChecked: segments, facts };
+    if (facts.ungradedRate < UNRATED_SHARE && facts.unscoredRate < UNRATED_SHARE) return { outcome: "pass", summary: named(said`Of ${plural(synced, "lead")} synced from Account Engagement in the window, ${facts.ungradedRate}% have no grade and ${facts.unscoredRate}% no score.`, { synced, ungradedRate: [facts.ungradedRate, "percent"], unscoredRate: [facts.unscoredRate, "percent"] }), evidence, segmentsChecked: segments, facts };
     return {
       outcome: "issue",
       title: said`Marketing isn't rating the leads it hands to sales`,
-      summary: said`Of ${plural(synced, "lead")} synced from Account Engagement in the window, ${ungraded} (${facts.ungradedRate}%) have no grade and ${unscored} (${facts.unscoredRate}%) no score. Without both, sales can't tell a good fit who's interested from a poor fit who opened one email, so every lead looks the same.`,
+      summary: named(said`Of ${plural(synced, "lead")} synced from Account Engagement in the window, ${ungraded} (${facts.ungradedRate}%) have no grade and ${unscored} (${facts.unscoredRate}%) no score. Without both, sales can't tell a good fit who's interested from a poor fit who opened one email, so every lead looks the same.`, { synced, ungraded, ungradedRate: [facts.ungradedRate, "percent"], unscored, unscoredRate: [facts.unscoredRate, "percent"] }),
       recommendation: said`Grade prospects against your ideal customer profile, check that scoring rewards real buying signals, and hand leads to sales on both.`,
       recommendationType: "change",
       severity: "medium",
@@ -77,7 +78,7 @@ const scoringGrading: Rule = {
 };
 
 /** Why a check can't pass on open synced leads read only to the row limit (rule 5): the rest weren't seen. */
-const cutOff = (read: number): Said => said`The read of open synced leads stopped at its row limit, so we checked only the first ${grouped(read)} in order of Salesforce id, and can't say the rest are followed up.`;
+const cutOff = (read: number): Said => named(said`The read of open synced leads stopped at its row limit, so we checked only the first ${grouped(read)} in order of Salesforce id, and can't say the rest are followed up.`, { read });
 
 /** Open synced leads, with the users who own them: or why they can't be read. */
 function openLeads(ctx: RuleContext): { rows: SyncedLeadRow[]; truncated: boolean; active: Set<string>; inactive: Set<string>; evidence: ReturnType<RuleContext["ev"]>[] } | NotMeasurableResult {
@@ -116,11 +117,11 @@ const unworkedHandovers: Rule = {
     const segments = bySource.segmentsChecked;
     const worst = bySource.hotspots[0];
     if ((unworked.length === 0 || (rate < UNWORKED_SHARE && !worst)) && read.truncated) return { outcome: "not_measurable", reason: cutOff(read.rows.length), evidence };
-    if (unworked.length === 0 || (rate < UNWORKED_SHARE && !worst)) return { outcome: "pass", summary: said`Of ${plural(handed.length, "open lead")} synced from Account Engagement and owned by a salesperson, ${unworked.length} made ${UNWORKED_DAYS} to ${STALE_DAYS} days ago ${unworked.length === 1 ? "has" : "have"} no activity logged (${rate}%).`, evidence, segmentsChecked: segments, facts };
+    if (unworked.length === 0 || (rate < UNWORKED_SHARE && !worst)) return { outcome: "pass", summary: named(said`Of ${plural(handed.length, "open lead")} synced from Account Engagement and owned by a salesperson, ${unworked.length} made ${UNWORKED_DAYS} to ${STALE_DAYS} days ago ${unworked.length === 1 ? "has" : "have"} no activity logged (${rate}%).`, { handed: handed.length, unworked: unworked.length, unworkedDays: UNWORKED_DAYS, staleDays: [STALE_DAYS, "day"], rate: [rate, "percent"] }), evidence, segmentsChecked: segments, facts };
     return {
       outcome: "issue",
       title: said`Leads marketing hands over aren't being followed up`,
-      summary: said`Of ${plural(handed.length, "open lead")} synced from Account Engagement and owned by a salesperson, ${read.truncated ? "at least " : ""}${unworked.length} (${rate}%) made ${UNWORKED_DAYS} to ${STALE_DAYS} days ago have no activity logged: marketing handed them over, and nobody followed up while they were warm.${worst ? said` Worst by lead source: ${org(worst.key)}, at ${worst.rate}% of ${worst.n}.` : ""}`,
+      summary: named(said`Of ${plural(handed.length, "open lead")} synced from Account Engagement and owned by a salesperson, ${read.truncated ? "at least " : ""}${unworked.length} (${rate}%) made ${UNWORKED_DAYS} to ${STALE_DAYS} days ago have no activity logged: marketing handed them over, and nobody followed up while they were warm.${worst ? said` Worst by lead source: ${org(worst.key)}, at ${worst.rate}% of ${worst.n}.` : ""}`, { handed: handed.length, unworked: unworked.length, rate: [rate, "percent"], unworkedDays: UNWORKED_DAYS, staleDays: [STALE_DAYS, "day"] }),
       recommendation: said`Agree how fast sales follows up a marketing lead, make it part of pipeline reviews, and send leads nobody will work back to marketing to nurture.`,
       recommendationType: "change",
       severity: rate >= 50 ? "high" : "medium",
@@ -159,15 +160,15 @@ const unownedProspects: Rule = {
     if (read.rows.length === 0) return { outcome: "pass", summary: said`No lead synced from Account Engagement is open.`, evidence: read.evidence, segmentExemptReason: "There are no open synced leads to segment.", facts };
     const segments = [{ dimension: "owner type", segments: 2 }];
     if (all.length === 0 && read.truncated) return { outcome: "not_measurable", reason: cutOff(read.rows.length), evidence: read.evidence };
-    if (all.length === 0) return { outcome: "pass", summary: said`All ${plural(read.rows.length, "open lead")} synced from Account Engagement are owned by an active person, or have been in a queue for under ${UNWORKED_DAYS} days.`, evidence: read.evidence, segmentsChecked: segments, facts };
-    const queued = inQueue.length ? said`${inQueue.length} ${inQueue.length === 1 ? "has" : "have"} sat untouched in a queue for ${UNWORKED_DAYS} days or more` : null;
-    const left = leftBehind.length ? said`${leftBehind.length} ${leftBehind.length === 1 ? "is" : "are"} owned by someone who has left` : null;
+    if (all.length === 0) return { outcome: "pass", summary: named(said`All ${plural(read.rows.length, "open lead")} synced from Account Engagement are owned by an active person, or have been in a queue for under ${UNWORKED_DAYS} days.`, { rows: read.rows.length, unworkedDays: [UNWORKED_DAYS, "day"] }), evidence: read.evidence, segmentsChecked: segments, facts };
+    const queued = inQueue.length ? named(said`${inQueue.length} ${inQueue.length === 1 ? "has" : "have"} sat untouched in a queue for ${UNWORKED_DAYS} days or more`, { inQueue: inQueue.length, unworkedDays: [UNWORKED_DAYS, "day"] }) : null;
+    const left = leftBehind.length ? named(said`${leftBehind.length} ${leftBehind.length === 1 ? "is" : "are"} owned by someone who has left`, { leftBehind: leftBehind.length }) : null;
     // One or both, as the parts joined with ", and " read before.
     const parts: Said = queued && left ? said`${queued}, and ${left}` : (queued ?? left ?? said``);
     return {
       outcome: "issue",
       title: said`Some synced leads have nobody to work them`,
-      summary: said`Of ${plural(read.rows.length, "open lead")} synced from Account Engagement, ${parts} (${rate}% in all). Nobody is going to call these people.`,
+      summary: named(said`Of ${plural(read.rows.length, "open lead")} synced from Account Engagement, ${parts} (${rate}% in all). Nobody is going to call these people.`, { rows: read.rows.length, rate: [rate, "percent"] }),
       recommendation: said`Assign each to an active salesperson or back to marketing, and check the assignment rules that left them there.`,
       recommendationType: "change",
       severity: rate >= UNWORKED_SHARE ? "medium" : "low",

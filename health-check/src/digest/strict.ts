@@ -146,23 +146,23 @@ function hoursFigures(f: Finding): DatasetFigure[] {
 }
 
 /** A name's last word, case aside, and the unit it says. Only the last whole word: "generated", "separate" and "operator" say nothing. */
-const UNIT_WORD: Readonly<Record<string, DatasetFigure["kind"] | `duration:${string}`>> = {
+const UNIT_WORD: Readonly<Record<string, DatasetFigure["kind"] | "date" | `duration:${string}`>> = {
   pct: "percent", percent: "percent", rate: "percent", share: "percent",
   money: "currency", points: "points",
   day: "duration:day", days: "duration:day", hour: "duration:hour", hours: "duration:hour", week: "duration:week", weeks: "duration:week",
   month: "duration:month", months: "duration:month", minute: "duration:minute", minutes: "duration:minute", year: "duration:year", years: "duration:year",
 };
-const EXPLICIT: Readonly<Record<NamedUnit, DatasetFigure["kind"] | `duration:${string}`>> = {
-  money: "currency", percent: "percent", points: "points", day: "duration:day", hour: "duration:hour", week: "duration:week", month: "duration:month", minute: "duration:minute", year: "duration:year",
+const EXPLICIT: Readonly<Record<NamedUnit, DatasetFigure["kind"] | "date" | `duration:${string}`>> = {
+  money: "currency", percent: "percent", points: "points", ratio: "ratio", date: "date", day: "duration:day", hour: "duration:hour", week: "duration:week", month: "duration:month", minute: "duration:minute", year: "duration:year",
 };
 
 /** The words of a name: "worstSegmentRate" is worst, segment, rate; "DataStorageMBShare" ends in share. */
 const wordsOf = (name: string): string[] => name.replace(/([a-z0-9])([A-Z])/g, "$1 $2").replace(/([A-Z]+)([A-Z][a-z])/g, "$1 $2").split(/[^A-Za-z0-9]+/).filter(Boolean).map((w) => w.toLowerCase());
 
 /** The unit a value is named with: given with it ("name@unit"), or said by its name's last word. */
-export function unitOf(key: string): DatasetFigure["kind"] | `duration:${string}` | null {
+export function unitOf(key: string): DatasetFigure["kind"] | "date" | `duration:${string}` | null {
   const [name, unit] = key.replace(/#\d+$/, "").split("@") as [string, string | undefined];
-  if (unit !== undefined) return (EXPLICIT as Record<string, DatasetFigure["kind"] | `duration:${string}`>)[unit] ?? null;
+  if (unit !== undefined) return (EXPLICIT as Record<string, DatasetFigure["kind"] | "date" | `duration:${string}`>)[unit] ?? null;
   const last = wordsOf(name).at(-1);
   return last !== undefined && Object.hasOwn(UNIT_WORD, last) ? UNIT_WORD[last]! : null;
 }
@@ -210,9 +210,15 @@ export function strictDataset(report: BuiltReport, set: FigureSet, named: NamedV
     }
     for (const [name, value] of Object.entries(f.facts)) extra.push(...typed(f.id, name, value, currency));
   }
+  const namedDates: FigureSet["dates"] = [];
   for (const [id, values] of Object.entries(named)) {
     if (!own.has(id)) continue;
-    for (const [name, value] of Object.entries(values)) if (Number.isFinite(value)) extra.push(...typed(id, name, value, currency));
+    for (const [name, value] of Object.entries(values)) {
+      if (!Number.isFinite(value)) continue;
+      // A named date (DECISIONS.md 772): a day, or a month, of the finding's own, as a row of dates and nothing else.
+      if (unitOf(name) === "date") namedDates.push({ source: id, y: Math.floor(value / 10000), m: Math.floor(value / 100) % 100, ...(value % 100 ? { d: value % 100 } : {}) });
+      else extra.push(...typed(id, name, value, currency));
+    }
   }
   // The fix prompt's fixed text, its rule's (src/fix/table.ts), put together with none of the finding's sentences in it.
   const prompts = findings.flatMap((f) => {
@@ -234,7 +240,7 @@ export function strictDataset(report: BuiltReport, set: FigureSet, named: NamedV
   const runDates = free.dates.filter((d) => d.source === SOURCE.run).map((d) => ({ ...d, source: RUN_DATES }));
   return {
     figures: [...runWide(free.figures), ...mine(ours.figures), ...extra, ...promptRows.figures.filter(isPrompt)],
-    dates: [...runWide(free.dates), ...mine(ours.dates), ...promptRows.dates.filter(isPrompt), ...runDates],
+    dates: [...runWide(free.dates), ...mine(ours.dates), ...promptRows.dates.filter(isPrompt), ...runDates, ...namedDates],
     identifiers: [...runWide(free.identifiers), ...mine(ours.identifiers), ...promptRows.identifiers.filter(isPrompt)],
     tokens: [...runWide(free.tokens), ...mine(ours.tokens), ...promptRows.tokens.filter(isPrompt)],
     labels: [],

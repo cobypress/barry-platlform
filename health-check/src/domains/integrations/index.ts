@@ -1,4 +1,5 @@
 import { apexExtractor } from "../../extract/automation.ts";
+import { named as valued } from "../../engine/named.ts";
 import { userKinds } from "../user-kinds.ts";
 import { customObjectsExtractor, orgExtractor, recordCountsExtractor } from "../../extract/configuration.ts";
 import { orgDocumentationExtractor } from "../../extract/documentation.ts";
@@ -91,7 +92,7 @@ const personalIntegrations: Rule = {
     const segments = [{ dimension: "user kind", segments: new Set(people.map((u) => kindOf(ctx, u.Id) ?? "Not calibrated")).size }, { dimension: "role", segments: new Set(people.map((u) => u.UserRole?.Name ?? "No role")).size }];
     if (hits.length === 0) {
       if (logins.truncated) return { outcome: "not_measurable", reason: said`The login log was too long to read in full, so we can't say no personal account is used this way.`, evidence };
-      return { outcome: "pass", summary: said`None of the ${people.length} personal accounts made ${MIN_API_LOGINS} or more API logins since ${org(logins.data.from)}.`, evidence, segmentsChecked: segments };
+      return { outcome: "pass", summary: valued(said`None of the ${people.length} personal accounts made ${MIN_API_LOGINS} or more API logins since ${org(logins.data.from)}.`, { people: people.length, minApiLogins: MIN_API_LOGINS }), evidence, segmentsChecked: segments };
     }
     const applications = [...new Set(hits.flatMap((u) => api[u.Id]!.applications))].sort();
     const total = hits.reduce((sum, u) => sum + api[u.Id]!.logins, 0);
@@ -99,7 +100,7 @@ const personalIntegrations: Rule = {
       outcome: "issue",
       title: said`Integrations look to be running on personal logins`,
       // A cut-off log holds only some of the logins, so its counts are floors (DECISIONS.md 325).
-      summary: said`${logins.truncated ? "At least " : ""}${plural(hits.length, "personal account")} made ${logins.truncated ? "at least " : ""}${total} API logins since ${org(logins.data.from)}, through ${applications.join(", ") ? joinSaid(applications.map((a) => said`${org(a)}`), ", ") : "an unnamed application"}.${logins.truncated ? " The login log was too long to read in full, so there may be more." : ""} If that person leaves and the account is deactivated, the integration stops.`,
+      summary: valued(said`${logins.truncated ? "At least " : ""}${plural(hits.length, "personal account")} made ${logins.truncated ? "at least " : ""}${total} API logins since ${org(logins.data.from)}, through ${applications.join(", ") ? joinSaid(applications.map((a) => said`${org(a)}`), ", ") : "an unnamed application"}.${logins.truncated ? " The login log was too long to read in full, so there may be more." : ""} If that person leaves and the account is deactivated, the integration stops.`, { hits: hits.length, total }),
       recommendation: said`Move each integration to its own integration account, with an API-only profile and only the access it needs.`,
       recommendationType: "investigate",
       severity: "medium",
@@ -136,8 +137,8 @@ const selfAuthorisedApps: Rule = {
     const unread = connectedApps.data.filter((a) => typeof a.OptionsAllowAdminApprovedUsersOnly !== "boolean").length;
     const segments = [{ dimension: "connected app", segments: connectedApps.data.length }];
     if (open.length === 0) {
-      if (unread) return { outcome: "not_measurable", reason: said`Who can authorise ${plural(unread, "connected app")} couldn't be read.`, evidence };
-      return { outcome: "pass", summary: said`All ${plural(connectedApps.data.length, "connected app")} let only users an admin has approved use them.`, evidence, segmentsChecked: segments, segmentExemptReason: connectedApps.data.length ? undefined : "There are no connected apps." };
+      if (unread) return { outcome: "not_measurable", reason: valued(said`Who can authorise ${plural(unread, "connected app")} couldn't be read.`, { unread }), evidence };
+      return { outcome: "pass", summary: valued(said`All ${plural(connectedApps.data.length, "connected app")} let only users an admin has approved use them.`, { data: connectedApps.data.length }), evidence, segmentsChecked: segments, segmentExemptReason: connectedApps.data.length ? undefined : "There are no connected apps." };
     }
     // An app with API logins is carrying data now, so opening it to anyone matters more.
     const inUse = new Map<string, number>();
@@ -147,7 +148,7 @@ const selfAuthorisedApps: Rule = {
     return {
       outcome: "issue",
       title: said`Any user can authorise some connected apps`,
-      summary: said`${open.length} of ${connectedApps.data.length} connected apps let users authorise them for themselves, without an admin approving who can: ${joinSaid(open.map((a) => said`${org(a.Name)}`), ", ")}.${busy.length ? said` ${joinSaid(busy.map((a) => said`${org(a.Name)}`), ", ")} ${busy.length === 1 ? "has" : "have"} had API logins since ${logins.status === "ok" ? org(logins.data.from) : ""}, so ${busy.length === 1 ? "it carries" : "they carry"} data now.` : ""}${logins.status !== "ok" ? " We couldn't read the login history, so we can't say which are in use." : ""}`,
+      summary: valued(said`${open.length} of ${connectedApps.data.length} connected apps let users authorise them for themselves, without an admin approving who can: ${joinSaid(open.map((a) => said`${org(a.Name)}`), ", ")}.${busy.length ? said` ${joinSaid(busy.map((a) => said`${org(a.Name)}`), ", ")} ${busy.length === 1 ? "has" : "have"} had API logins since ${logins.status === "ok" ? org(logins.data.from) : ""}, so ${busy.length === 1 ? "it carries" : "they carry"} data now.` : ""}${logins.status !== "ok" ? " We couldn't read the login history, so we can't say which are in use." : ""}`, { open: open.length, data: connectedApps.data.length }),
       recommendation: said`Set each app to admin-approved users only, then give access through a permission set to the people and integration accounts that need it.`,
       recommendationType: "change",
       severity: busy.length ? "high" : "medium",
@@ -181,7 +182,7 @@ const insecureRemoteSites: Rule = {
     const mixed = active.filter((r) => r.secure && r.ProtocolMismatch);
     const segments = [{ dimension: "remote site", segments: active.length }];
     if (plain.length + mixed.length === 0) {
-      return { outcome: "pass", summary: said`All ${plural(active.length, "active remote site")} use HTTPS and keep to it.`, evidence, segmentsChecked: segments, segmentExemptReason: active.length ? undefined : "There are no active remote sites." };
+      return { outcome: "pass", summary: valued(said`All ${plural(active.length, "active remote site")} use HTTPS and keep to it.`, { active: active.length }), evidence, segmentsChecked: segments, segmentExemptReason: active.length ? undefined : "There are no active remote sites." };
     }
     const hosts = (rows: typeof active): Said => joinSaid([...new Set(rows.map((r) => r.host))].sort().map((h) => said`${org(h)}`), ", ");
     return {
@@ -189,8 +190,8 @@ const insecureRemoteSites: Rule = {
       title: said`Some remote sites can send data over plain HTTP`,
       summary: joinSaid(
         [
-          plain.length ? said`${plural(plain.length, "active remote site")} ${plain.length === 1 ? "uses" : "use"} plain HTTP: ${hosts(plain)}.` : null,
-          mixed.length ? said`${plural(mixed.length, "active remote site")} ${mixed.length === 1 ? "is" : "are"} set to let code pass data between HTTPS and HTTP: ${hosts(mixed)}.` : null,
+          plain.length ? valued(said`${plural(plain.length, "active remote site")} ${plain.length === 1 ? "uses" : "use"} plain HTTP: ${hosts(plain)}.`, { plain: plain.length }) : null,
+          mixed.length ? valued(said`${plural(mixed.length, "active remote site")} ${mixed.length === 1 ? "is" : "are"} set to let code pass data between HTTPS and HTTP: ${hosts(mixed)}.`, { mixed: mixed.length }) : null,
           said`Data sent over HTTP isn't encrypted on the way.`,
         ].filter((part): part is Said => part !== null),
         " ",
@@ -262,7 +263,7 @@ const integrationLicences: Rule = {
     const segments = [{ dimension: "licence", segments: new Set(accounts.map(licenceOf)).size }];
     const row = userLicenses.data.find((l) => l.Name === INTEGRATION_LICENCE && l.Status === "Active");
     const spare = row ? Math.max(0, row.TotalLicenses - row.UsedLicenses) : 0;
-    if (onFull.length === 0) return { outcome: "pass", summary: said`All ${plural(accounts.length, "integration account")} ${accounts.length === 1 ? "is" : "are"} on an integration or free licence.`, evidence, segmentsChecked: segments, facts: { accounts: accounts.length, onFull: 0 } };
+    if (onFull.length === 0) return { outcome: "pass", summary: valued(said`All ${plural(accounts.length, "integration account")} ${accounts.length === 1 ? "is" : "are"} on an integration or free licence.`, { accounts: accounts.length }), evidence, segmentsChecked: segments, facts: { accounts: accounts.length, onFull: 0 } };
     const movable = Math.min(onFull.length, spare);
     const orgRead = ctx.data(orgExtractor);
     const edition = orgRead.status === "ok" ? (orgRead.data[0]?.OrganizationType ?? null) : null;
@@ -288,7 +289,7 @@ const integrationLicences: Rule = {
     return {
       outcome: "issue",
       title: said`Integration accounts are using full Salesforce licences`,
-      summary: said`${onFull.length} of ${plural(accounts.length, "integration account")} ${onFull.length === 1 ? "holds" : "hold"} a full ${andList(licences.map((l) => said`${org(l)}`))} licence. ${spare ? said`The org has ${plural(spare, `${INTEGRATION_LICENCE} licence`)} unassigned, so ${movable === onFull.length ? (movable === 1 ? "it" : "all of them") : movable} could move now and free the full ${movable === 1 ? "seat" : "seats"}.` : said`The org has no unassigned ${INTEGRATION_LICENCE} licence.`} Salesforce's guidance for new integrations is an API-only profile on the ${INTEGRATION_LICENCE} licence.`,
+      summary: valued(said`${onFull.length} of ${plural(accounts.length, "integration account")} ${onFull.length === 1 ? "holds" : "hold"} a full ${andList(licences.map((l) => said`${org(l)}`))} licence. ${spare ? said`The org has ${plural(spare, `${INTEGRATION_LICENCE} licence`)} unassigned, so ${movable === onFull.length ? (movable === 1 ? "it" : "all of them") : movable} could move now and free the full ${movable === 1 ? "seat" : "seats"}.` : said`The org has no unassigned ${INTEGRATION_LICENCE} licence.`} Salesforce's guidance for new integrations is an API-only profile on the ${INTEGRATION_LICENCE} licence.`, { onFull: onFull.length, accounts: accounts.length }),
       recommendation: said`Move each integration account to the ${INTEGRATION_LICENCE} licence with an API-only profile, give it a permission set with only the access it needs, then reduce the full seats at renewal.`,
       recommendationType: "change",
       severity: movable > 0 ? "medium" : "low",
@@ -330,11 +331,11 @@ const interactiveIntegrations: Rule = {
     const byHand = open.filter((u) => uiLogins(u) > 0);
     if (logins.status === "ok") evidence.push(ctx.ev(logins.source, { count: byHand.length, dateRange: { from: logins.data.from, to: ctx.window.to }, note: "Logins without an API type, by account" }));
     const segments = [{ dimension: "profile", segments: new Set(accounts.map((u) => u.Profile?.Name ?? "No profile")).size }];
-    if (open.length === 0) return { outcome: "pass", summary: said`All ${plural(accounts.length, "integration account")} ${accounts.length === 1 ? "is" : "are"} API only, so nobody can log in to Salesforce with ${accounts.length === 1 ? "it" : "them"}.`, evidence, segmentsChecked: segments, facts: { accounts: accounts.length, open: 0 } };
+    if (open.length === 0) return { outcome: "pass", summary: valued(said`All ${plural(accounts.length, "integration account")} ${accounts.length === 1 ? "is" : "are"} API only, so nobody can log in to Salesforce with ${accounts.length === 1 ? "it" : "them"}.`, { accounts: accounts.length }), evidence, segmentsChecked: segments, facts: { accounts: accounts.length, open: 0 } };
     return {
       outcome: "issue",
       title: said`Integration accounts can log in like a person`,
-      summary: said`${open.length} of ${plural(accounts.length, "integration account")} ${open.length === 1 ? "isn't" : "aren't"} set to API only, so anyone with the password can log in through the browser${byHand.length && logins.status === "ok" ? said`, and ${byHand.length === open.length && open.length === 1 ? "it has" : said`${byHand.length} ${byHand.length === 1 ? "has" : "have"}`} since ${org(logins.data.from)}` : ""}.${logins.status !== "ok" ? " We couldn't read the login history, so we can't say whether anyone has." : ""}`,
+      summary: valued(said`${open.length} of ${plural(accounts.length, "integration account")} ${open.length === 1 ? "isn't" : "aren't"} set to API only, so anyone with the password can log in through the browser${byHand.length && logins.status === "ok" ? said`, and ${byHand.length === open.length && open.length === 1 ? "it has" : said`${byHand.length} ${byHand.length === 1 ? "has" : "have"}`} since ${org(logins.data.from)}` : ""}.${logins.status !== "ok" ? " We couldn't read the login history, so we can't say whether anyone has." : ""}`, { open: open.length, accounts: accounts.length }),
       recommendation: said`Give each integration account the API Only User permission, through its profile or a permission set, so it can reach Salesforce only through the API.`,
       recommendationType: "change",
       severity: byHand.length ? "high" : "medium",
@@ -387,8 +388,8 @@ const apiUsage: Rule = {
     const segments = [{ dimension: "allowance", segments: read.length }];
     const facts = Object.fromEntries(read.flatMap((r) => [[`${r.key}Used`, r.used], [`${r.key}Max`, r.max], [`${r.key}Share`, r.share]]));
     // Past the allowance, "100,500 of 100,000" would read as a part larger than its whole, which the number check refuses (as storage, 502).
-    const amount = (r: Read): Said => (r.used > r.max ? said`${grouped(r.used)}, over the ${grouped(r.max)} allowance` : said`${grouped(r.used)} of ${grouped(r.max)}`);
-    const text = (r: Read): Said => said`${r.share}% of its daily ${r.first} (${amount(r)})`;
+    const amount = (r: Read): Said => (r.used > r.max ? valued(said`${grouped(r.used)}, over the ${grouped(r.max)} allowance`, { used: r.used, max: r.max }) : valued(said`${grouped(r.used)} of ${grouped(r.max)}`, { used: r.used, max: r.max }));
+    const text = (r: Read): Said => valued(said`${r.share}% of its daily ${r.first} (${amount(r)})`, { share: [r.share, "percent"] });
     const noAllowance = none.length ? said`This org has no daily allowance for ${listed(none)}, so there's nothing to use up.` : null;
     const oddText = odd.length ? said`Salesforce reported more remaining than the maximum for ${listed(odd)}, so we can't say how much was used.` : null;
     const unreadText = absent.length ? said`The org didn't report its daily allowance for ${listed(absent)}, so we can't say it's within it.` : null;
@@ -447,13 +448,13 @@ const failedJobs: Rule = {
     const facts = { jobs: started.length, failed: failed.length, withErrors: withErrors.length, classes: classes.length, days: ASYNC_JOB_DAYS };
     if (failed.length + withErrors.length === 0) {
       if (jobs.truncated) return { outcome: "not_measurable", reason: said`The job log was too long to read in full, so we can't say none failed.`, evidence };
-      if (started.length === 0) return { outcome: "pass", summary: said`No asynchronous Apex ran in the last ${ASYNC_JOB_DAYS} days.`, evidence, segmentExemptReason: "There are no jobs to segment.", facts };
-      return { outcome: "pass", summary: said`None of the ${plural(started.length, "asynchronous Apex job")} in the last ${ASYNC_JOB_DAYS} days failed.`, evidence, segmentsChecked: segments, facts };
+      if (started.length === 0) return { outcome: "pass", summary: valued(said`No asynchronous Apex ran in the last ${ASYNC_JOB_DAYS} days.`, { asyncJobDays: [ASYNC_JOB_DAYS, "day"] }), evidence, segmentExemptReason: "There are no jobs to segment.", facts };
+      return { outcome: "pass", summary: valued(said`None of the ${plural(started.length, "asynchronous Apex job")} in the last ${ASYNC_JOB_DAYS} days failed.`, { started: started.length, asyncJobDays: [ASYNC_JOB_DAYS, "day"] }), evidence, segmentsChecked: segments, facts };
     }
     return {
       outcome: "issue",
       title: said`Background jobs are failing`,
-      summary: said`${jobs.truncated ? said`At least ${plural(failed.length, "asynchronous Apex job")}` : said`${failed.length} of ${plural(started.length, "asynchronous Apex job")}`} failed in the last ${ASYNC_JOB_DAYS} days${withErrors.length ? said`, and ${plural(withErrors.length, "batch job")} finished with errors in some of ${withErrors.length === 1 ? "its" : "their"} records` : ""}: ${joinSaid(classes.map(([name, n]) => said`${org(name)} ${n}`), ", ")}. The work these jobs should have done didn't happen, and failures like these often go unnoticed until someone finds the data wrong.`,
+      summary: valued(said`${jobs.truncated ? said`At least ${plural(failed.length, "asynchronous Apex job")}` : said`${failed.length} of ${plural(started.length, "asynchronous Apex job")}`} failed in the last ${ASYNC_JOB_DAYS} days${withErrors.length ? said`, and ${plural(withErrors.length, "batch job")} finished with errors in some of ${withErrors.length === 1 ? "its" : "their"} records` : ""}: ${joinSaid(classes.map(([name, n]) => valued(said`${org(name)} ${n}`, { n })), ", ")}. The work these jobs should have done didn't happen, and failures like these often go unnoticed until someone finds the data wrong.`, { asyncJobDays: [ASYNC_JOB_DAYS, "day"] }),
       recommendation: said`Find out why each job failed and fix the cause, then send failures to someone who will act on them.`,
       recommendationType: "change",
       severity: failed.length + withErrors.length >= FAILURES_MEDIUM ? "medium" : "low",
@@ -490,12 +491,12 @@ const hardcodedEndpoints: Rule = {
     const segments = [{ dimension: "class", segments: code.length }];
     const facts = { classes: code.length, callouts: callouts.length, literal: literal.length, addresses };
     if (literal.length === 0) {
-      return { outcome: "pass", summary: callouts.length ? said`All ${plural(callouts.length, "class", "classes")} that set a callout address use a named credential.` : said`None of the code we read sets a callout address itself.`, evidence, segmentsChecked: segments, facts };
+      return { outcome: "pass", summary: callouts.length ? valued(said`All ${plural(callouts.length, "class", "classes")} that set a callout address use a named credential.`, { callouts: callouts.length }) : said`None of the code we read sets a callout address itself.`, evidence, segmentsChecked: segments, facts };
     }
     return {
       outcome: "issue",
       title: said`Some code calls other systems at addresses written into it`,
-      summary: said`${literal.length} of ${plural(callouts.length, "class", "classes")} that set a callout address ${literal.length === 1 ? "writes" : "write"} it into the code rather than using a named credential, ${plural(addresses, "address", "addresses")} in all. Each change of address then needs a code release, and the login for the other system has to be kept somewhere else. Salesforce's guidance is to manage callouts' authentication centrally through named credentials.`,
+      summary: valued(said`${literal.length} of ${plural(callouts.length, "class", "classes")} that set a callout address ${literal.length === 1 ? "writes" : "write"} it into the code rather than using a named credential, ${plural(addresses, "address", "addresses")} in all. Each change of address then needs a code release, and the login for the other system has to be kept somewhere else. Salesforce's guidance is to manage callouts' authentication centrally through named credentials.`, { literal: literal.length, callouts: callouts.length, addresses }),
       recommendation: said`Move each address into a named credential, with its authentication in an external credential, and call it with callout: in the code.`,
       recommendationType: "change",
       severity: "medium",

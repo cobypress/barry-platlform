@@ -1,4 +1,5 @@
 import { editionIsWhy } from "../../salesforce/refusal-words.ts";
+import { named } from "../../engine/named.ts";
 import { said } from "../../engine/org-words.ts";
 import { apexExtractor, metadataExtractor } from "../../extract/automation.ts";
 import { unreadReason } from "../../extract/metadata-parse.ts";
@@ -110,7 +111,7 @@ export function objectInventoryMetric(ctx: Ctx): Metric[] {
   // Said, so an automatic run's marks know the counts as the only things put in (DECISIONS.md 739); the list's
   // reason is passed on in its own text, which the passed-on route knows by its head (702).
   if (unnamedLayouts + unnamedTriggers > 0) {
-    exclusions.push(said`Page layouts (${unnamedLayouts}) and Apex triggers (${unnamedTriggers}) on custom objects we couldn't name`);
+    exclusions.push(named(said`Page layouts (${unnamedLayouts}) and Apex triggers (${unnamedTriggers}) on custom objects we couldn't name`, { unnamedLayouts, unnamedTriggers }));
     if (ids.status !== "ok") exclusions.push(`The names of custom objects, because the list of custom objects couldn't be read: ${ids.reason}`);
   }
   if (layouts.status !== "ok") exclusions.push(`Page layouts, which couldn't be read: ${layouts.reason}`);

@@ -1,4 +1,5 @@
 import { pct, type RuleContext } from "../../../engine/rule.ts";
+import { named } from "../../../engine/named.ts";
 import { org, said, type Said } from "../../../engine/org-words.ts";
 import type { Metric, MetricSegment } from "../../../schemas/index.ts";
 import { loadPipeline, type Deal, type PipelineData, type StageMap } from "../cohort.ts";
@@ -233,16 +234,16 @@ function buildPaths(ctx: Ctx, data: PipelineData): Loaded {
   const fromOpen = closedFromOpen(ctx, data);
   // Deals closed, and not one with a stage from while it was open: the stage history isn't kept for them.
   if (closedAll.length > 0 && fromOpen.length === 0) {
-    return { status: "not_measurable", reason: said`Stage history isn't tracked for these deals: none of the ${closedAll.length} deals that closed in the window has a recorded open stage.`, data };
+    return { status: "not_measurable", reason: named(said`Stage history isn't tracked for these deals: none of the ${closedAll.length} deals that closed in the window has a recorded open stage.`, { closedAll: closedAll.length }), data };
   }
-  if (fromOpen.length < minSample) return { status: "not_measurable", reason: said`${fromOpen.length} closed deals with stage history is below the calibrated minimum of ${minSample}.`, data };
+  if (fromOpen.length < minSample) return { status: "not_measurable", reason: named(said`${fromOpen.length} closed deals with stage history is below the calibrated minimum of ${minSample}.`, { fromOpen: fromOpen.length, minSample }), data };
   const closed: PathDeal[] = fromOpen.map((deal) => ({ id: deal.Id, deal, path: openPathOf(deal, data.stages), won: deal.category === "won", days: daysToClose(deal) }));
   const distinct = new Set(closed.map((d) => keyOf(d.path))).size;
-  if (distinct === closed.length) return { status: "not_measurable", reason: said`Each of the ${closed.length} closed deals took a different path through your stages, so no path is common enough to compare with.`, data };
+  if (distinct === closed.length) return { status: "not_measurable", reason: named(said`Each of the ${closed.length} closed deals took a different path through your stages, so no path is common enough to compare with.`, { closed: closed.length }), data };
   const won = closed.filter((d) => d.won);
-  if (won.length < minSample) return { status: "not_measurable", reason: said`${won.length} won deals with stage history is below the calibrated minimum of ${minSample}.`, data };
+  if (won.length < minSample) return { status: "not_measurable", reason: named(said`${won.length} won deals with stage history is below the calibrated minimum of ${minSample}.`, { won: won.length, minSample }), data };
   if (new Set(won.map((d) => keyOf(d.path))).size === won.length) {
-    return { status: "not_measurable", reason: said`Each of the ${won.length} won deals took a different path through your stages, so there's no usual path to compare with.`, data };
+    return { status: "not_measurable", reason: named(said`Each of the ${won.length} won deals took a different path through your stages, so there's no usual path to compare with.`, { won: won.length }), data };
   }
   return { status: "ok", data, paths: variantsOf(closed, standardPathOf(closed)!) };
 }
@@ -279,7 +280,7 @@ export function pathMetrics(ctx: Ctx): Metric[] {
     ...HOW,
     "A stage counts as skipped only after a deal's first recorded stage and before a later stage of the usual path it entered",
     "The usual path is chosen by how often won deals took it, so it is a label, never a side of a comparison",
-    ...(closedOut ? [closedOut === 1 ? said`1 deal whose last move, back to an earlier stage, came within a day of its close isn't counted as sent back: that move closed it out` : said`${closedOut} deals whose last move, back to an earlier stage, came within a day of their close aren't counted as sent back: that move closed them out`] : []),
+    ...(closedOut ? [closedOut === 1 ? said`1 deal whose last move, back to an earlier stage, came within a day of its close isn't counted as sent back: that move closed it out` : named(said`${closedOut} deals whose last move, back to an earlier stage, came within a day of their close aren't counted as sent back: that move closed them out`, { closedOut })] : []),
   ];
   const segments: MetricSegment[] = [];
   const stats: Record<string, number> = {

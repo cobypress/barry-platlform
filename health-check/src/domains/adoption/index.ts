@@ -98,7 +98,7 @@ export function partialHistory(users: UserRow[], activity: LoginActivity, mid = 
   const expected = users.filter((u) => u.LastLoginDate && new Date(u.LastLoginDate.replace(/\+0000$/, "Z")) >= from).length;
   const seen = users.filter((u) => activity.days[u.Id]).length;
   if (expected === 0 || seen * 2 >= expected) return null;
-  return said`${mid ? "the" : "The"} login history shows logins for ${seen} of the ${expected} people who logged in during the window, so the connection can probably see only its own logins. Give the connected user the Monitor Login History permission, then run the check again.`;
+  return named(said`${mid ? "the" : "The"} login history shows logins for ${seen} of the ${expected} people who logged in during the window, so the connection can probably see only its own logins. Give the connected user the Monitor Login History permission, then run the check again.`, { seen, expected });
 }
 
 type Loaded = { status: "ok"; users: UserRow[]; activity: LoginActivity; evidence: Evidence[] } | { status: "not_measurable"; reason: string; evidence: Evidence[] };
@@ -303,7 +303,7 @@ const fallingAdoption: Rule = {
     const { users, activity, evidence } = data;
     const months = coveredMonths(activity, ctx.now);
     if (months.length < FALL_SPAN_MONTHS + 1) {
-      return { outcome: "not_measurable", reason: said`The login history covers ${plural(months.length, "whole month")}, and a trend needs ${FALL_SPAN_MONTHS + 1}.`, evidence };
+      return { outcome: "not_measurable", reason: named(said`The login history covers ${plural(months.length, "whole month")}, and a trend needs ${FALL_SPAN_MONTHS + 1}.`, { months: months.length }), evidence };
     }
     const last = months.at(-1)!;
     const earlier = months.slice(0, -FALL_SPAN_MONTHS);
@@ -327,7 +327,7 @@ const fallingAdoption: Rule = {
     ];
     const window = said`between ${org(months[0]!)} and ${org(last)}`;
     if (!whole && falls.length === 0) {
-      return { outcome: "pass", summary: said`Monthly active users haven't fallen ${FALL_SHARE}% or more from an earlier peak ${window}, in the org or in any profile or role of ${MIN_GROUP} people or more.`, evidence, segmentsChecked: segments, facts: { months: months.length } };
+      return { outcome: "pass", summary: named(said`Monthly active users haven't fallen ${FALL_SHARE}% or more from an earlier peak ${window}, in the org or in any profile or role of ${MIN_GROUP} people or more.`, { fallShare: [FALL_SHARE, "percent"], minGroup: MIN_GROUP }), evidence, segmentsChecked: segments, facts: { months: months.length } };
     }
     const line = (f: Fall): Said => named(said`${f.words}, from ${f.peak} in ${org(f.peakMonth)} to ${f.now} in ${org(last)} (down ${f.drop}%)`, { peak: f.peak, now: f.now, dropPct: f.drop });
     const all = [...(whole ? [whole] : []), ...falls];
@@ -367,13 +367,13 @@ const lowEngagement: Rule = {
       { dimension: "profile", segments: groups.filter((g) => g.dimension === "profile").length },
       { dimension: "role", segments: groups.filter((g) => g.dimension === "role").length },
     ];
-    if (groups.length === 0) return { outcome: "pass", summary: said`No profile or role has ${MIN_GROUP} people or more to judge.`, evidence, segmentExemptReason: `No group has ${MIN_GROUP} people.` };
+    if (groups.length === 0) return { outcome: "pass", summary: named(said`No profile or role has ${MIN_GROUP} people or more to judge.`, { minGroup: MIN_GROUP }), evidence, segmentExemptReason: `No group has ${MIN_GROUP} people.` };
     const low = groups.map((g) => ({ g, barely: g.users.filter(barely).length })).filter((x) => pct(x.barely, x.g.users.length) > BARELY_SHARE);
-    if (low.length === 0) return { outcome: "pass", summary: said`In every profile and role of ${MIN_GROUP} people or more, most log in at least ${BARELY_DAYS} days in ${RECENT_DAYS}.`, evidence, segmentsChecked: segments };
+    if (low.length === 0) return { outcome: "pass", summary: named(said`In every profile and role of ${MIN_GROUP} people or more, most log in at least ${BARELY_DAYS} days in ${RECENT_DAYS}.`, { minGroup: MIN_GROUP, barelyDays: [BARELY_DAYS, "day"], recentDays: RECENT_DAYS }), evidence, segmentsChecked: segments };
     return {
       outcome: "issue",
       title: said`Some teams barely use Salesforce`,
-      summary: named(said`In these groups, most people logged in on fewer than ${BARELY_DAYS} of the last ${RECENT_DAYS} days: ${joinSaid(low.map((x) => said`${x.g.dimension} ${org(x.g.key)}, ${x.barely} of ${x.g.users.length}`), "; ")}.`, { barelyDays: BARELY_DAYS, recentDays: RECENT_DAYS, ...each(low, (x) => ({ barely: x.barely, of: x.g.users.length })) }),
+      summary: named(said`In these groups, most people logged in on fewer than ${BARELY_DAYS} of the last ${RECENT_DAYS} days: ${joinSaid(low.map((x) => named(said`${x.g.dimension} ${org(x.g.key)}, ${x.barely} of ${x.g.users.length}`, { barely: x.barely, users: x.g.users.length })), "; ")}.`, { barelyDays: BARELY_DAYS, recentDays: RECENT_DAYS, ...each(low, (x) => ({ barely: x.barely, of: x.g.users.length })) }),
       recommendation: said`Find out what these teams use instead of Salesforce, and bring that work into it: their pipeline, their reports, and their next steps.`,
       recommendationType: "investigate",
       severity: "medium",
@@ -406,7 +406,7 @@ const classicUsers: Rule = {
     const profiles = new Set(who.map(profileOf)).size;
     const segments = [{ dimension: "profile", segments: profiles }];
     const unread = everyone.length - who.length;
-    if (classic.length === 0) return { outcome: "pass", summary: said`All ${plural(who.length, "active user")}${unread ? said` whose setting we could read` : ""} are set to use Lightning Experience.${unread ? said` The setting couldn't be read for ${plural(unread, "user")}.` : ""}`, evidence, segmentsChecked: segments };
+    if (classic.length === 0) return { outcome: "pass", summary: named(said`All ${plural(who.length, "active user")}${unread ? said` whose setting we could read` : ""} are set to use Lightning Experience.${unread ? said` The setting couldn't be read for ${plural(unread, "user")}.` : ""}`, { who: who.length }), evidence, segmentsChecked: segments };
     const share = pct(classic.length, who.length);
     const byProfile = [...new Set(classic.map(profileOf))].sort().map((p) => {
       const users = classic.filter((u) => profileOf(u) === p).length;

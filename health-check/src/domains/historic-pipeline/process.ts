@@ -79,7 +79,7 @@ export function load(ctx: Ctx): { status: "ok"; data: Ready; process: Process } 
   if (data.unmapped.unordered.length > 0) return { status: "not_measurable", reason: unorderedReason(data.unmapped.unordered), data };
   const closed = closedFromOpen(ctx, data);
   const { minSample } = ctx.calibration;
-  if (closed.length < minSample) return { status: "not_measurable", reason: said`${closed.length} closed deals with stage history is below the calibrated minimum of ${minSample}.`, data };
+  if (closed.length < minSample) return { status: "not_measurable", reason: named(said`${closed.length} closed deals with stage history is below the calibrated minimum of ${minSample}.`, { closed: closed.length, minSample }), data };
   const paths = new Map(closed.map((d) => [d.Id, pathOf(d)]));
   const won = closed.filter(isWon);
   const lost = closed.filter(isLost);
@@ -92,7 +92,7 @@ export function load(ctx: Ctx): { status: "ok"; data: Ready; process: Process } 
 const skippedOf = (p: Process, d: Deal): string[] => p.expected.filter((stage) => !p.paths.get(d.Id)!.includes(stage));
 const stageList = (stages: string[]): Said => joinSaid(stages.map((s) => said`${org(s)}`), ", ");
 export const expectedNote = (p: Process): Said =>
-  p.expectedFrom === "calibration" ? said`The expected stages are the ones the calibration marks as required: ${stageList(p.expected)}` : said`The expected stages are those more than ${USUAL_SHARE}% of won deals passed through: ${stageList(p.expected)}`;
+  p.expectedFrom === "calibration" ? said`The expected stages are the ones the calibration marks as required: ${stageList(p.expected)}` : named(said`The expected stages are those more than ${USUAL_SHARE}% of won deals passed through: ${stageList(p.expected)}`, { usualShare: [USUAL_SHARE, "percent"] });
 
 const DIMENSION_WORDS = ["record type", "team", "rep", "lead source", "type", "closed quarter"] as const;
 
@@ -144,7 +144,7 @@ export function transitionMatrix(m: Extract<Metric, { status: "measured" }>, cal
 function skipped(ctx: Ctx, data: Ready, p: Process): Metric {
   const definition = base(ctx, data, { ...DEF.skipped, assumptions: [expectedNote(p)] });
   const { minSample } = ctx.calibration;
-  if (p.won.length < minSample) return notMeasurable(definition, said`${p.won.length} won deals with stage history is below the calibrated minimum of ${minSample}.`);
+  if (p.won.length < minSample) return notMeasurable(definition, named(said`${p.won.length} won deals with stage history is below the calibrated minimum of ${minSample}.`, { won: p.won.length, minSample }));
   if (p.expected.length === 0) return notMeasurable(definition, `No open stage was passed through by more than ${USUAL_SHARE}% of won deals, and the calibration marks none as required.`);
   const rate = (group: Deal[]): number => pct(group.filter((d) => skippedOf(p, d).length > 0).length, group.length);
   const byStage: MetricSegment[] = p.expected.map((stage) => ({ dimension: "skipped stage", key: stage, n: p.won.length, value: pct(p.won.filter((d) => !p.paths.get(d.Id)!.includes(stage)).length, p.won.length), notMeasurableReason: null }));
@@ -171,7 +171,7 @@ function backwards(ctx: Ctx, data: Ready, p: Process): Metric {
 function commonPath(ctx: Ctx, data: Ready, p: Process, deals: Deal[], d: Definition, noun: "won deals" | "lost and no decision deals"): Metric {
   const definition = base(ctx, data, d);
   const { minSample } = ctx.calibration;
-  if (deals.length < minSample) return notMeasurable(definition, said`${deals.length} ${noun} with stage history is below the calibrated minimum of ${minSample}.`);
+  if (deals.length < minSample) return notMeasurable(definition, named(said`${deals.length} ${noun} with stage history is below the calibrated minimum of ${minSample}.`, { deals: deals.length, minSample }));
   const counts = new Map<string, number>();
   for (const deal of deals) {
     const key = p.paths.get(deal.Id)!.join(" > ");
@@ -197,7 +197,7 @@ export function processMetrics(ctx: Ctx): Metric[] {
 function worst(result: SegmentedRate): Said {
   const worse = result.hotspots.filter((h) => h.rate > result.rate).slice(0, 3);
   // A segment's key is the org's: a record type, a team, a lead source, a person's token.
-  return worse.length ? named(said` Highest: ${joinSaid(worse.map((h) => said`${dimensionWords(h.dimension)} ${org(h.key)}, ${h.hits} of ${h.n} (${h.rate}%)`), "; ")}.`, each(worse, (h) => ({ hits: h.hits, of: h.n, ratePct: h.rate }))) : said``;
+  return worse.length ? named(said` Highest: ${joinSaid(worse.map((h) => named(said`${dimensionWords(h.dimension)} ${org(h.key)}, ${h.hits} of ${h.n} (${h.rate}%)`, { hits: h.hits, n: h.n, rate: [h.rate, "percent"] })), "; ")}.`, each(worse, (h) => ({ hits: h.hits, of: h.n, ratePct: h.rate }))) : said``;
 }
 
 /** Said in the analysis, so the reason is marked (DECISIONS.md 663). */
@@ -217,19 +217,19 @@ const skippedStages: Rule = {
     if (loaded.status !== "ok") return notMeasurableResult(loaded);
     const { data, process: p } = loaded;
     const { minSample } = ctx.calibration;
-    if (p.won.length < minSample) return { outcome: "not_measurable", reason: said`${p.won.length} won deals with stage history is below the calibrated minimum of ${minSample}.`, evidence: data.evidence };
-    if (p.expected.length === 0) return { outcome: "not_measurable", reason: said`No open stage was passed through by more than ${USUAL_SHARE}% of won deals, and the calibration marks none as required.`, evidence: data.evidence };
+    if (p.won.length < minSample) return { outcome: "not_measurable", reason: named(said`${p.won.length} won deals with stage history is below the calibrated minimum of ${minSample}.`, { won: p.won.length, minSample }), evidence: data.evidence };
+    if (p.expected.length === 0) return { outcome: "not_measurable", reason: named(said`No open stage was passed through by more than ${USUAL_SHARE}% of won deals, and the calibration marks none as required.`, { usualShare: [USUAL_SHARE, "percent"] }), evidence: data.evidence };
     const result = segmentRate(p.won, (d) => skippedOf(p, d).length > 0, dimensions(ctx), { segmentLimit: SKIP_SEGMENT_LIMIT, minSegment: minSample });
     if (result.rate <= SKIP_LIMIT && result.hotspots.length === 0) {
-      return { outcome: "pass", summary: said`${result.hits} of ${result.n} won deals we can follow through their stages (${result.rate}%) skipped an expected stage, within our limit of ${SKIP_LIMIT}%, and no segment is over ${SKIP_SEGMENT_LIMIT}%. ${expectedNote(p)}.`, evidence: data.evidence, segmentsChecked: result.segmentsChecked, facts: { hits: result.hits, n: result.n, rate: result.rate } };
+      return { outcome: "pass", summary: named(said`${result.hits} of ${result.n} won deals we can follow through their stages (${result.rate}%) skipped an expected stage, within our limit of ${SKIP_LIMIT}%, and no segment is over ${SKIP_SEGMENT_LIMIT}%. ${expectedNote(p)}.`, { hits: result.hits, n: result.n, rate: [result.rate, "percent"], skipLimit: [SKIP_LIMIT, "percent"], skipSegmentLimit: [SKIP_SEGMENT_LIMIT, "percent"] }), evidence: data.evidence, segmentsChecked: result.segmentsChecked, facts: { hits: result.hits, n: result.n, rate: result.rate } };
     }
     const byStage = p.expected.map((stage) => ({ stage, n: p.won.filter((d) => !p.paths.get(d.Id)!.includes(stage)).length })).filter((s) => s.n > 0).sort((a, b) => b.n - a.n);
     // "We can follow through their stages": a deal entered straight as won has no path to read (DECISIONS.md 364).
-    const where = result.rate > SKIP_LIMIT ? said`${result.hits} of ${result.n} won deals we can follow through their stages (${result.rate}%)` : said`${result.hits} of ${result.n} won deals we can follow through their stages (${result.rate}%), and more in some segments`;
+    const where = result.rate > SKIP_LIMIT ? named(said`${result.hits} of ${result.n} won deals we can follow through their stages (${result.rate}%)`, { hits: result.hits, n: result.n, rate: [result.rate, "percent"] }) : named(said`${result.hits} of ${result.n} won deals we can follow through their stages (${result.rate}%), and more in some segments`, { hits: result.hits, n: result.n, rate: [result.rate, "percent"] });
     return {
       outcome: "issue",
       title: said`Won deals skip stages your process expects`,
-      summary: said`${where} never entered a stage we'd expect them to: ${joinSaid(byStage.map((s) => said`${org(s.stage)} (${s.n})`), ", ")}. ${expectedNote(p)}.${worst(result)}`,
+      summary: said`${where} never entered a stage we'd expect them to: ${joinSaid(byStage.map((s) => named(said`${org(s.stage)} (${s.n})`, { n: s.n })), ", ")}. ${expectedNote(p)}.${worst(result)}`,
       recommendation: said`Ask the teams that skip these stages why. Either the stage isn't part of how they sell, and it can go from their path, or it's being skipped in Salesforce, and the stage's exit criteria need agreeing.`,
       recommendationType: "investigate",
       severity: "medium",
@@ -257,13 +257,13 @@ const goingBackwards: Rule = {
     const back = (d: Deal): number => backwardMoves(p.paths.get(d.Id)!, data.stages.orderOf);
     const result = segmentRate(p.closed, (d) => back(d) > 0, dimensions(ctx), { segmentLimit: BACK_SEGMENT_LIMIT, minSegment: ctx.calibration.minSample });
     if (result.rate <= BACK_LIMIT && result.hotspots.length === 0) {
-      return { outcome: "pass", summary: said`${result.hits} of ${result.n} closed deals (${result.rate}%) went back a stage, within our limit of ${BACK_LIMIT}%, and no segment is over ${BACK_SEGMENT_LIMIT}%.`, evidence: data.evidence, segmentsChecked: result.segmentsChecked, facts: { hits: result.hits, n: result.n, rate: result.rate } };
+      return { outcome: "pass", summary: named(said`${result.hits} of ${result.n} closed deals (${result.rate}%) went back a stage, within our limit of ${BACK_LIMIT}%, and no segment is over ${BACK_SEGMENT_LIMIT}%.`, { hits: result.hits, n: result.n, rate: [result.rate, "percent"], backLimit: [BACK_LIMIT, "percent"], backSegmentLimit: [BACK_SEGMENT_LIMIT, "percent"] }), evidence: data.evidence, segmentsChecked: result.segmentsChecked, facts: { hits: result.hits, n: result.n, rate: result.rate } };
     }
     const twice = p.closed.filter((d) => back(d) >= 2).length;
     return {
       outcome: "issue",
       title: said`Deals often go back a stage`,
-      summary: said`${result.hits} of ${result.n} deals that closed in the window (${result.rate}%) went back to an earlier stage at least once${twice ? said`, and ${plural(twice, "deal")} twice or more` : ""}.${worst(result)} A deal moved forward too early makes the open pipeline look further on than it is.`,
+      summary: named(said`${result.hits} of ${result.n} deals that closed in the window (${result.rate}%) went back to an earlier stage at least once${twice ? said`, and ${plural(twice, "deal")} twice or more` : ""}.${worst(result)} A deal moved forward too early makes the open pipeline look further on than it is.`, { hits: result.hits, n: result.n, rate: [result.rate, "percent"] }),
       recommendation: said`Agree what has to be true for a deal to leave each stage, and check new moves against it in pipeline reviews.`,
       recommendationType: "investigate",
       severity: "medium",
@@ -295,20 +295,20 @@ const deadEndStage: Rule = {
     const { data, process: p } = loaded;
     const { minSample } = ctx.calibration;
     const lost = p.lost.filter((d) => stageLeftFrom(d, data) !== null);
-    if (lost.length < minSample) return { outcome: "not_measurable", reason: said`${lost.length} lost and no decision deals with stage history is below the calibrated minimum of ${minSample}.`, evidence: data.evidence };
+    if (lost.length < minSample) return { outcome: "not_measurable", reason: named(said`${lost.length} lost and no decision deals with stage history is below the calibrated minimum of ${minSample}.`, { lost: lost.length, minSample }), evidence: data.evidence };
     const counts = groupBy(lost, (d) => stageLeftFrom(d, data)!);
     const [stage, dying] = [...counts].sort(([a, x], [b, y]) => y.length - x.length || a.localeCompare(b))[0]!;
     const share = pct(dying.length, lost.length);
     const wonDays = p.won.flatMap((d) => (daysByStage(d, data).has(stage) ? [daysByStage(d, data).get(stage)!] : []));
     const segments = [{ dimension: "stage left", segments: counts.size }];
-    if (share < DEAD_END_SHARE) return { outcome: "pass", summary: said`Lost deals leave from no one stage in particular: the most, ${org(stage)}, holds ${dying.length} of ${lost.length} (${share}%).`, evidence: data.evidence, segmentsChecked: segments, facts: { share } };
-    if (wonDays.length < minSample) return { outcome: "not_measurable", reason: said`${wonDays.length} won deals were in ${org(stage)}, below the calibrated minimum of ${minSample}, so there's no usual time to compare with.`, evidence: data.evidence };
+    if (share < DEAD_END_SHARE) return { outcome: "pass", summary: named(said`Lost deals leave from no one stage in particular: the most, ${org(stage)}, holds ${dying.length} of ${lost.length} (${share}%).`, { dying: dying.length, lost: lost.length, share: [share, "percent"] }), evidence: data.evidence, segmentsChecked: segments, facts: { share } };
+    if (wonDays.length < minSample) return { outcome: "not_measurable", reason: named(said`${wonDays.length} won deals were in ${org(stage)}, below the calibrated minimum of ${minSample}, so there's no usual time to compare with.`, { wonDays: wonDays.length, minSample }), evidence: data.evidence };
     const line = round1(quantile(wonDays, WAIT_PERCENTILE));
     const waitOf = (d: Deal): number => daysByStage(d, data).get(stage) ?? 0;
     const wait = round1(median(dying.map(waitOf)));
     const result = segmentRate(dying, (d) => waitOf(d) > line, dimensions(ctx), { segmentLimit: 50, minSegment: minSample });
     const checked = [...segments, ...result.segmentsChecked];
-    if (wait <= line) return { outcome: "pass", summary: said`More lost deals leave from ${org(stage)} than from any other stage (${dying.length} of ${lost.length}, ${share}%), but after a median of ${wait} days there, no longer than three quarters of won deals took (${line} days).`, evidence: data.evidence, segmentsChecked: checked, facts: { share, wait, line } };
+    if (wait <= line) return { outcome: "pass", summary: named(said`More lost deals leave from ${org(stage)} than from any other stage (${dying.length} of ${lost.length}, ${share}%), but after a median of ${wait} days there, no longer than three quarters of won deals took (${line} days).`, { dying: dying.length, lost: lost.length, share: [share, "percent"], wait: [wait, "day"], line: [line, "day"] }), evidence: data.evidence, segmentsChecked: checked, facts: { share, wait, line } };
     return {
       outcome: "issue",
       title: said`Lost deals wait in ${org(stage)} before they're closed`,
