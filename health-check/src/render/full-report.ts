@@ -18,6 +18,7 @@ import { closedAgainstFirst, compactMoney, longDate, monthYear, percent, ukDates
 import type { Calibration } from "../schemas/index.ts";
 import { chartSlot, coverScore, document, documentTitle, difficultySpan, difficultyText, estimateLines, inDocumentOrder, paginate, paginateColumns, paragraphs, renderContext, sentence, severityChip, valueFigure, valueText, wrappedLines, type Render } from "./html.ts";
 import { noteSections, referenceMap } from "./references.ts";
+import { unscoredBeyond, withWholeNotes } from "./area-notes.ts";
 import { scoreLine } from "./executive.ts";
 import { COMPARE_CSS, compareSlide } from "./compare.ts";
 import { MONEY_CSS, moneySlides } from "./money.ts";
@@ -794,7 +795,9 @@ function buildSlides(report: BuiltReport, r: Render, density: Density | null, mo
   const withIssues = assessed.filter((d) => issuesOf(team.filter((f) => f.domain === d)).length > 0);
   const quiet = assessed.filter((d) => !withIssues.includes(d));
   const working = quiet.filter((d) => team.some((f) => f.domain === d && f.status === "passed"));
-  const unclear = [...quiet.filter((d) => !working.includes(d)), ...unassessed];
+  const nothingMeasured = [...quiet.filter((d) => !working.includes(d)), ...unassessed];
+  // With the areas' own reasons on, every area the score leaves out is listed, its reason whole (DECISIONS.md 769).
+  const unclear = [...nothingMeasured, ...unscoredBeyond(report, domains, nothingMeasured)];
   // A thin org is told once, on the Overview, so the area pages don't each say it again (DECISIONS.md 450).
   // "Where we can't give a view yet" needs nothing more: it only ever holds areas with nothing measured.
   const thin = isThinData(team);
@@ -915,7 +918,7 @@ function buildSlides(report: BuiltReport, r: Render, density: Density | null, mo
   if (worth.length) mark("What fixing this is worth");
   for (const slide of worth) add(slide, "tight");
 
-  add(`<div class="eyebrow">Scorecard</div><h2>How each area stands</h2>${scoreLine(report) ? `<p class="lede">${r.t(scoreLine(report, true))}</p>` : ""}<div class="chart-wrap" style="max-width:${scoreLine(report) ? 760 : 880}px">${chartSlot(scorecardChart(scorecard(team, scores, domains), scorecardOptions(report)))}</div>`);
+  add(`<div class="eyebrow">Scorecard</div><h2>How each area stands</h2>${scoreLine(report) ? `<p class="lede">${r.t(scoreLine(report, true))}</p>` : ""}<div class="chart-wrap" style="max-width:${scoreLine(report) ? 760 : 880}px">${chartSlot(scorecardChart(withWholeNotes(report, scorecard(team, scores, domains)), scorecardOptions(report)))}</div>`);
 
   if (comparable) mark("How you compare");
   if (comparable) slides.push(compareSlide(r, compared));

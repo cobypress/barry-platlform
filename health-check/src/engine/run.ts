@@ -474,6 +474,9 @@ async function runHealthCheckWithin(options: RunOptions): Promise<RunResult> {
   // The company information in Setup is the name the customer goes by, unless one was given.
   run.customerRef ??= org.data?.[0]?.Name?.trim() || null;
   run.status = "analysing";
+  // Said at every analysis, so a resume after the switch changed says what this analysis did (DECISIONS.md 769).
+  if (options.areaReasons === true) run.areaReasons = true;
+  else delete run.areaReasons;
   await saveRun();
   const output = analyseRun(dir, run, calibration, modules, extracts, options.answers ?? [], options.knownModules ?? ALL_MODULES, options.gated === true, options.stageNames === true, options.stageNamesModel === true, options.areaReasons === true);
   // Each issue's records by name, for the action lists. Beside the pseudonym map, not in checkpoints/.

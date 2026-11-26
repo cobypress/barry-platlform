@@ -290,7 +290,18 @@ export function thinDataLine(findings: Finding[], appendix: "The full report's a
 }
 
 /** `notMeasurableKind` is the unscored area's, when its score has one (DECISIONS.md 627). */
-export type ScorecardRow = { domain: string; label: string; score: number | null; note: string; assessed: boolean; issues: number; high: number; notMeasurableKind?: NotMeasurableKind };
+export type ScorecardRow = {
+  domain: string;
+  label: string;
+  score: number | null;
+  note: string;
+  assessed: boolean;
+  issues: number;
+  high: number;
+  notMeasurableKind?: NotMeasurableKind;
+  /** HC_AREA_REASONS on (DECISIONS.md 769): whole sentences to print in place of the note, the first that fits; none cut. */
+  wholeNotes?: string[];
+};
 
 /** A set-up review (roadmap 2.2): set-up only, and no CRM records. */
 export const isSetupReview = (run: Pick<Run, "scope">): boolean => run.scope === "essentials";

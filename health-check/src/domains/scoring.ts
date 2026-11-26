@@ -117,6 +117,15 @@ export function areaReasonParts(domain: string, findings: Finding[], today: stri
   return [first, { text: rest === 1 ? "We couldn't measure another check in this area either, and it gives its own reason." : "We couldn't measure other checks in this area either, and each gives its own reason.", findingIds: [] }];
 }
 
+/** The reason an area gave before 769 and the parts its own checks' reasons now make, or null for a reason not made so (DECISIONS.md 769). */
+export function areaReasonFrom(domain: string, findings: Finding[], reason: string): { today: string; parts: AreaReasonPart[] } | null {
+  for (const today of AREA_REASON_TODAY) {
+    const parts = areaReasonParts(domain, findings, today);
+    if (parts && parts.map((p) => p.text).join(" ") === reason) return { today, parts };
+  }
+  return null;
+}
+
 /** The parts as one text, as the area's score says it. */
 function areaReasonOf(parts: AreaReasonPart[]): string {
   const [a, b] = parts;
