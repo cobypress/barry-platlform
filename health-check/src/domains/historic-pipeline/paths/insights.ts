@@ -176,10 +176,15 @@ export const BAND_DAYS = 91;
  * none left the z is 0, which clears no bar.
  */
 export function stratifiedZ(group: PathDeal[], other: PathDeal[], wonOf: (d: PathDeal) => boolean, from: string): number {
+  return bandedZ(group, other, wonOf, (d) => new Date(d.deal.CreatedDate).getTime(), from);
+}
+
+/** The same test for any records, given when each was made (the lead journey's, DECISIONS.md 770). */
+export function bandedZ<T>(group: T[], other: T[], wonOf: (d: T) => boolean, madeAt: (d: T) => number, from: string): number {
   const start = Date.parse(`${from}T00:00:00Z`);
   const bands = new Map<number, { won: number; n1: number; n2: number; m1: number }>();
-  const add = (d: PathDeal, inGroup: boolean): void => {
-    const k = Math.floor((new Date(d.deal.CreatedDate).getTime() - start) / (BAND_DAYS * DAY));
+  const add = (d: T, inGroup: boolean): void => {
+    const k = Math.floor((madeAt(d) - start) / (BAND_DAYS * DAY));
     const b = bands.get(k) ?? { won: 0, n1: 0, n2: 0, m1: 0 };
     const won = wonOf(d);
     if (inGroup) {
@@ -406,7 +411,7 @@ function untestedSaid(all: Array<{ untested: Untested | null; period: Period }>,
   return said`${lateSaid}${openSaid}${fewSaid}`;
 }
 
-const NOT_A_CAUSE = said` This shows how often they went together, not that one is the reason for the other.`;
+export const NOT_A_CAUSE = said` This shows how often they went together, not that one is the reason for the other.`;
 const value = (): ReturnType<typeof notSized> => notSized(said`It compares the paths your deals took, which has no direct figure.`);
 
 /** Lowest with no segment to check it in; high only with segments and both sides at twice the minimum. */

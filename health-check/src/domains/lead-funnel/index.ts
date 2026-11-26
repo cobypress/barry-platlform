@@ -15,6 +15,8 @@ import type { DomainModule } from "../types.ts";
 import { loadLeads, type Lead, type LeadData } from "./load.ts";
 import { joinSaid, org, said, type Said } from "../../engine/org-words.ts";
 import { moneySaid } from "../../engine/said-forms.ts";
+import { daySaid } from "../historic-pipeline/reached.ts";
+import { fastConversion, journeyMetrics, sourceWinRate } from "./journey.ts";
 
 // Every title, summary, recommendation and reason of our own is written with
 // `said`, and every value the org chose (a lead source, a campaign type, a
@@ -36,8 +38,8 @@ const HOUR = 3_600_000;
 type Ctx = Omit<RuleContext, "metrics">;
 type Ready = Extract<LeadData, { status: "ok" }>;
 
-function leadsOr(ctx: Ctx): Ready | NotMeasurableResult {
-  const data = loadLeads(ctx);
+function leadsOr(ctx: Ctx, journey = false): Ready | NotMeasurableResult {
+  const data = loadLeads(ctx, journey);
   return data.status === "ok" ? data : { outcome: "not_measurable", reason: data.reason, evidence: data.evidence };
 }
 
@@ -98,18 +100,33 @@ function judgeable(ctx: Ctx, data: Ready): Lead[] {
   return data.leads.filter((l) => l.touchKnowable && created(l) < daysBefore(ctx.now, RESPONSE_GRACE_DAYS));
 }
 
-const responseTime: Rule = {
+/**
+ * The first-response checks with the lead journey's switch on (DECISIONS.md 770):
+ * a Status history Salesforce didn't keep makes them not measurable, since a lead
+ * answered only by a change of status would look unanswered; one kept from a day
+ * inside the window leaves out the leads made before it. Off, nothing is said.
+ */
+function untrackedReason(data: Ready): Said | null {
+  return data.statusHistory.kind === "untracked"
+    ? said`We couldn't measure first responses: Salesforce isn't keeping a history of your leads' Status field, as none of the ${data.statusHistory.converted} leads converted in the window has a recorded status change. A lead answered only by a change of status would look unanswered. Switch on field history tracking for Lead Status, and later runs will measure from that day.`
+    : null;
+}
+const historyExclusions = (data: Ready): string[] => (data.statusHistory.kind === "from" ? [said`Leads created before ${daySaid(data.statusHistory.day)}, when Salesforce's history of lead status changes starts`] : []);
+
+const responseTimeRule = (journey: boolean): Rule => ({
   id: "lead.response-time",
-  version: 1,
+  version: journey ? 2 : 1,
   domain: DOMAIN,
   title: "How fast leads get a first response",
   evaluate(ctx): RuleResult | RuleResult[] {
-    const data = leadsOr(ctx);
+    const data = leadsOr(ctx, journey);
     if ("outcome" in data) return data;
     if (!data.activityReadable) return { outcome: "not_measurable", reason: said`Activities couldn't be read in full, so we can't see first responses.`, evidence: data.evidence };
+    const untracked = untrackedReason(data);
+    if (untracked) return { outcome: "not_measurable", reason: untracked, evidence: data.evidence };
     const touched = judgeable(ctx, data).filter((l) => l.firstTouch);
     const { minSample } = ctx.calibration;
-    const exclusions = [...data.exclusions, "Leads with no response at all, which the next check covers", `Leads created before the readable year or in the last ${RESPONSE_GRACE_DAYS} days`];
+    const exclusions = [...data.exclusions, "Leads with no response at all, which the next check covers", `Leads created before the readable year or in the last ${RESPONSE_GRACE_DAYS} days`, ...historyExclusions(data)];
     const evidence = [{ ...data.evidence[0]!, count: touched.length, exclusions, note: "First response is the earliest task, event or status change after creation, on the lead or its converted contact" }];
     if (touched.length < minSample) return { outcome: "not_measurable", reason: said`${touched.length} leads with a response is below the calibrated minimum of ${minSample}.`, evidence };
     const overall = round1(median(touched.map(hoursToTouch)));
@@ -143,19 +160,22 @@ const responseTime: Rule = {
       facts: { medianHours: overall, leads: touched.length, ...(worst ? { worstHours: worst.hours } : {}) },
     };
   },
-};
+});
+const responseTime = responseTimeRule(false);
 
-const noResponse: Rule = {
+const noResponseRule = (journey: boolean): Rule => ({
   id: "lead.no-first-response",
-  version: 2,
+  version: journey ? 3 : 2,
   domain: DOMAIN,
   title: "Leads with no response at all",
   evaluate(ctx): RuleResult | RuleResult[] {
-    const data = leadsOr(ctx);
+    const data = leadsOr(ctx, journey);
     if ("outcome" in data) return data;
     if (!data.activityReadable) return { outcome: "not_measurable", reason: said`Activities couldn't be read in full, so we can't see first responses.`, evidence: data.evidence };
+    const untracked = untrackedReason(data);
+    if (untracked) return { outcome: "not_measurable", reason: untracked, evidence: data.evidence };
     const leads = judgeable(ctx, data);
-    const evidence = [{ ...data.evidence[0]!, count: leads.length, exclusions: [...data.exclusions, `Leads created before the readable year or in the last ${RESPONSE_GRACE_DAYS} days`] }];
+    const evidence = [{ ...data.evidence[0]!, count: leads.length, exclusions: [...data.exclusions, `Leads created before the readable year or in the last ${RESPONSE_GRACE_DAYS} days`, ...historyExclusions(data)] }];
     if (leads.length < ctx.calibration.minSample) return { outcome: "not_measurable", reason: said`${leads.length} leads is below the calibrated minimum of ${ctx.calibration.minSample}.`, evidence };
     const result = segmentRate(leads, (l) => l.firstTouch === null, dimensions(ctx), { segmentLimit: NO_TOUCH_SEGMENT_LIMIT, minSegment: MIN_SEGMENT });
     const facts = { hits: result.hits, n: result.n, rate: result.rate };
@@ -178,7 +198,8 @@ const noResponse: Rule = {
       facts,
     };
   },
-};
+});
+const noResponse = noResponseRule(false);
 
 const convertedWithoutOpportunity: Rule = {
   id: "lead.converted-no-opportunity",
@@ -329,14 +350,14 @@ function groupByType<C extends { Type: string | null }>(campaigns: C[]): Array<[
   return [...groups].sort(([a], [b]) => a.localeCompare(b));
 }
 
-function funnelMetrics(ctx: Ctx): Metric[] {
+const funnelMetricsOf = (journey: boolean) => (ctx: Ctx): Metric[] => {
   const shared = { domain: DOMAIN, exclusions: [] as string[], assumptions: [zoneNote(ctx)] };
   const definitions = {
     conversion: { ...shared, id: "lead.conversion_rate", label: "Lead conversion", unit: "percent" as const, definition: `Leads converted, as a share of leads at least ${CONVERSION_AGE_DAYS} days old.` },
     response: { ...shared, id: "lead.median_response_hours", label: "First response time", unit: "count" as const, definition: "Median hours from a lead's creation to its first task, event or status change. The unit is hours." },
     wonPerLead: { ...shared, id: "lead.won_per_lead", label: "Won per lead", unit: "currency" as const, definition: "Amount of won deals converted from leads, divided by leads." },
   };
-  const data = loadLeads(ctx);
+  const data = loadLeads(ctx, journey);
   if (data.status !== "ok") return Object.values(definitions).map((d) => ({ ...d, status: "not_measurable", reason: data.reason, evidence: data.evidence }));
   // No metric is published without the deals behind the funnel. Conversion alone
   // could be counted, but a funnel that stops at conversion invites the wrong read.
@@ -360,7 +381,9 @@ function funnelMetrics(ctx: Ctx): Metric[] {
   else metrics.push({ ...definitions.conversion, evidence, status: "measured", value: rate(leads), n: leads.length, segments: cuts(leads, rate), ...rest });
 
   const touched = judgeable(ctx, data).filter((l) => l.firstTouch);
+  const untracked = journey ? untrackedReason(data) : null;
   if (!data.activityReadable) metrics.push({ ...definitions.response, evidence, status: "not_measurable", reason: "Activities couldn't be read in full." });
+  else if (untracked) metrics.push({ ...definitions.response, evidence, status: "not_measurable", reason: untracked });
   else if (touched.length < minSample) metrics.push({ ...definitions.response, evidence, status: "not_measurable", reason: said`${touched.length} leads with a response is below the calibrated minimum of ${minSample}.` });
   else {
     const hours = (group: Lead[]): number => round1(median(group.map(hoursToTouch)));
@@ -376,7 +399,8 @@ function funnelMetrics(ctx: Ctx): Metric[] {
     metrics.push({ ...definitions.wonPerLead, evidence, status: "measured", value: per(total), n: total.leads, segments, ...rest });
   }
   return metrics;
-}
+};
+const funnelMetrics = funnelMetricsOf(false);
 
 export const leadFunnelModule: DomainModule = {
   id: DOMAIN,
@@ -386,3 +410,18 @@ export const leadFunnelModule: DomainModule = {
   metrics: [funnelMetrics],
   rules: [conversionBySource, responseTime, noResponse, convertedWithoutOpportunity, sourceReturn, campaignReturn],
 };
+
+/**
+ * The lead funnel with the lead journey on (HC_LEAD_JOURNEY, DECISIONS.md 770):
+ * the same reads, the first-response checks reading whether the Status history
+ * was kept, and the journey's two metrics, its check and its stored insight
+ * after the rest, so every finding and metric before them keeps its place.
+ */
+export const leadJourneyModule: DomainModule = {
+  ...leadFunnelModule,
+  metrics: [funnelMetricsOf(true), journeyMetrics],
+  rules: [conversionBySource, responseTimeRule(true), noResponseRule(true), convertedWithoutOpportunity, sourceReturn, campaignReturn, sourceWinRate, fastConversion],
+};
+
+/** The modules a run analyses with the switch on: the lead funnel swapped for its journey's, and nothing else touched. */
+export const withLeadJourney = (modules: DomainModule[]): DomainModule[] => modules.map((m) => (m === leadFunnelModule ? leadJourneyModule : m));

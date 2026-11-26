@@ -64,6 +64,11 @@ export type WorkerDeps = {
    * model's readings. Until it does, its strict schema throws on one, so stageNamesModel is ignored without it.
    */
   stageNamesModelConsole?: boolean;
+  /**
+   * HC_LEAD_JOURNEY=on, exactly, read once at start in env.ts (DECISIONS.md 770): every analysis the worker makes adds
+   * the lead journey to the lead funnel and reads whether the leads' Status history was kept. Off when absent.
+   */
+  leadJourney?: boolean;
   /** The worker's switch for automatic runs, read once at start in env.ts (DECISIONS.md 688). Absent: off. */
   automatic?: AutomaticSwitch;
   /**

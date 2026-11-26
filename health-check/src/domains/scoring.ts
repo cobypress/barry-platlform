@@ -32,7 +32,7 @@ export const UNSCORED_RULES: ReadonlySet<string> = new Set(["tech.lint-data-acce
  * twice, and a path that is won more often is no fault. Kept apart from
  * UNSCORED_RULES, which a re-check reads as the code checker's groups.
  */
-export const INSIGHT_RULES: ReadonlySet<string> = new Set(["pipe.path-insights", "pipe.probability-vs-reality"]);
+export const INSIGHT_RULES: ReadonlySet<string> = new Set(["pipe.path-insights", "pipe.probability-vs-reality", "lead.fast-conversion"]);
 /** The path insights' rule (DECISIONS.md 703): the only insight the digest serves, in its own `paths` block (758). */
 export const PATH_INSIGHTS_RULE = "pipe.path-insights";
 /**
