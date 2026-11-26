@@ -144,19 +144,19 @@ const UNIT_NAME: ReadonlyArray<[RegExp, string]> = [[/Days$/, "day"], [/Hours$/,
 /**
  * A computed value of a finding or metric as a row of the set: a plain number,
  * and in the unit its name says (DECISIONS.md 768: `…Money` an amount in the
- * run's currency, `…Pct` or a rate, share or percent a percentage, `…Points` points, `…Days`,
- * `…Hours`, `…Months`, `…Weeks`, `…Minutes`, `…Years` a duration), and in any
- * unit the set already holds that same value in under that source (as the
- * documents' set takes a fact's unit from how the engine wrote it: the value is
- * the computed one, only its unit is read).
+ * run's currency, `…Pct` or a rate, share or percent a percentage, `…Points`
+ * points, `…Days`, `…Hours`, `…Months`, `…Weeks`, `…Minutes`, `…Years` a
+ * duration). Never a unit read from the finding's own text, as the documents'
+ * set takes a fact's: here nothing of the prose is read, its units included.
  */
-function typed(source: string, name: string, value: number, held: readonly DatasetFigure[], currency: string | undefined): DatasetFigure[] {
+function typed(source: string, key: string, value: number, currency: string | undefined): DatasetFigure[] {
+  // A second value under one name is kept as "name#2" (namedIn): its unit is the name's.
+  const name = key.replace(/#\d+$/, "");
   const out: DatasetFigure[] = [{ source, kind: "number", value }];
   if (PERCENT_NAME.test(name)) out.push({ source, kind: "percent", value });
   if (/Money$/.test(name)) out.push({ source, kind: "currency", value, ...(currency ? { currency } : {}) });
   if (/Points$/.test(name)) out.push({ source, kind: "points", value });
   for (const [pattern, unit] of UNIT_NAME) if (pattern.test(name)) out.push({ source, kind: "duration", value, unit });
-  out.push(...held.filter((r) => r.value === value && r.kind !== "number").map((r) => ({ ...r, source })));
   return out;
 }
 
@@ -175,8 +175,6 @@ export function strictDataset(report: BuiltReport, set: FigureSet, named: NamedV
   const mine = <T extends { source: string }>(rows: T[]): T[] => rows.filter((r) => own.has(r.source));
   const runWide = <T extends { source: string; said?: string }>(rows: T[]): T[] => rows.filter((r) => !own.has(r.source) && !r.said);
   const free = orgFree(set);
-  const bySource = new Map<string, DatasetFigure[]>();
-  for (const r of free.figures) bySource.set(r.source, [...(bySource.get(r.source) ?? []), r]);
   const extra: DatasetFigure[] = [];
   const currency = report.input.calibration.currency;
   for (const f of findings) {
@@ -186,11 +184,11 @@ export function strictDataset(report: BuiltReport, set: FigureSet, named: NamedV
       const amount = f.facts[name];
       if (typeof amount === "number" && amount > 0) extra.push({ source: f.id, kind: "currency", value: amount, ...(currency ? { currency } : {}) });
     }
-    for (const [name, value] of Object.entries(f.facts)) extra.push(...typed(f.id, name, value, bySource.get(f.id) ?? [], currency));
+    for (const [name, value] of Object.entries(f.facts)) extra.push(...typed(f.id, name, value, currency));
   }
   for (const [id, values] of Object.entries(named)) {
     if (!own.has(id)) continue;
-    for (const [name, value] of Object.entries(values)) if (Number.isFinite(value)) extra.push(...typed(id, name, value, bySource.get(id) ?? [], currency));
+    for (const [name, value] of Object.entries(values)) if (Number.isFinite(value)) extra.push(...typed(id, name, value, currency));
   }
   // The fix prompt's fixed text, its rule's (src/fix/table.ts), put together with none of the finding's sentences in it.
   const prompts = findings.flatMap((f) => {
