@@ -292,7 +292,8 @@ const stuckInStageExpected: Rule = {
     const { data, deals: open } = loaded;
     const base = { ...data.evidence[0]!, dateRange: { from: ctx.window.to, to: ctx.window.to } };
     const { minSample } = ctx.calibration;
-    const from = new Date(`${ctx.window.from}T00:00:00.000Z`);
+    // A day alone parses as midnight UTC, where the read starts.
+    const from = new Date(ctx.window.from);
     // Every stay since the read's start, by stage, and every entry with its age today.
     const stays = new Map<string, Stay[]>();
     const oldest = new Map<string, number>();
