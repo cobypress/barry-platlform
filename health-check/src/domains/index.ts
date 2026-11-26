@@ -11,7 +11,7 @@ import { historicPipelineModule } from "./historic-pipeline/index.ts";
 import { integrationsModule } from "./integrations/index.ts";
 import { revenueOpportunitiesModule } from "./revenue-opportunities/index.ts";
 import { securityModule } from "./security/index.ts";
-import { SERVICE_CLOUD_MODULES } from "./service/index.ts";
+import { casePathsModule, SERVICE_CLOUD_MODULES } from "./service/index.ts";
 import { CPQ_MODULE, CPQ_MODULES } from "./cpq/index.ts";
 import { ACCOUNT_ENGAGEMENT_MODULE, accountEngagementModule } from "./account-engagement/index.ts";
 import { technicalHealthModule } from "./technical-health/index.ts";
@@ -36,6 +36,19 @@ export const LATEST_RULE_VERSIONS: ReadonlyMap<string, number> = new Map(
   [...ALL_MODULES, currentPipelineExpectedModule, currentPipelineUnscoredModule, leadJourneyModule].flatMap((m) => m.rules).reduce((out, r) => out.set(r.id, Math.max(out.get(r.id) ?? 0, r.version)), new Map<string, number>()),
 );
 
+/** Each rule at the version a run with every worker switch off reads it at: the rule set as it is. */
+const DEFAULT_RULE_VERSIONS: ReadonlyMap<string, number> = new Map(ALL_MODULES.flatMap((m) => m.rules).map((r) => [r.id, r.version]));
+/**
+ * The modules a worker switch puts in place of the rule set's own (HC_STUCK_EXPECTED, HC_STUCK_UNSCORED,
+ * HC_LEAD_JOURNEY, HC_CASE_PATHS). A test fails when a switch's module is missing here.
+ */
+export const SWITCH_MODULES: readonly DomainModule[] = [currentPipelineExpectedModule, currentPipelineUnscoredModule, leadJourneyModule, casePathsModule];
+const SWITCHED: ReadonlySet<string> = new Set(SWITCH_MODULES.flatMap((m) => m.rules).filter((r) => DEFAULT_RULE_VERSIONS.get(r.id) !== r.version).map((r) => `${r.id}@${r.version}`));
+/**
+ * Whether a finding reads a rule as only a worker switch runs it (DECISIONS.md 779): a version the rule set doesn't
+ * run, or a rule it doesn't run at all. An area holding one isn't scored as the rule set scores it.
+ */
+export const switchedVersion = (f: { ruleId: string; ruleVersion: number }): boolean => SWITCHED.has(`${f.ruleId}@${f.ruleVersion}`);
 /** The console's module for both Service Cloud areas (DECISIONS.md 156). */
 export const SERVICE_MODULE = "service";
 
