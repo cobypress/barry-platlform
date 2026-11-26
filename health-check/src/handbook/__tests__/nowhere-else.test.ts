@@ -527,6 +527,7 @@ describe("what reads it", () => {
     ["src/worker/run-job.ts", "runs those summaries after the analysis, deletes the kept code when a run fails for good, and gives the store the summaries file's summaries, never the code (DECISIONS.md 494)"],
     ["src/worker/retention.ts", "deletes the kept code and partial summaries after seven days, by their names"],
     ["src/worker/env.ts", "reads the switch, HC_HANDBOOK_SUMMARIES"],
+    ["src/worker/at-run.ts", "names that switch, to record on each run whether it was on, never its value (DECISIONS.md 774)"],
     ["src/config.ts", "names the summaries' model"],
   ]);
   const root = fileURLToPath(new URL("../../../", import.meta.url));
