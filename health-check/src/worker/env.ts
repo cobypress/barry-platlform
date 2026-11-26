@@ -54,6 +54,7 @@ export const WORKER_ENV = {
     HC_STAGE_NAMES_MODEL_CONSOLE: "ready, exactly, once the console's copy of the calibration carries a model's readings of closed stages (DECISIONS.md 766: its schema refuses them until then, and every page that reads such a calibration would fail). Anything else, or unset: HC_STAGE_NAMES_MODEL is ignored, and the worker says so at start",
     HC_AREA_REASONS: "on, exactly, to have an area we couldn't score say why from its own checks' reasons, said as each check says it, in the portal, the PDFs and the raw notes (DECISIONS.md 769). Anything else, or unset, is off: the area says what it said before",
     HC_LEAD_JOURNEY: "on, exactly, to add the lead journey to the lead funnel (DECISIONS.md 770): the days from a lead to a won deal, the share of leads that became won deals, a check of lead sources whose deals are won more or less often than they convert, and a stored insight that isn't served; and to read whether Salesforce kept the leads' Status history, so first-response checks on an org that doesn't keep it say they couldn't be measured. It changes findings, metrics and lead funnel scores. Anything else, or unset, is off: every result is as before",
+    HC_STUCK_EXPECTED: "on, exactly, to run version 3 of the check for open deals stuck in their stage (DECISIONS.md 777): the share past the line is compared with the share a steady pipeline would have, from every closed deal's stage times, so a steady org with long-tailed stage times passes. It changes that check's findings, sentences, fix prompt and the current pipeline score. Anything else, or unset, is off: version 2, exactly as before",
     RENDER_GIT_COMMIT: "Set by Render, not by hand: the commit the worker was built from. Each run records it, and which of the switches above were on, for staff on the run's page (DECISIONS.md 774). Anything that isn't 7 to 40 hex characters is taken as not given",
     HC_DOCUMENTS_KEY: "Seals the portal's documents: 32 bytes, base64 (openssl rand -base64 32), the same value as the console's, and different from HC_CONNECT_KEY, HC_TOKEN_KEY and HC_MICROSITE_KEY. Missing or wrong, the worker still starts and every portal request is refused, with nothing made",
   },
@@ -115,6 +116,8 @@ export type WorkerConfig = {
   areaReasons: boolean;
   /** HC_LEAD_JOURNEY=on, exactly: the lead funnel analyses the lead journey too (DECISIONS.md 770). */
   leadJourney: boolean;
+  /** HC_STUCK_EXPECTED=on, exactly: cur.stuck-in-stage runs at version 3 (DECISIONS.md 777). */
+  stuckExpected: boolean;
   /** RENDER_GIT_COMMIT when it reads as a commit, lower case, or null (DECISIONS.md 774). */
   build: string | null;
 };
@@ -238,6 +241,7 @@ export function readWorkerEnv(env: NodeJS.ProcessEnv): { ok: true; config: Worke
       // Exactly "on", untrimmed, as the other switches that change what a customer reads with no person reading it.
       areaReasons: env.HC_AREA_REASONS === "on",
       leadJourney: env.HC_LEAD_JOURNEY === "on",
+      stuckExpected: env.HC_STUCK_EXPECTED === "on",
       // Only ever hex, so nothing else from the environment can ride into a run's row as its build.
       build: BUILD_COMMIT.test(get("RENDER_GIT_COMMIT").toLowerCase()) ? get("RENDER_GIT_COMMIT").toLowerCase() : null,
     },
@@ -254,3 +258,8 @@ export const leadJourneyStartLine = (on: boolean): string =>
   on
     ? "The lead journey is on: the lead funnel adds the days from a lead to a won deal, the share of leads that became won deals and a check of lead sources by the win rate of their deals, keeps a stored insight it doesn't serve, and says first responses couldn't be measured where Salesforce doesn't keep the leads' Status history."
     : "The lead journey is off: HC_LEAD_JOURNEY isn't on, so the lead funnel is analysed exactly as before.";
+/** What the worker says at start about stuck-in-stage's version 3 (DECISIONS.md 777). */
+export const stuckExpectedStartLine = (on: boolean): string =>
+  on
+    ? "Stuck-in-stage version 3 is on: open deals past the line are compared with the share a steady pipeline would have, from every closed deal's stage times."
+    : "Stuck-in-stage version 3 is off: HC_STUCK_EXPECTED isn't on, so the check runs at version 2 exactly as before.";
