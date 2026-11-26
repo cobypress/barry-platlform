@@ -635,6 +635,11 @@ export function snapshotAt(cases: SnapCase[], at: number, historyFrom: number, m
 }
 
 /**
+ * Stored and never served (INSIGHT_RULES, DECISIONS.md 776): on a second, independent generator its steady
+ * comparison raised seasonal orgs (quarterly bursts) in more than half of them, and re-entry orgs more often than the
+ * rule it replaced, so it is kept for the record until a comparison that holds on seasonal orgs is found. Info, as every
+ * stored insight.
+ *
  * Today's open cases against the same org's earlier weeks, never against
  * completed stays: a snapshot of open cases holds more long stays than a list
  * of ended ones, so "past the line" is set beside how often it was so on the
@@ -759,7 +764,7 @@ export const stuckInStatus: Rule = {
       summary: said`${lead}${overShare ? statusSaid : said``}${which}${farSaid} ${STUCK_BAR.mode === "both" && !enoughWeeks ? said`We compare today's share only beside enough earlier weeks, so we raise this now only when ${farLine}: that line is ours.` : said`We raise this when today's share is ${lines}, or when ${farLine}: these lines are ours.`}`,
       recommendation: said`Go through the open cases that have waited longest in each status and move each one on or close it, then look at why cases wait there.`,
       recommendationType: "change",
-      severity: "medium",
+      severity: "info",
       confidence: n < minSample * 2 ? "medium" : "high",
       evidence,
       value,
@@ -780,7 +785,7 @@ function farIssue(summary: Said, evidence: Evidence[], label: string | null, sta
     summary,
     recommendation: said`Go through the open cases that have waited longest in each status and move each one on or close it, then look at why cases wait there.`,
     recommendationType: "change",
-    severity: "medium",
+    severity: "info",
     confidence: "medium",
     evidence,
     value,

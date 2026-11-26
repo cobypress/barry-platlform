@@ -77,8 +77,10 @@ describe("the switch", () => {
   test("off, the modules are the engine's own; on, only service operations is swapped, its rules and metrics after the rest", () => {
     assert.deepEqual(withCasePaths(ALL_MODULES).filter((m, i) => m !== ALL_MODULES[i]), [casePathsModule]);
     assert.deepEqual(casePathsModule.rules.map((r) => r.id), [...serviceOperationsModule.rules.map((r) => r.id), ...NEW_RULES]);
-    assert.ok(INSIGHT_RULES.has("svc.sent-back-cases") && INSIGHT_METRICS.has("service.status_paths"));
-    for (const id of ["svc.stuck-in-status", "svc.reopened-time", "svc.closed-straight"]) assert.ok(COUNTED_WHEN_MEASURED.has(id) && !INSIGHT_RULES.has(id), id);
+    // The stuck check is stored and never served, as the send-back insight is (its seasonal probe, decision 776).
+    assert.ok(INSIGHT_RULES.has("svc.sent-back-cases") && INSIGHT_RULES.has("svc.stuck-in-status") && INSIGHT_METRICS.has("service.status_paths"));
+    assert.ok(!COUNTED_WHEN_MEASURED.has("svc.stuck-in-status"));
+    for (const id of ["svc.reopened-time", "svc.closed-straight"]) assert.ok(COUNTED_WHEN_MEASURED.has(id) && !INSIGHT_RULES.has(id), id);
   });
 
   test("a run without Service Cloud is the same with the switch on", () => {
@@ -100,7 +102,7 @@ describe("the switch", () => {
     assert.deepEqual(a.findings.filter((f) => !NEW_RULES.includes(f.ruleId)), off.findings);
     assert.deepEqual(a.metrics, off.metrics);
     assert.deepEqual(a.insightMetrics.filter((m) => m.id !== "service.status_paths"), off.insightMetrics);
-    assert.deepEqual(a.rulesRun, [...off.rulesRun, "svc.closed-straight", "svc.reopened-time", "svc.stuck-in-status"].sort());
+    assert.deepEqual(a.rulesRun, [...off.rulesRun, "svc.closed-straight", "svc.reopened-time"].sort());
   });
 });
 
@@ -557,7 +559,8 @@ describe("scoring", () => {
 
   test("the synthetic org with the switch on: its open cases left in Working from before the year are raised as far older than any stay there that ended", () => {
     const a = analyseExtracts(extracts, { modules: ALL_MODULES, casePaths: true });
-    const f = a.findings.find((x) => x.ruleId === "svc.stuck-in-status")!;
+    assert.ok(!a.findings.some((x) => x.ruleId === "svc.stuck-in-status"), "stored, never among the findings");
+    const f = a.insights.find((x) => x.ruleId === "svc.stuck-in-status")!;
     assert.equal(f.status, "issue", textOf(f));
     assert.match(textOf(f), /^\d+ open cases have been in their status more than 2 times as long as the longest stay there that ended in the year we read, all of them in Working\. No open case is in a status with a line today, below the calibrated minimum of 20\. We raise this when 5 or more open cases have been in their status more than 2 times as long as any stay there that ended: that line is ours\.$/);
     assert.ok(f.evidence.at(-1)!.exclusions.some((e) => /too many of them still running to show how long they last/.test(e)), f.evidence.at(-1)!.exclusions.join(" | "));

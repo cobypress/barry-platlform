@@ -78,7 +78,7 @@ async function runs(): Promise<Record<string, StrictShadow>> {
     "casePaths/untracked": { modules: ALL_MODULES, transport: new Simulator({ records: caseOrg(caseRecords(richCases().map((x) => ({ ...x, noHistory: true })))) }), casePaths: true },
   };
   // The case status paths' runs count its own rules only, on the same terms (DECISIONS.md 776).
-  const CASES = new Set(["svc.stuck-in-status", "svc.reopened-time", "svc.closed-straight"]);
+  const CASES = new Set(["svc.reopened-time", "svc.closed-straight"]);
   // The lead journey's runs count the journey's own rules only: on constructed lead orgs the base rules reach sentences the
   // synthetic org doesn't, with or without the switch, and those aren't this switch's to hold (DECISIONS.md 770).
   const JOURNEY = new Set(["lead.days_to_won", "lead.won_lead_rate", "lead.source-win-rate"]);
