@@ -6,6 +6,7 @@ import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { buildDigest } from "../build.ts";
 import { ALL_MODULES } from "../../domains/index.ts";
+import { leadJourneyModule } from "../../domains/lead-funnel/index.ts";
 import type { DomainModule } from "../../domains/types.ts";
 import { org, said, textSha256 } from "../../engine/org-words.ts";
 import type { Rule } from "../../engine/rule.ts";
@@ -46,7 +47,7 @@ const planted: DomainModule = {
   label: "Planted",
   extractors: [],
   rules: Object.keys(FIX_TABLE).map((id): Rule => {
-    const real = ALL_MODULES.flatMap((m) => m.rules).find((r) => r.id === id)!;
+    const real = [...ALL_MODULES, leadJourneyModule].flatMap((m) => m.rules).find((r) => r.id === id)!;
     return {
       id,
       version: 1,

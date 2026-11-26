@@ -662,6 +662,20 @@ export const FIX_TABLE: Readonly<Record<string, FixRule>> = {
     hours: fixed(2, 4, PROCESS),
     prompt: decide("campaign types", ["For the campaign type named, show spend against won value.", "Check the attribution: contacts on a campaign whose deals aren't counted.", "Prepare the options for the spend."], ["The analysis is ready for marketing."]),
   },
+  // Behind HC_LEAD_JOURNEY (DECISIONS.md 770).
+  "lead.source-win-rate": {
+    complexity: "simple",
+    touches: { leavesOut: true },
+    hours: fixed(2, 4, PROCESS),
+    prompt: decide("lead sources", ["For the source named, show leads, conversions, closed deals and won deals, against the other sources, by team.", "Check how its leads are qualified before they are converted.", "Prepare the options for how its leads are converted and what is spent on it."], ["The analysis is ready for sales and marketing to agree."]),
+  },
+  // Stored and never served (703, 770): declared, as every rule that can raise an issue declares some, and used by nothing.
+  "lead.fast-conversion": {
+    complexity: "simple",
+    touches: { leavesOut: true },
+    hours: fixed(2, 4, PROCESS),
+    prompt: decide("lead conversion", ["List the deals from leads converted within a week and from leads converted later, by source and team.", "Set out what happens to the leads in each group before they are converted."], ["The comparison is ready for sales and marketing to agree."]),
+  },
 
   // Revenue opportunities
   "rev.stalled-deals": {

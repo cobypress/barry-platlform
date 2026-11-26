@@ -295,6 +295,8 @@ function buildPipeline(ctx: Omit<RuleContext, "metrics">): PipelineData {
     const fromHistory = closedAtFromHistory(rows, stages);
     deals.push({
       ...opportunity,
+      // An empty lead source is no lead source: as a segment key it would fail the schema and stop the run (DECISIONS.md 770).
+      LeadSource: opportunity.LeadSource === "" ? null : opportunity.LeadSource,
       category,
       history: rows,
       team: roles.get(opportunity.OwnerId) ?? "No role",

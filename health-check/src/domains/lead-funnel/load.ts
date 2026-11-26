@@ -4,6 +4,7 @@ import { daysBefore } from "../../extract/types.ts";
 import { usersExtractor } from "../../extract/users.ts";
 import type { RuleContext } from "../../engine/rule.ts";
 import type { Evidence } from "../../schemas/index.ts";
+import { localDay, zoneOf } from "../time-zone.ts";
 
 export type Lead = LeadRow & {
   source: string;
@@ -14,13 +15,35 @@ export type Lead = LeadRow & {
   touchKnowable: boolean;
 };
 
+/**
+ * What the leads' Status history read shows of itself (HC_LEAD_JOURNEY,
+ * DECISIONS.md 770), as the stage history's absence is read for deals
+ * (paths/variants.ts): no new read, and never a claim about Salesforce's
+ * setting. `complete`: nothing says otherwise. `untracked`: no Status change at
+ * all, while at least the calibrated minimum of leads converted in the window,
+ * `converted` of them; with fewer, nothing is inferred. `from`: the earliest
+ * change found is more than a whole day after a conversion (ConvertedDate's zone
+ * is unverified), so the changes found start on `day`, the earliest one's local
+ * day, and a lead made before it can't show a status change. It finds when the
+ * history starts, never when it stops: tracking switched off mid-window still
+ * reads as kept. Both rest on conversion writing a Status change where the field
+ * is tracked (unverified, docs/QUESTIONS.md).
+ */
+export type StatusHistory = { kind: "complete" } | { kind: "untracked"; converted: number } | { kind: "from"; day: string };
+
 export type LeadData =
   | { status: "unavailable"; reason: string; evidence: Evidence[] }
-  | { status: "ok"; leads: Lead[]; evidence: Evidence[]; exclusions: string[]; activityReadable: boolean; statusReadable: boolean };
+  | { status: "ok"; leads: Lead[]; evidence: Evidence[]; exclusions: string[]; activityReadable: boolean; statusReadable: boolean; statusHistory: StatusHistory };
 
 const stamp = (value: string): Date => new Date(value.replace(/\+0000$/, "Z"));
 
-export function loadLeads(ctx: Omit<RuleContext, "metrics">): LeadData {
+/**
+ * The leads, each with its first touch. With `inferHistory` (the lead journey's
+ * switch on, DECISIONS.md 770), whether the Status history was kept is read too,
+ * and a lead made before the history starts can't show a first touch by status;
+ * off, every lead is read exactly as before and the history counts as complete.
+ */
+export function loadLeads(ctx: Omit<RuleContext, "metrics">, inferHistory = false): LeadData {
   const { leads, statusChanges } = ctx.data(leadsExtractor);
   const activity = ctx.data(activityExtractor);
   const evidence = [ctx.ev(leads.source, { count: leads.status === "ok" ? leads.data.length : null, dateRange: ctx.window })];
@@ -42,20 +65,38 @@ export function loadLeads(ctx: Omit<RuleContext, "metrics">): LeadData {
   if (activity.events.status === "ok") for (const event of activity.events.data) note(event.WhoId, event.StartDateTime);
   const statusReadable = statusChanges.status === "ok" && !statusChanges.truncated;
   if (statusChanges.status === "ok") for (const change of statusChanges.data) note(change.LeadId, change.CreatedDate);
+  const statusHistory: StatusHistory = inferHistory && statusReadable ? historyOf(ctx, leads.data, statusChanges.data) : { kind: "complete" };
+  const zone = statusHistory.kind === "from" ? zoneOf(ctx) : null;
 
   const readableFrom = daysBefore(ctx.now, 365);
   const rows = leads.data.map((lead): Lead => {
     const created = stamp(lead.CreatedDate);
     // Conversion moves a lead's activity to the new contact, so both ids count.
     const touches = [earliest.get(lead.Id), lead.ConvertedContactId ? earliest.get(lead.ConvertedContactId) : undefined].filter((d): d is Date => d !== undefined && d >= created);
+    // Made before the Status history starts: a blank can't say the lead wasn't answered by a change of status.
+    const beforeHistory = statusHistory.kind === "from" && localDay(created, zone) < statusHistory.day;
     return {
       ...lead,
-      source: lead.LeadSource ?? "No source",
+      // An empty source is no source: as a segment key or a subject's label it would fail the schema (DECISIONS.md 770).
+      source: lead.LeadSource === null || lead.LeadSource === "" ? "No source" : lead.LeadSource,
       team: roles.get(lead.OwnerId) ?? "No role",
       firstTouch: touches.length ? new Date(Math.min(...touches.map((d) => d.getTime()))) : null,
-      touchKnowable: activityReadable && created >= readableFrom,
+      touchKnowable: activityReadable && created >= readableFrom && !beforeHistory,
     };
   });
   const exclusions = [...(statusReadable ? [] : ["Lead status changes, which couldn't be read in full"])];
-  return { status: "ok", leads: rows, evidence, exclusions, activityReadable, statusReadable };
+  return { status: "ok", leads: rows, evidence, exclusions, activityReadable, statusReadable, statusHistory };
+}
+
+/** What the Status history read says of itself (see StatusHistory). Only from a read that came back whole. */
+function historyOf(ctx: Omit<RuleContext, "metrics">, leads: LeadRow[], changes: Array<{ CreatedDate: string }>): StatusHistory {
+  const converted = leads.filter((l) => l.IsConverted && l.ConvertedDate);
+  if (changes.length === 0) return converted.length >= ctx.calibration.minSample ? { kind: "untracked", converted: converted.length } : { kind: "complete" };
+  const zone = zoneOf(ctx);
+  const first = changes.reduce((min, c) => (c.CreatedDate < min ? c.CreatedDate : min), changes[0]!.CreatedDate);
+  const day = localDay(stamp(first), zone);
+  // ConvertedDate is a day with no time, in a zone not verified: only a conversion more than a whole day before the
+  // first change found says the changes found start later than the conversions.
+  const dayBefore = new Date(Date.parse(`${day}T00:00:00Z`) - 86_400_000).toISOString().slice(0, 10);
+  return converted.some((l) => l.ConvertedDate! < dayBefore) ? { kind: "from", day } : { kind: "complete" };
 }

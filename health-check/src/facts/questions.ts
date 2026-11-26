@@ -37,6 +37,7 @@ export const SECTION_IDS: Record<string, string> = {
   "Knowing the org before reading it": "org-profile",
   "Difficulty": "difficulty",
   "Cheaper fill rates": "fill-cost",
+  "The lead journey": "lead-journey",
 };
 
 export type QuestionItem = { id: string; section: string; text: string };

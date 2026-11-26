@@ -8,6 +8,7 @@ import { fileLines, readCheckpoint, trimToLastLine, writeCheckpoint } from "./ch
 import { shareRepeatedValues } from "./share-values.ts";
 import { modulesFor } from "../domains/scope.ts";
 import { ALL_MODULES } from "../domains/index.ts";
+import { withLeadJourney } from "../domains/lead-funnel/index.ts";
 import { RULES_FILE, rulesOf } from "./rules-run.ts";
 import { scoreDomains } from "../domains/scoring.ts";
 import type { DomainModule } from "../domains/types.ts";
@@ -88,6 +89,11 @@ export type RunOptions = {
   stageNamesModel?: boolean;
   /** HC_AREA_REASONS on (DECISIONS.md 769): an unscored area says why from its own checks' reasons. Off or absent, as before. */
   areaReasons?: boolean;
+  /**
+   * HC_LEAD_JOURNEY on (DECISIONS.md 770): the lead funnel analyses the lead journey too, and reads whether the
+   * leads' Status history was kept. Off or absent, the analysis is exactly as before.
+   */
+  leadJourney?: boolean;
   /** The run this one re-checks: its first health check, whose findings the report compares against. */
   baselineRunId?: string | null;
   /**
@@ -479,7 +485,7 @@ async function runHealthCheckWithin(options: RunOptions): Promise<RunResult> {
   if (options.areaReasons === true) run.areaReasons = true;
   else delete run.areaReasons;
   await saveRun();
-  const output = analyseRun(dir, run, calibration, modules, extracts, options.answers ?? [], options.knownModules ?? ALL_MODULES, options.gated === true, options.stageNames === true, options.stageNamesModel === true, options.areaReasons === true);
+  const output = analyseRun(dir, run, calibration, modules, extracts, options.answers ?? [], options.knownModules ?? ALL_MODULES, options.gated === true, options.stageNames === true, options.stageNamesModel === true, options.areaReasons === true, options.leadJourney === true);
   // Each issue's records by name, for the action lists. Beside the pseudonym map, not in checkpoints/.
   writeJson(join(dir, ACTION_LISTS_FILE), buildActionLists(output.records, extracts, client.instanceUrl));
   run.status = output.manualSteps.some((s) => s.status === "pending") ? "awaiting_manual" : "in_review";
@@ -519,7 +525,7 @@ export function keepSkipped(run: Run, skipped: SkippedRead[], log: (message: str
   }
 }
 
-function analyseRun(dir: string, run: Run, calibration: Calibration, modules: DomainModule[], extracts: Map<string, unknown>, answers: ManualAnswer[], known: DomainModule[], gated = false, stageNames = false, stageNamesModel = false, areaReasons = false): AnalysisOutput {
+function analyseRun(dir: string, run: Run, calibration: Calibration, modules: DomainModule[], extracts: Map<string, unknown>, answers: ManualAnswer[], known: DomainModule[], gated = false, stageNames = false, stageNamesModel = false, areaReasons = false, leadJourney = false): AnalysisOutput {
   const pseudonyms = loadPseudonyms(dir);
   const users = extracts.get(usersExtractor.id) as { status: string; data?: UserRow[] } | undefined;
   const directory = new Map((users?.data ?? []).map((u) => [u.Id, { name: u.Name, aliases: [u.Username, u.Email] }]));
@@ -548,7 +554,8 @@ function analyseRun(dir: string, run: Run, calibration: Calibration, modules: Do
   registerSharedNames(pseudonyms);
 
   const output = analyse({
-    modules,
+    // The lead journey's switch swaps the lead funnel for its journey's (DECISIONS.md 770); off, the modules are the ones given.
+    modules: leadJourney ? withLeadJourney(modules) : modules,
     extracts,
     calibration,
     now: new Date(run.asOf),
@@ -567,7 +574,7 @@ function analyseRun(dir: string, run: Run, calibration: Calibration, modules: Do
   writeJson(join(dir, "pseudonym-map.json"), pseudonyms.entries());
   // Which rules this analysis ran, and which the engine knows, for the digest (DECISIONS.md 718).
   // Written with every analysis, so it always goes with the findings it ran beside.
-  writeJson(join(dir, RULES_FILE), rulesOf(output.rulesRun, known));
+  writeJson(join(dir, RULES_FILE), rulesOf(output.rulesRun, leadJourney ? withLeadJourney(known) : known));
   // The customer's own configuration, for their handbook: kept as long as the
   // findings, and read by nothing else here (DECISIONS.md 451 to 457).
   writeJson(

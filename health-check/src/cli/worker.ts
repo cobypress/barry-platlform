@@ -11,6 +11,7 @@ import { GoogleDrive } from "../worker/drive.ts";
 import { areaReasonsStartLine, readWorkerEnv, WORKER_ENV } from "../worker/env.ts";
 import { automaticStartLine } from "../worker/automatic.ts";
 import { stageModelStartLine, stageNamesStartLine } from "../worker/stage-answer.ts";
+import { leadJourneyStartLine } from "../worker/env.ts";
 import { PostgresWorkerStore, type SqlPool } from "../worker/postgres-store.ts";
 import { retentionSweep, SWEEP_INTERVAL_MS } from "../worker/retention.ts";
 import { createJobHandler } from "../worker/worker.ts";
@@ -127,6 +128,7 @@ export async function workerCommand(
     stageNamesModel: config.stageNamesModel,
     stageNamesModelConsole: config.stageNamesModelConsole,
     areaReasons: config.areaReasons,
+    leadJourney: config.leadJourney,
     codeLint: "found" in pmd ? { pmd: pmd.found } : { pmd: null, pmdMissing: pmd.missing },
     queueRun: runQueuer(queue),
     narrative,
@@ -171,6 +173,8 @@ export async function workerCommand(
   log(stageModelStartLine(config.stageNames, config.stageNamesModel, narrative !== undefined, config.stageNamesModelConsole));
   // And the areas' own reasons (DECISIONS.md 769).
   log(areaReasonsStartLine(config.areaReasons));
+  // The lead journey (DECISIONS.md 770), said at every start so turning it on or off shows in the log.
+  log(leadJourneyStartLine(config.leadJourney));
   // Said at every start, so a deploy that installs it shows in the log.
   if (lintSwept) log(`Deleted ${lintSwept} temporary ${lintSwept === 1 ? "folder" : "folders"} of Apex code that a PMD run cut short had left.`);
   log("found" in pmd ? `PMD ${PMD_VERSION} checks each health check's Apex code, and its findings are stored beside our own scan's.` : `${pmd.missing} Each health check says PMD didn't run.`);

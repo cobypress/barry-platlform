@@ -546,6 +546,12 @@
       "high": 3,
       "basis": "Preparing the analysis and the options for the people who decide; their time deciding, and making the change, isn't counted"
     },
+    "lead.fast-conversion": {
+      "fixComplexity": "simple",
+      "low": 2,
+      "high": 4,
+      "basis": "Preparing the analysis and the options for the people who decide; their time deciding, and making the change, isn't counted"
+    },
     "lead.no-first-response": {
       "fixComplexity": "moderate",
       "low": 2,
@@ -559,6 +565,12 @@
       "basis": "Agreeing a response target by source and the routing behind it"
     },
     "lead.source-return": {
+      "fixComplexity": "simple",
+      "low": 2,
+      "high": 4,
+      "basis": "Preparing the analysis and the options for the people who decide; their time deciding, and making the change, isn't counted"
+    },
+    "lead.source-win-rate": {
       "fixComplexity": "simple",
       "low": 2,
       "high": 4,

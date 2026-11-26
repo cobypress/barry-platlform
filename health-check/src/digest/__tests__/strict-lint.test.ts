@@ -14,6 +14,7 @@ import { AutomaticReplay, automaticSyntheticCalibration, stagesOf } from "../../
 import { runFromRecording } from "../../testing/harness.ts";
 import { Simulator } from "../../testing/simulator.ts";
 import { deals, open, orgWith, REWORK, SKIPS, USUAL } from "./paths-orgs.ts";
+import { journeyOrg, journeyRecords, richSpecs } from "../../testing/lead-journey-org.ts";
 
 // Step 1 of the strict check, held from here on (DECISIONS.md 768, KAN-102):
 // every rule's figures on the synthetic org's runs and the constructed
@@ -50,8 +51,27 @@ async function runs(): Promise<Record<string, StrictShadow>> {
     // An unscored area says why from its own checks (HC_AREA_REASONS, DECISIONS.md 769): its reason's figures are held too.
     areaReasons: { calibration: auto, answers: [], reviewMode: "automatic", transport: new Simulator({ readOnly: true }), areaReasons: true },
     areaReasonsConsultant: { areaReasons: true },
+    // The lead journey on (HC_LEAD_JOURNEY, DECISIONS.md 770): the synthetic org and constructed lead orgs, so its sentences are counted.
+    "leadJourney/synthetic": { calibration: auto, answers: [], reviewMode: "automatic", transport: new Simulator(), leadJourney: true },
+    "leadJourney/rich": { calibration: auto, answers: [], reviewMode: "automatic", transport: new Simulator({ records: journeyOrg(journeyRecords(richSpecs())) }), leadJourney: true },
+    "leadJourney/rich-consultant": { transport: new Simulator({ records: journeyOrg(journeyRecords(richSpecs())) }), leadJourney: true },
+    "leadJourney/untracked": { calibration: auto, answers: [], reviewMode: "automatic", transport: new Simulator({ records: journeyOrg(journeyRecords(richSpecs(), () => [])) }), leadJourney: true },
+    "leadJourney/late-history": {
+      calibration: auto,
+      answers: [],
+      reviewMode: "automatic",
+      transport: new Simulator({ records: journeyOrg(journeyRecords(richSpecs(), (leads) => leads.filter((l) => l.CreatedDate >= "2026-01-01").map((l, i) => ({ Id: `017${String(950_000 + i).padStart(12, "0")}AAA`, LeadId: l.Id, CreatedDate: l.CreatedDate })))) }),
+      leadJourney: true,
+    },
+    "leadJourney/quick": { calibration: auto, answers: [], reviewMode: "automatic", transport: new Simulator({ records: journeyOrg(journeyRecords(richSpecs().map((x) => (x.outcome ? { ...x, convertedAfter: 1, closedAfter: 5 } : x)))) }), leadJourney: true },
   };
-  for (const [name, options] of Object.entries(synthetic)) out[name] = await shadowOf((await runFromRecording(options)).dir);
+  // The lead journey's runs count the journey's own rules only: on constructed lead orgs the base rules reach sentences the
+  // synthetic org doesn't, with or without the switch, and those aren't this switch's to hold (DECISIONS.md 770).
+  const JOURNEY = new Set(["lead.days_to_won", "lead.won_lead_rate", "lead.source-win-rate"]);
+  for (const [name, options] of Object.entries(synthetic)) {
+    const shadow = await shadowOf((await runFromRecording(options)).dir);
+    out[name] = name.startsWith("leadJourney/") ? { ...shadow, figures: shadow.figures.filter((f) => JOURNEY.has(f.ruleId)) } : shadow;
+  }
   const first = await runFromRecording();
   const stages = stagesOf(first.dir);
   const cal = (answer?: Record<string, string>) => {

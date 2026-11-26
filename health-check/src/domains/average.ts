@@ -23,6 +23,8 @@ export const DURATION_MEDIANS: ReadonlySet<string> = new Set([
   "current.median_days_in_stage",
   "current.open_median_age",
   "service.resolution_days",
+  // Behind HC_LEAD_JOURNEY (DECISIONS.md 770): days from a won deal's first lead to its close.
+  "lead.days_to_won",
 ]);
 
 const round1 = (n: number): number => Math.round(n * 10) / 10;

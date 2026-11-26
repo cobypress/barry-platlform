@@ -69,6 +69,11 @@ export type WorkerDeps = {
    * why from its own checks' reasons. Off when absent: the area says what it said before.
    */
   areaReasons?: boolean;
+  /**
+   * HC_LEAD_JOURNEY=on, exactly, read once at start in env.ts (DECISIONS.md 770): every analysis the worker makes adds
+   * the lead journey to the lead funnel and reads whether the leads' Status history was kept. Off when absent.
+   */
+  leadJourney?: boolean;
   /** The worker's switch for automatic runs, read once at start in env.ts (DECISIONS.md 688). Absent: off. */
   automatic?: AutomaticSwitch;
   /**
