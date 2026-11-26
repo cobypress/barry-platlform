@@ -51,6 +51,7 @@ export const WORKER_ENV = {
     HC_STAGE_NAMES: "on, exactly, to let an automatic run read a closed stage that isn't won as lost or no decision from its name, by the engine's fixed word list, said to the customer as an assumption they can correct (DECISIONS.md 756). Anything else, or unset, is off: such a stage stays undecided until the customer says which it is",
     HC_STAGE_NAMES_MODEL: "on, exactly, and with HC_STAGE_NAMES also on, a model (Claude) reads a closed stage that isn't won as lost or no decision from its label and API name where the word list can't, sent to Anthropic with nothing else of the org, and said to the customer as an assumption they can correct (DECISIONS.md 766). Only a stage whose every word is on the engine's fixed vocabulary is sent, each in a call of its own. Anything else, or unset, is off: no stage name goes to a model. It has effect only with HC_STAGE_NAMES on and HC_STAGE_NAMES_MODEL_CONSOLE ready",
     HC_STAGE_NAMES_MODEL_CONSOLE: "ready, exactly, once the console's copy of the calibration carries a model's readings of closed stages (DECISIONS.md 766: its schema refuses them until then, and every page that reads such a calibration would fail). Anything else, or unset: HC_STAGE_NAMES_MODEL is ignored, and the worker says so at start",
+    HC_AREA_REASONS: "on, exactly, to have an area we couldn't score say why from its own checks' reasons, said as each check says it, in the portal, the PDFs and the raw notes (DECISIONS.md 769). Anything else, or unset, is off: the area says what it said before",
     HC_DOCUMENTS_KEY: "Seals the portal's documents: 32 bytes, base64 (openssl rand -base64 32), the same value as the console's, and different from HC_CONNECT_KEY, HC_TOKEN_KEY and HC_MICROSITE_KEY. Missing or wrong, the worker still starts and every portal request is refused, with nothing made",
   },
 } as const;
@@ -107,6 +108,8 @@ export type WorkerConfig = {
   stageNamesModel: boolean;
   /** HC_STAGE_NAMES_MODEL_CONSOLE=ready, exactly: the console carries model readings, so stageNamesModel may take effect (DECISIONS.md 766). */
   stageNamesModelConsole: boolean;
+  /** HC_AREA_REASONS=on, exactly: an unscored area says why from its own checks' reasons (DECISIONS.md 769). */
+  areaReasons: boolean;
 };
 
 const key32 = (raw: string): Buffer | null => {
@@ -225,6 +228,14 @@ export function readWorkerEnv(env: NodeJS.ProcessEnv): { ok: true; config: Worke
       stageNamesModel: env.HC_STAGE_NAMES_MODEL === "on",
       // Exactly "ready", untrimmed: the order of deploys (console first) made a switch, so it can't be got wrong by accident.
       stageNamesModelConsole: env.HC_STAGE_NAMES_MODEL_CONSOLE === "ready",
+      // Exactly "on", untrimmed, as the other switches that change what a customer reads with no person reading it.
+      areaReasons: env.HC_AREA_REASONS === "on",
     },
   };
 }
+
+/** What the worker says at start about the areas' own reasons (DECISIONS.md 769), so a deploy that turns it on or off shows in the log. */
+export const areaReasonsStartLine = (on: boolean): string =>
+  on
+    ? "Areas' own reasons are on: an area we couldn't score says why from its own checks' reasons, as each check says it."
+    : "Areas' own reasons are off: HC_AREA_REASONS isn't on, so an area we couldn't score says what it said before.";

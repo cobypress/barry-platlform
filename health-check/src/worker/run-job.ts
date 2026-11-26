@@ -522,6 +522,7 @@ async function runLocked(runId: string, deps: WorkerDeps, attempt: Attempt, seen
       ...(gatedPulse ? { gated: true } : {}),
       ...(deps.stageNames === true ? { stageNames: true } : {}),
       ...(deps.stageNames === true && deps.stageNamesModel === true && deps.stageNamesModelConsole === true ? { stageNamesModel: true } : {}),
+      ...(deps.areaReasons === true ? { areaReasons: true } : {}),
       baselineRunId: input.run.baselineRunId,
       keepApexSource: apexSummaries,
       // A health check runs PMD and ESLint beside our scan, and only stores what they find; a scan and a pulse don't (DECISIONS.md 670).

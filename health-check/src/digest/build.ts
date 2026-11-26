@@ -10,7 +10,7 @@ import type { Pseudonymiser } from "../privacy/pseudonymiser.ts";
 import { knownPeople } from "../fix/prompt.ts";
 import { spansIfCurrent, textSha256, type OrgSpan } from "../engine/org-words.ts";
 import { engineOwn, orgValuesOf } from "../engine/automatic-words.ts";
-import { UNSCORED_RULES } from "../domains/scoring.ts";
+import { areaReasonParts, AREA_REASON_TODAY, UNSCORED_RULES } from "../domains/scoring.ts";
 import { hasLoosened, hasTightened, issueUnder, passedUnder } from "../engine/loosened.ts";
 import { DIGEST_VERSION, NAMED_PEOPLE_SENTENCE, RunDigest, type DigestArea, type DigestReadiness, type DigestFinding, type DigestMetric, type DigestTotal, type DigestValueModel, type SentenceOrgWords } from "../schemas/digest.ts";
 import { FIX_PROMPT_MAX, type Finding, type Metric } from "../schemas/index.ts";
@@ -541,7 +541,7 @@ function moreWords(d: Pick<RunDigest, "metrics" | "areas" | "overall" | "plan">,
   });
   const areas = d.areas.map((a) => {
     if (a.status !== "not_measurable") return a;
-    const reason = engineWords(a.reason);
+    const reason = engineWords(a.reason) ?? checksWords(a, report);
     return reason ? { ...a, orgWords: { ...a.orgWords, reason } } : a;
   });
   const overallReason = d.overall.status === "not_measurable" ? engineWords(d.overall.reason) : undefined;
@@ -550,6 +550,33 @@ function moreWords(d: Pick<RunDigest, "metrics" | "areas" | "overall" | "plan">,
   const noteWords = note ? engineWords(note) : undefined;
   const plan = d.plan.hoursTotal && noteWords ? { ...d.plan, hoursTotal: { ...d.plan.hoursTotal, orgWords: { note: noteWords } } } : d.plan;
   return { metrics, areas, overall, plan };
+}
+
+/**
+ * An area's reason said from its own checks' reasons (DECISIONS.md 769), marked
+ * part by part: our words with no marks, and each check's reason with the marks
+ * the run made for it, moved to where it sits. Only while the area reads exactly
+ * as the score made it from the run's findings, and every check's part still
+ * reads as marked; anything else is unknown, for the checked digest to withhold.
+ */
+function checksWords(a: Extract<DigestArea, { status: "not_measurable" }>, report: BuiltReport): SentenceOrgWords | undefined {
+  const score = (report.input.scores ?? []).find((s) => s.domain === a.domain);
+  if (score?.status !== "not_measurable" || score.reason !== a.reason) return undefined;
+  const byId = new Map(report.input.findings.map((f) => [f.id, f]));
+  for (const today of AREA_REASON_TODAY) {
+    const parts = areaReasonParts(a.domain, report.input.findings, today);
+    if (!parts || parts.map((p) => p.text).join(" ") !== a.reason) continue;
+    const spans: OrgSpan[] = [];
+    let at = 0;
+    for (const part of parts) {
+      const own = part.findingIds.length === 0 ? [] : part.findingIds.map((id) => byId.get(id)).map((f) => (f ? spansIfCurrent(part.text, f.orgWords?.notMeasurableReason) : null)).find((s) => s !== null);
+      if (!own) return undefined;
+      spans.push(...own.map((s) => ({ start: s.start + at, end: s.end + at })));
+      at += part.text.length + 1;
+    }
+    return { orgWordsMarked: true, orgWords: spans };
+  }
+  return undefined;
 }
 
 /**
