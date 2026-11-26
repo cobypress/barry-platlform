@@ -1,5 +1,5 @@
 import type { RuleContext } from "../../engine/rule.ts";
-import { named } from "../../engine/named.ts";
+import { named, aside } from "../../engine/named.ts";
 import { org, said } from "../../engine/org-words.ts";
 import { stagesExtractor } from "../../extract/opportunities.ts";
 import type { Evidence, Metric, MetricSegment, SeriesPoint } from "../../schemas/index.ts";
@@ -24,7 +24,9 @@ const OUTLOOK_MONTHS = 6;
 const MIN_STAGE_DEALS = 10;
 const MULTI_CURRENCY = "The org is multi-currency, and amounts can't be added until historic rates are supplied.";
 
-const hasAmount = (d: Deal): boolean => (d.Amount ?? 0) > 0;
+/** An amount of zero is none: "no Amount, or zero" says it, and is named with it (DECISIONS.md 773). */
+const ZERO_AMOUNT = 0;
+const hasAmount = (d: Deal): boolean => (d.Amount ?? ZERO_AMOUNT) > ZERO_AMOUNT;
 const ageDays = (d: Deal, now: Date): number => (now.getTime() - new Date(d.CreatedDate).getTime()) / DAY;
 const addDays = (day: string, days: number): string => new Date(new Date(`${day}T00:00:00Z`).getTime() + Math.round(days) * DAY).toISOString().slice(0, 10);
 
@@ -60,7 +62,7 @@ export function openStageMetrics(ctx: Ctx, data: Ready, deals: Deal[], evidence:
   const rest = { dateRange: day, series: [] as SeriesPoint[], stats: {} as Record<string, number>, segmentExemptReason: deals.length === 0 ? "There are no open deals." : null };
   const count = (group: Deal[]): number => group.length;
   const definitions = {
-    noAmount: { id: "current.open_no_amount", label: "Open deals with no amount", unit: "count" as const, definition: "Open deals today with no Amount, or zero. We never impute one." },
+    noAmount: { id: "current.open_no_amount", label: "Open deals with no amount", unit: "count" as const, definition: aside(named("Open deals today with no Amount, or zero. We never impute one.", { zeroAmount: ZERO_AMOUNT }), "one") },
     pastClose: { id: "current.open_past_close", label: "Open deals past their close date", unit: "count" as const, definition: "Open deals today whose close date has passed." },
     age: { id: "current.open_median_age", label: "Age of open deals", unit: "days" as const, definition: named(`Median days since open deals were created. A stage needs ${MIN_STAGE_DEALS} open deals for its own median.`, { minStageDeals: MIN_STAGE_DEALS }) },
     weighted: {
