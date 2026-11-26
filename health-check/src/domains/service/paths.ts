@@ -1,6 +1,7 @@
-import { notSized, pct, plural, segmentRate, type Rule, type RuleContext, type RuleResult } from "../../engine/rule.ts";
+import { notSized, pct, plural, segmentRate, type Hotspot, type Rule, type RuleContext, type RuleResult } from "../../engine/rule.ts";
 import { org, passedOn, said, type Said } from "../../engine/org-words.ts";
 import { named } from "../../engine/named.ts";
+import { holdsNameOrSecret } from "../../narrative/guard.ts";
 import { serviceActivityExtractor, serviceCasesExtractor, serviceSetupExtractor, SERVICE_MONTHS, type CaseStatusRow, type ClosedCaseRow, type OpenCaseRow, type StatusChangeRow } from "../../extract/service.ts";
 import { monthsBefore, type SourceInfo, type Sourced } from "../../extract/types.ts";
 import type { Evidence, Metric, MetricSegment, SegmentCheck } from "../../schemas/index.ts";
@@ -49,9 +50,25 @@ const LAG_SHARE = Math.round(LAG_QUANTILE * 100);
 /** An open case is held to the time this share of the period's stays in its status ended within. */
 export const STAY_QUANTILE = 0.75;
 const STAY_SHARE = Math.round(STAY_QUANTILE * 100);
-/** Stuck cases: the share of open cases past the line, overall and in any one segment, as cur.stuck-in-stage holds deals. */
-const STUCK_LIMIT = 40;
-const STUCK_SEGMENT_LIMIT = 60;
+
+/**
+ * A status's line is set from the stays that began in it in LOOKBACK_DAYS, ending GAP_DAYS before the day judged:
+ * so a backlog building in the last weeks doesn't raise its own line, and nothing the day didn't know is used.
+ */
+export const LOOKBACK_DAYS = 90;
+export const GAP_DAYS = 30;
+/** How far back the oldest stay a line reads began, as a sentence says it: the lookback and the gap together. */
+const LINE_FROM_DAYS = LOOKBACK_DAYS + GAP_DAYS;
+/** Today is set beside the same weekday and time in each earlier week. */
+const SNAPSHOT_EVERY_DAYS = 7;
+/** Earlier weeks, each with the calibrated minimum of open cases with a line, needed to say what is usual. */
+export const MIN_SNAPSHOTS = 12;
+/**
+ * Today must be above the share this share of the earlier weeks were at or below, and above their median by at
+ * least `points`, and by `z` standard errors of a share of today's open cases at that median: the margin grows as
+ * the open cases get fewer (set by the noise probe, DECISIONS.md 776; a test may change it).
+ */
+export const STUCK_BAR = { quantile: 0.9, points: 10, z: 3 };
 /** Cases closed straight from where they started, overall and in any one segment. */
 const STRAIGHT_LIMIT = 25;
 const STRAIGHT_SEGMENT_LIMIT = 50;
@@ -129,9 +146,13 @@ type Ready = {
   /** The first instant a Status change was found, for an open case with none of its own. */
   historyFrom: number;
   cases: PathCase[];
-  /** Open cases read, as C1 reads them (every open case, whenever made). */
-  openNow: Array<{ row: OpenCaseRow; visits: Visit[] | null; status: Status | null; consistent: boolean }>;
+  /** Every case read whose statuses can be followed, whenever made: what the stuck check's days are read from. */
+  universe: SnapCase[];
   openRead: number;
+  /** The year read starts at this instant. */
+  yearStart: number;
+  /** Cases made in the period, closed, with no recorded status change: not counted, and said where it matters. */
+  noChange: number;
   hasOrigin: boolean;
   openSource: SourceInfo;
   exclusions: string[];
@@ -142,32 +163,62 @@ type Ready = {
 type NotReady = { status: "not_measurable"; reason: string; evidence: Evidence[] };
 export type CaseCohort = Ready | NotReady;
 
+/** A case as the stuck check reads it on any day: when it was made, its visits, and how it is segmented. */
+export type SnapCase = { id: string; madeAt: number; visits: Visit[]; priority: string; origin: string };
+
 const instant = (s: string): number => Date.parse(s.replace(/\+0000$/, "Z"));
 
-/** The changes of one case in order: by time, and within the same second by chaining one change's new value to the next's old. */
-function ordered(changes: StatusChangeRow[], table: (v: string | null) => Status | null): StatusChangeRow[] {
+/**
+ * The changes of one case in order: by time, and within the same second by
+ * chaining, never by the order the read returned them (it has no ORDER BY).
+ * The chain starts from the tied change whose old value is no other tied
+ * change's new value, and each next is the one tied change whose old value is
+ * the last one's new. Null when the ties can't be put in one order (no such
+ * start, two of them, a branch or a cycle): the case is then left out and said.
+ */
+export function ordered(changes: StatusChangeRow[], table: (v: string | null) => Status | null): StatusChangeRow[] | null {
   const byTime = [...changes].sort((a, b) => instant(a.CreatedDate) - instant(b.CreatedDate));
+  const keyOf = (v: string | null): string | null => (valueOf(v) === null ? null : (table(v)?.key ?? `?${v}`));
   const out: StatusChangeRow[] = [];
   for (let i = 0; i < byTime.length; ) {
     let j = i;
     while (j < byTime.length && instant(byTime[j]!.CreatedDate) === instant(byTime[i]!.CreatedDate)) j++;
     const tied = byTime.slice(i, j);
-    while (tied.length) {
-      const last = out.at(-1);
-      const next = last ? tied.findIndex((c) => table(c.OldValue)?.key === table(last.NewValue)?.key) : -1;
-      out.push(tied.splice(next >= 0 ? next : 0, 1)[0]!);
-    }
     i = j;
+    if (tied.length === 1) {
+      out.push(tied[0]!);
+      continue;
+    }
+    const news = tied.map((c) => keyOf(c.NewValue));
+    const starts = tied.filter((c) => !news.includes(keyOf(c.OldValue)) || keyOf(c.OldValue) === null);
+    if (starts.length !== 1) return null;
+    let last = starts[0]!;
+    const left = tied.filter((c) => c !== last);
+    out.push(last);
+    while (left.length) {
+      const next = left.filter((c) => keyOf(c.OldValue) === keyOf(last.NewValue));
+      if (next.length !== 1) return null;
+      last = next[0]!;
+      left.splice(left.indexOf(last), 1);
+      out.push(last);
+    }
   }
   return out;
 }
 
-/** A case's visits from its changes, starting in the first change's old value (or its current status with none), or null when a value has no meaning. */
+/**
+ * A case's visits from its changes, starting in the first change's old value (or
+ * its current status with none), or null when a value has no meaning. A first
+ * change with no old value is the case being made: its new value is the status
+ * it was made in, and it is no move.
+ */
 function visitsOf(madeAt: number, changes: StatusChangeRow[], current: Status | null, table: (v: string | null) => Status | null): Visit[] | null {
-  const first = changes.length ? table(changes[0]!.OldValue) : current;
+  const made = changes.length > 0 && valueOf(changes[0]!.OldValue) === null;
+  const moves = made ? changes.slice(1) : changes;
+  const first = made ? table(changes[0]!.NewValue) : moves.length ? table(moves[0]!.OldValue) : current;
   if (!first) return null;
   const visits: Visit[] = [{ status: first, start: madeAt, end: null }];
-  for (const c of changes) {
+  for (const c of moves) {
     const to = table(c.NewValue);
     if (!to) return null;
     const at = Math.max(instant(c.CreatedDate), visits.at(-1)!.start);
@@ -218,7 +269,7 @@ export function caseCohortOf(ctx: Ctx): CaseCohort {
     return {
       status: "not_measurable",
       reason: named(
-        said`We couldn't follow your cases' statuses: we found no recorded change to a case's Status in the last year, though ${closed} cases were closed in it. Either Salesforce isn't keeping a history of the Status field, or we can't see it. If field history isn't switched on for Case Status, switching it on lets later runs measure from that day.`,
+        said`We couldn't follow your cases' statuses: we found no recorded change to a case's Status in the last year, though ${closed} cases were closed in it. Either Salesforce isn't keeping a history of the Status field, or we can't see it. If field history isn't switched on for Case Status, switching it on lets later runs measure from that day. It can also be that every one of these cases was made already closed.`,
         { closed },
       ),
       evidence,
@@ -256,14 +307,18 @@ export function caseCohortOf(ctx: Ctx): CaseCohort {
   const to = dayPlus(range.to, -lagDays);
   if (to < start) return { status: "not_measurable", reason: named(said`Cases here can take ${lagDays} days to close, so none made since ${daySaid(start)} has had the time yet.`, { lagDays: [lagDays, "day"], start: [start, "date"] }), evidence };
 
-  const counts = { beforeRead: 0, beforeHistory: 0, recent: 0, noChange: 0, unknown: 0, mismatch: 0 };
+  const counts = { beforeRead: 0, beforeHistory: 0, recent: 0, noChange: 0, unordered: 0, unknown: 0, mismatch: 0 };
   const cases: PathCase[] = [];
-  const visitsById = new Map<string, Visit[] | null>();
+  const universe: SnapCase[] = [];
   for (const r of rows) {
-    const own = ordered(changes.get(r.id) ?? [], table);
+    const raw = changes.get(r.id) ?? [];
+    const own = ordered(raw, table);
     const current = r.open ? table(r.open.Status) : null;
-    const visits = r.open && !current ? null : visitsOf(r.made, own, current, table);
-    visitsById.set(r.id, visits);
+    const visits = own === null || (r.open && !current) ? null : visitsOf(r.made, own, current, table);
+    const lastOf = visits?.at(-1)?.status ?? null;
+    // Where the case stands now must be where its changes end: a closed case in a closed status, an open one in its Status.
+    const consistent = visits !== null && lastOf !== null && (r.closed ? lastOf.closed : !current!.closed && lastOf.key === current!.key);
+    if (consistent && !(r.closed && raw.length === 0)) universe.push({ id: r.id, madeAt: r.made, visits: visits!, priority: r.priority, origin: r.origin });
     const day = dayOf(r);
     if (day < firstFull) {
       counts.beforeRead++;
@@ -277,17 +332,19 @@ export function caseCohortOf(ctx: Ctx): CaseCohort {
       counts.recent++;
       continue;
     }
-    if (r.closed && own.length === 0) {
+    if (r.closed && raw.length === 0) {
       counts.noChange++;
+      continue;
+    }
+    if (own === null) {
+      counts.unordered++;
       continue;
     }
     if (!visits) {
       counts.unknown++;
       continue;
     }
-    const last = visits.at(-1)!.status;
-    // How the case stands now must be where its changes end: a closed case in a closed status, an open one in its Status.
-    if (r.closed ? !last.closed : current!.closed || last.key !== current!.key) {
+    if (!consistent) {
       counts.mismatch++;
       continue;
     }
@@ -318,15 +375,10 @@ export function caseCohortOf(ctx: Ctx): CaseCohort {
       : []),
     ...(both.size ? [named(said`${plural(both.size, "case")} read as both open and closed, as ${both.size === 1 ? said`it` : said`they`} changed while we read`, { both: both.size })] : []),
     ...(counts.noChange ? [named(said`${plural(counts.noChange, "closed case")} with no recorded status change, so we can't tell which statuses ${counts.noChange === 1 ? said`it` : said`they`} went through`, { noChange: counts.noChange })] : []),
+    ...(counts.unordered ? [named(said`${plural(counts.unordered, "case")} with status changes in the same second that we couldn't put in one order`, { unordered: counts.unordered })] : []),
     ...(counts.unknown ? [named(said`${plural(counts.unknown, "case")} with a status we couldn't find in your case status settings, or with none`, { unknown: counts.unknown })] : []),
     ...(counts.mismatch ? [named(said`${plural(counts.mismatch, "case")} whose recorded status changes don't end where the case stands now`, { mismatch: counts.mismatch })] : []),
   ];
-  const openNow = openRows.map((row) => {
-    const status = table(row.Status);
-    const visits = both.has(row.Id) ? null : (visitsById.get(row.Id) ?? null);
-    const last = visits?.at(-1)?.status ?? null;
-    return { row, visits, status, consistent: status !== null && !status.closed && last !== null && last.key === status.key };
-  });
   const hasOrigin = !(data.open.missingFields ?? []).includes("Case.Origin") && !(data.closedCases.missingFields ?? []).includes("Case.Origin");
   return {
     status: "ok",
@@ -337,8 +389,10 @@ export function caseCohortOf(ctx: Ctx): CaseCohort {
     lateHistory,
     historyFrom,
     cases,
-    openNow,
+    universe,
     openRead: openRows.length,
+    yearStart: yearStart.getTime(),
+    noChange: counts.noChange,
     hasOrigin,
     openSource: data.open.source,
     exclusions,
@@ -373,7 +427,13 @@ function daysSaid(values: number[]): Said {
     const only = round1(values[0]!);
     return named(said`${only} ${only === 1 ? said`calendar day` : said`calendar days`}`, { only: [only, "day"] });
   }
-  const mid = round1(median(values));
+  const exact = median(values);
+  if (exact < 1) {
+    // Under a day, in hours, so a median is never "0 calendar days".
+    const hours = Math.round(exact * 24);
+    return hours === 0 ? said`a median of under an hour` : hours === 1 ? said`a median of 1 hour` : named(said`a median of ${hours} hours`, { hours: [hours, "hour"] });
+  }
+  const mid = round1(exact);
   const mean = meanStat(values).mean;
   const unit = mid === 1 ? said`calendar day` : said`calendar days`;
   if (mean === undefined || values.length < MIN_AVERAGE_VALUES || mid <= 0 || !averageApart(mid, mean)) return named(said`a median of ${mid} ${unit}`, { mid: [mid, "day"] });
@@ -391,93 +451,174 @@ const value = notSized(said`How cases are handled has no honest figure in money:
 const DIMENSION_WORDS = ["priority", "origin", "status", "starting status"] as const;
 const dimensionWords = (dimension: string) => DIMENSION_WORDS.find((k) => k === dimension) ?? org(dimension);
 
-// ─── C1: open cases sitting in a status longer than most cases did ───────────
+/** Any pseudonym token, an email, or a Salesforce id's shape: what the digest's name guard reads as a person or a secret. */
+const GUARDED = [/\[\[[a-z]+[:\]]/, /@/, /\b(?=[a-zA-Z0-9]*\d)[a-zA-Z0-9]{15}(?:[a-zA-Z0-9]{3})?\b/];
+/**
+ * Whether an org's name can be written into a sentence: never one the privacy
+ * pass or the digest's name guard would take for a person or a secret. A
+ * status named like an email or an id is no person, and saying so would be
+ * false, so the sentence leaves that name out instead.
+ */
+export const sayable = (ctx: Ctx, name: string): boolean => !GUARDED.some((re) => re.test(name)) && !holdsNameOrSecret(name, ctx.pseudonyms) && ctx.pseudonyms.scrub(name) === name;
 
+/** The hotspots worth naming: in a dimension with two or more values among these rows, and a name we can write. */
+function nameable<R>(ctx: Ctx, rows: R[], dims: Record<string, (r: R) => string>, hotspots: Hotspot[]): Hotspot[] {
+  const many = new Set(Object.entries(dims).filter(([, keyOf]) => new Set(rows.map(keyOf)).size >= 2).map(([d]) => d));
+  return hotspots.filter((h) => many.has(h.dimension) && sayable(ctx, h.key));
+}
+
+// ─── C1: more open cases past their status's line today than usual ─────────
+
+/** A status's line on a day, as said: rounded up, so "ended within" stays true; in hours under a day, never "0 days". */
+export function lineSaid(days: number): Said {
+  if (days < 1) {
+    const hours = Math.max(1, Math.ceil(days * 24));
+    return hours === 1 ? said`an hour` : named(said`${hours} hours`, { hours: [hours, "hour"] });
+  }
+  const up = Math.ceil(days * 10) / 10;
+  return up === 1 ? said`1 day` : named(said`${up} days`, { up: [up, "day"] });
+}
+
+/** One open case on a day: its status, since when it was there, and whether it was past that status's line then. */
+export type Target = { id: string; status: Status; since: number; days: number; past: boolean; priority: string; origin: string };
+export type Snapshot = { at: number; lines: Map<string, number>; targets: Target[]; noLine: number; open: number };
+
+/**
+ * The open cases at an instant and which were past their status's line then.
+ * A status's line is the 75th percentile (nearest rank) of the stays that began
+ * in it in the LOOKBACK_DAYS before, a stay not ended by then counted as the
+ * longest there is: so the line uses nothing the day didn't know, and at least
+ * 75% of those stays really ended within it. A case with no change of its own
+ * before the instant has been in its status since it was made or, if it was
+ * made before the first change found, at least since then. Compared unrounded.
+ */
+export function snapshotAt(cases: SnapCase[], at: number, historyFrom: number, minSample: number): Snapshot {
+  const until = at - GAP_DAYS * DAY;
+  const from = until - LOOKBACK_DAYS * DAY;
+  const stays = new Map<string, number[]>();
+  for (const x of cases) {
+    x.visits.forEach((v, i) => {
+      if (v.status.closed || v.start >= until || v.start < from) return;
+      // A first stay of a case made before the history starts began at a time we can't see.
+      if (i === 0 && x.madeAt < historyFrom) return;
+      stays.set(v.status.key, [...(stays.get(v.status.key) ?? []), v.end !== null && v.end <= at ? daysOf(v.end - v.start) : Infinity]);
+    });
+  }
+  const lines = new Map<string, number>();
+  for (const [key, days] of stays) {
+    if (days.length < minSample) continue;
+    const line = nearestRank(days, STAY_QUANTILE);
+    if (Number.isFinite(line)) lines.set(key, line);
+  }
+  const targets: Target[] = [];
+  let noLine = 0;
+  let open = 0;
+  for (const x of cases) {
+    if (x.madeAt > at) continue;
+    const i = x.visits.findIndex((v) => v.start <= at && (v.end === null || v.end > at));
+    const v = i >= 0 ? x.visits[i]! : null;
+    if (!v || v.status.closed) continue;
+    open++;
+    const line = lines.get(v.status.key);
+    if (line === undefined) {
+      noLine++;
+      continue;
+    }
+    const since = i > 0 ? v.start : Math.max(x.madeAt, historyFrom);
+    const days = daysOf(at - since);
+    targets.push({ id: x.id, status: v.status, since, days, past: days > line, priority: x.priority, origin: x.origin });
+  }
+  return { at, lines, targets, noLine, open };
+}
+
+/**
+ * Today's open cases against the same org's earlier weeks, never against
+ * completed stays: a snapshot of open cases holds more long stays than a list
+ * of ended ones, so "past the line" is set beside how often it was so on the
+ * same weekday and time in each earlier week of the year read, each judged
+ * with only what it knew then. Raised only when today is above what 90% of
+ * those weeks were at or below and at least STUCK_MARGIN points above their
+ * median, with the calibrated minimum of open cases today and in each week
+ * counted, and MIN_SNAPSHOTS such weeks.
+ */
 export const stuckInStatus: Rule = {
   id: "svc.stuck-in-status",
   version: 1,
   domain: DOMAIN,
-  title: "Open cases sitting in a status longer than most cases did",
+  title: "Open cases past the usual time in their status, against earlier weeks",
   records: true,
   evaluate(ctx): RuleResult {
-    const ready = readyOrWhy(ctx, false);
-    if (ready.status !== "ok") return { outcome: "not_measurable", reason: ready.reason, evidence: ready.evidence };
-    const c = ready;
+    const c = caseCohortOf(ctx);
+    if (c.status !== "ok") return { outcome: "not_measurable", reason: c.reason, evidence: c.evidence };
     const { minSample } = ctx.calibration;
-    // Every stay in each open status by the period's cases. A stay not yet ended is counted as the longest there is, so the
-    // line is one at least STAY_SHARE% of the stays really ended within, however the open ones end.
-    const stays = new Map<string, number[]>();
-    for (const x of c.cases) for (const v of x.visits) if (!v.status.closed) stays.set(v.status.key, [...(stays.get(v.status.key) ?? []), v.end === null ? Infinity : daysOf(v.end - v.start)]);
-    const lines = new Map<string, number>();
-    for (const [key, days] of stays) {
-      if (days.length < minSample) continue;
-      const line = nearestRank(days, STAY_QUANTILE);
-      if (Number.isFinite(line)) lines.set(key, round1(line));
-    }
     const now = ctx.now.getTime();
-    type Target = { row: OpenCaseRow; status: Status; since: number; days: number; priority: string; origin: string; label: string };
-    const targets: Target[] = [];
-    let noStatus = 0;
-    let noLine = 0;
-    for (const o of c.openNow) {
-      if (!o.status || o.status.closed || !o.consistent || !o.visits) {
-        noStatus++;
-        continue;
-      }
-      if (!lines.has(o.status.key)) {
-        noLine++;
-        continue;
-      }
-      // With no change of its own, the case has been in its status since it was made, or at least since the first change we found.
-      const since = o.visits.length > 1 ? o.visits.at(-1)!.start : Math.max(instant(o.row.CreatedDate), c.historyFrom);
-      targets.push({ row: o.row, status: o.status, since, days: daysOf(now - since), priority: casePriority(o.row), origin: caseOrigin(o.row), label: o.status.label });
-    }
+    const today = snapshotAt(c.universe, now, c.historyFrom, minSample);
+    const noStatus = c.openRead - today.open;
+    const noLine = today.noLine;
     const exclusions = [
       ...(noStatus ? [named(said`${plural(noStatus, "open case")} whose status we couldn't place: not in your case status settings, a closed status, or not where ${noStatus === 1 ? said`its` : said`their`} recorded changes end`, { noStatus })] : []),
-      ...(noLine ? [named(said`${plural(noLine, "open case")} in a status too few cases made ${periodSaid(c)} spent time in, or left, to set a line`, { noLine, minSample })] : []),
+      ...(noLine ? [named(said`${plural(noLine, "open case")} in a status with fewer than ${minSample} stays begun between ${LINE_FROM_DAYS} and ${GAP_DAYS} days earlier, or too few of them ended, to set a line`, { noLine, minSample, lineFrom: [LINE_FROM_DAYS, "day"], gap: [GAP_DAYS, "day"] })] : []),
     ];
-    const evidence = [...c.evidence, ctx.ev(c.openSource, { count: targets.length, note: "Open cases now, in a status with a line to compare", exclusions })];
-    if (targets.length === 0) return { outcome: "not_measurable", reason: named(said`No open case is in a status that ${minSample} or more stays by cases made ${periodSaid(c)} were in and left.`, { minSample }), evidence };
-    const dims: Record<string, (t: Target) => string> = { status: (t) => t.label, priority: (t) => t.priority, ...(c.hasOrigin ? { origin: (t: Target) => t.origin } : {}) };
-    const result = segmentRate(targets, (t) => t.days > lines.get(t.status.key)!, dims, { segmentLimit: STUCK_SEGMENT_LIMIT, minSegment: MIN_SEGMENT });
-    const { hits, n, rate } = result;
-    const lead = named(said`We set each open case beside the cases made ${periodSaid(c)}. ${hits} of ${n} ${n === 1 ? said`open case` : said`open cases`} (${rate}%) ${hits === 1 ? said`has been in its` : said`have been in their`} current status longer than ${STAY_SHARE}% of those cases' stays in it lasted. Days are calendar days.`, { stayShare: [STAY_SHARE, "percent"], hits, n, rate: [rate, "percent"] });
-    const facts = { hits, n, rate, statusesWithLine: lines.size, stayShare: STAY_SHARE, segmentLimit: STUCK_SEGMENT_LIMIT };
-    const over = rate > STUCK_LIMIT;
-    if (!over && result.hotspots.length === 0) {
-      return { outcome: "pass", summary: named(said`${lead} No segment is above ${STUCK_SEGMENT_LIMIT}%.`, { segmentLimit: [STUCK_SEGMENT_LIMIT, "percent"] }), evidence, segmentsChecked: result.segmentsChecked, facts };
+    const evidence = [...c.evidence, ctx.ev(c.openSource, { count: today.targets.length, note: "Open cases now, in a status with a line to compare", exclusions })];
+    const n = today.targets.length;
+    if (n < minSample) {
+      const few = n === 1 ? said`1 open case is` : named(said`${n} open cases are`, { n });
+      return { outcome: "not_measurable", reason: named(said`${few} in a status with a line today, below the calibrated minimum of ${minSample}.`, { minSample }), evidence };
     }
-    const worst = result.hotspots[0];
-    // The status the note's sentence names: the worst status past the line, with the line it is held to.
-    const top = result.hotspots.find((h) => h.dimension === "status");
-    const topLine = top ? lines.get(targets.find((t) => t.label === top.key)!.status.key)! : 0;
-    const within = topLine === 1 ? said`1 day` : named(said`${topLine} days`, { topLine: [topLine, "day"] });
-    const lineSaid = !top
-      ? said``
-      : top === worst
-        ? named(said` ${STAY_SHARE}% of the stays in ${org(top.key)} ended within ${within}.`, { stayShare: [STAY_SHARE, "percent"] })
-        : named(said` In ${org(top.key)}, ${top.hits} of ${top.n} open cases (${top.rate}%) ${top.hits === 1 ? said`is` : said`are`} past the line: ${STAY_SHARE}% of the stays there ended within ${within}.`, { topHits: top.hits, topN: top.n, topRate: [top.rate, "percent"], stayShare: [STAY_SHARE, "percent"] });
-    const hidden = !worst
-      ? said``
-      : !over
-        ? named(said` The total is within our line of ${STUCK_LIMIT}%, but by ${dimensionWords(worst.dimension)}, ${org(worst.key)} is at ${worst.rate}% (${worst.hits} of ${worst.n}).`, { stuckLimit: [STUCK_LIMIT, "percent"], worstPct: [worst.rate, "percent"], worstHits: worst.hits, worstN: worst.n })
-        : named(said` Worst by ${dimensionWords(worst.dimension)}: ${org(worst.key)}, at ${worst.rate}%.`, { worstPct: [worst.rate, "percent"] });
+    // The earlier weeks: the same weekday and time, back while a whole lookback and gap lie inside what we read.
+    const earliest = Math.max(c.yearStart, c.historyFrom) + (LOOKBACK_DAYS + GAP_DAYS) * DAY;
+    const weeks: Snapshot[] = [];
+    // From a whole gap back, so the weeks today is set beside aren't the weeks in which a backlog may be building.
+    for (let at = now - Math.ceil(GAP_DAYS / SNAPSHOT_EVERY_DAYS) * SNAPSHOT_EVERY_DAYS * DAY; at >= earliest; at -= SNAPSHOT_EVERY_DAYS * DAY) {
+      const snap = snapshotAt(c.universe, at, c.historyFrom, minSample);
+      if (snap.targets.length >= minSample) weeks.push(snap);
+    }
+    const counted = weeks.length;
+    if (counted < MIN_SNAPSHOTS) {
+      const fewWeeks = counted === 0 ? said`no earlier week` : counted === 1 ? said`only 1 earlier week` : named(said`only ${counted} earlier weeks`, { counted });
+      return { outcome: "not_measurable", reason: named(said`We could set today's open cases beside ${fewWeeks} with ${minSample} or more open cases in a status with a line, and we need ${MIN_SNAPSHOTS} to say what is usual for your cases.`, { minSample, minSnapshots: MIN_SNAPSHOTS }), evidence };
+    }
+    const shareOf = (snap: Snapshot): number => pct(snap.targets.filter((t) => t.past).length, snap.targets.length);
+    const shares = weeks.map(shareOf);
+    const hits = today.targets.filter((t) => t.past).length;
+    const rate = shareOf(today);
+    const usual = nearestRank(shares, STUCK_BAR.quantile);
+    const USUAL_SHARE = Math.round(STUCK_BAR.quantile * 100);
+    const middle = round1(median(shares));
+    const firstWeek = localDay(new Date(weeks.at(-1)!.at), zoneOf(ctx));
+    const dims: Record<string, (t: Target) => string> = { status: (t) => t.status.label, priority: (t) => t.priority, ...(c.hasOrigin ? { origin: (t: Target) => t.origin } : {}) };
+    const segmentsChecked: SegmentCheck[] = Object.entries(dims).map(([dimension, keyOf]) => ({ dimension, segments: new Set(today.targets.map(keyOf)).size }));
+    const lead = named(
+      said`Today ${hits} of ${n} open cases (${rate}%) ${hits === 1 ? said`has been in its` : said`have been in their`} status longer than ${STAY_SHARE}% of the stays that began there between ${LINE_FROM_DAYS} and ${GAP_DAYS} days earlier. On the same day of the week in the ${counted} earlier weeks we could compare, back to ${daySaid(firstWeek)}, the share was a median of ${middle}%, and ${USUAL_SHARE}% of those weeks were at or below ${usual}%. Days are calendar days.`,
+      { hits, n, rate: [rate, "percent"], stayShare: [STAY_SHARE, "percent"], lineFrom: [LINE_FROM_DAYS, "day"], gap: [GAP_DAYS, "day"], counted, firstWeek: [firstWeek, "date"], middle: [middle, "percent"], usualShare: [USUAL_SHARE, "percent"], usual: [usual, "percent"] },
+    );
+    // The margin: our least points, or the z bar's points at today's count, whichever is more, in whole points up.
+    const margin = Math.max(STUCK_BAR.points, Math.ceil(STUCK_BAR.z * Math.sqrt((middle * (100 - middle)) / n)));
+    const facts = { hits, n, rate, weeks: counted, median: middle, usual, margin, stayShare: STAY_SHARE, lookbackDays: LOOKBACK_DAYS };
+    if (!(rate > usual && rate - middle >= margin)) {
+      return { outcome: "pass", summary: named(said`${lead} We raise this only when today's share is above ${usual}% and at least ${margin} points above ${middle}%, and it isn't.`, { usual: [usual, "percent"], margin: [margin, "points"], middle: [middle, "percent"] }), evidence, segmentsChecked, facts };
+    }
+    // The status with the most open cases past its line today, when its name can be written.
+    const byStatus = [...groupBy(today.targets.filter((t) => t.past), (t) => t.status.key)].map(([key, ts]) => ({ key, past: ts.length, status: ts[0]!.status, there: today.targets.filter((t) => t.status.key === key).length }));
+    const top = byStatus.filter((x) => sayable(ctx, x.status.label)).sort((a, b) => b.past - a.past || (a.status.label < b.status.label ? -1 : 1))[0];
+    const statusSaid = top
+      ? named(said` In ${org(top.status.label)}, ${top.past} of ${top.there} open ${top.there === 1 ? said`case is` : said`cases are`} past that status's line: ${STAY_SHARE}% of the stays that began there between ${LINE_FROM_DAYS} and ${GAP_DAYS} days earlier ended within ${lineSaid(today.lines.get(top.key)!)}.`, { topPast: top.past, topThere: top.there, stayShare: [STAY_SHARE, "percent"], lineFrom: [LINE_FROM_DAYS, "day"], gap: [GAP_DAYS, "day"] })
+      : said``;
     return {
       outcome: "issue",
-      title: said`Open cases are sitting in a status longer than most cases did`,
-      summary: said`${lead}${hidden}${lineSaid}`,
-      recommendation: said`Go through the open cases that have waited longest in each status and move each one on or close it, then look at why cases wait there.`,
+      title: said`More of your open cases are past the usual time in their status than in most earlier weeks`,
+      summary: named(said`${lead}${statusSaid} We raise this when today's share is above ${usual}% and at least ${margin} points above the median of ${middle}%. Both lines are ours.`, { usual: [usual, "percent"], margin: [margin, "points"], middle: [middle, "percent"] }),
+      recommendation: said`Go through the open cases that have waited longest in each status and move each one on or close it, then look at what changed in the last weeks.`,
       recommendationType: "change",
       severity: "medium",
-      // Fewer open cases than the calibrated minimum: true of those cases, said with less confidence.
-      confidence: n < minSample ? "medium" : "high",
+      confidence: n < minSample * 2 ? "medium" : "high",
       evidence,
       value,
       effort: { size: "S" },
       owner: OWNER,
-      segmentsChecked: result.segmentsChecked,
-      subjects: result.hotspots.slice(0, 5).map((h) => ({ type: h.dimension, label: h.key })),
-      facts: { ...facts, ...(worst ? { worstSegmentRate: worst.rate, worstSegmentHits: worst.hits, worstSegmentN: worst.n } : {}) },
+      segmentsChecked,
+      ...(top ? { subjects: [{ type: "status", label: top.status.label }] } : {}),
+      facts,
     };
   },
 };
@@ -502,6 +643,13 @@ export const reopenedTime: Rule = {
     if (n < minSample) {
       const few = n === 1 ? said`1 case made ${periodSaid(c)} was closed and then reopened` : named(said`${n} cases made ${periodSaid(c)} were closed and then reopened`, { n });
       return { outcome: "not_measurable", reason: named(said`${few}, below the calibrated minimum of ${minSample}.`, { minSample }), evidence: c.evidence };
+    }
+    // A reopened case whose close date is its first close, though a later close is recorded: the close date we read would
+    // then not be the final close, and every time after a first close would read short. Direct evidence, so nothing is said.
+    const keptFirst = reopened.filter((x) => !x.open && Math.abs(x.closedAt! - x.firstCloseAt!) < 1000 && x.visits.some((v) => v.status.closed && v.start > x.firstCloseAt!)).length;
+    if (keptFirst > 0) {
+      const which = keptFirst === 1 ? said`On 1 reopened case, the close date we read is its first close, though a later close is recorded` : named(said`On ${keptFirst} reopened cases, the close date we read is their first close, though a later close is recorded`, { keptFirst });
+      return { outcome: "not_measurable", reason: said`${which}, so we can't tell from the close date how long these cases took after their first close.`, evidence: c.evidence };
     }
     // Same cases on both sides: the time to the first close against the time from it to the final close.
     const before = (x: PathCase): number => daysOf(x.firstCloseAt! - x.madeAt);
@@ -574,21 +722,33 @@ export const closedStraight: Rule = {
     const open = c.cases.filter((x) => x.firstCloseAt === null).length;
     const lead = named(said`Of the ${n} cases made ${periodSaid(c)}, ${hits} (${rate}%) ${hits === 1 ? said`was` : said`were`} closed straight from the status they started in, with no other status between.`, { n, hits, rate: [rate, "percent"] });
     const openSaid = open === 0 ? said`` : open === 1 ? said` 1 case has never been closed, and isn't counted as closed straight.` : named(said` ${open} cases have never been closed, and aren't counted as closed straight.`, { open });
-    const facts = { hits, n, rate, open, segmentLimit: STRAIGHT_SEGMENT_LIMIT };
+    // Cases closed with no recorded change may be the very cases made already closed: we can't tell, so they are said.
+    const noChange = c.noChange;
+    const noChangeSaid = noChange === 0 ? said`` : noChange === 1 ? said` 1 case closed with no recorded status change isn't counted.` : named(said` ${noChange} cases closed with no recorded status change aren't counted.`, { noChange });
+    const facts = { hits, n, rate, open, noChange, limit: STRAIGHT_LIMIT, segmentLimit: STRAIGHT_SEGMENT_LIMIT };
     const over = rate > STRAIGHT_LIMIT;
-    if (!over && result.hotspots.length === 0) {
-      return { outcome: "pass", summary: named(said`${lead}${openSaid} No segment is above ${STRAIGHT_SEGMENT_LIMIT}%.`, { segmentLimit: [STRAIGHT_SEGMENT_LIMIT, "percent"] }), evidence: c.evidence, segmentsChecked: result.segmentsChecked, facts };
+    // Only a segment worth naming: in a dimension with two or more values here, and a name we can write.
+    const hotspots = nameable(ctx, c.cases, dims, result.hotspots);
+    if (!over && hotspots.length === 0) {
+      return { outcome: "pass", summary: named(said`${lead}${openSaid}${noChangeSaid} Our lines are ${STRAIGHT_LIMIT}% overall and ${STRAIGHT_SEGMENT_LIMIT}% in any one starting status, priority or origin, and none is crossed.`, { limit: [STRAIGHT_LIMIT, "percent"], segmentLimit: [STRAIGHT_SEGMENT_LIMIT, "percent"] }), evidence: c.evidence, segmentsChecked: result.segmentsChecked, facts };
     }
-    const worst = result.hotspots[0];
+    const worst = hotspots[0];
     const hidden = !worst
       ? said``
       : !over
-        ? named(said` The total is within our line of ${STRAIGHT_LIMIT}%, but by ${dimensionWords(worst.dimension)}, ${org(worst.key)} is at ${worst.rate}% (${worst.hits} of ${worst.n}).`, { straightLimit: [STRAIGHT_LIMIT, "percent"], worstPct: [worst.rate, "percent"], worstHits: worst.hits, worstN: worst.n })
-        : named(said` Worst by ${dimensionWords(worst.dimension)}: ${org(worst.key)}, at ${worst.rate}%.`, { worstPct: [worst.rate, "percent"] });
+        ? named(said` The total is within our line of ${STRAIGHT_LIMIT}%, but by ${dimensionWords(worst.dimension)}, ${org(worst.key)} is at ${worst.rate}% (${worst.hits} of ${worst.n}), over our line of ${STRAIGHT_SEGMENT_LIMIT}% for any one.`, { straightLimit: [STRAIGHT_LIMIT, "percent"], worstPct: [worst.rate, "percent"], worstHits: worst.hits, worstN: worst.n, segmentLimit: [STRAIGHT_SEGMENT_LIMIT, "percent"] })
+        : worst
+          ? named(said` That is over our line of ${STRAIGHT_LIMIT}%. Highest by ${dimensionWords(worst.dimension)}: ${org(worst.key)}, at ${worst.rate}%.`, { straightLimit: [STRAIGHT_LIMIT, "percent"], worstPct: [worst.rate, "percent"] })
+          : said``;
+    const overSaid = over && !worst ? named(said` That is over our line of ${STRAIGHT_LIMIT}%.`, { straightLimit: [STRAIGHT_LIMIT, "percent"] }) : said``;
+    // Titled by what is true: over the line overall, or in one segment.
+    const title = over
+      ? named(said`More than ${STRAIGHT_LIMIT}% of cases are closed straight from the status they started in`, { straightLimit: [STRAIGHT_LIMIT, "percent"] })
+      : named(said`More than ${STRAIGHT_SEGMENT_LIMIT}% of cases with ${dimensionWords(worst!.dimension)} ${org(worst!.key)} are closed straight from the status they started in`, { segmentLimit: [STRAIGHT_SEGMENT_LIMIT, "percent"] });
     return {
       outcome: "issue",
-      title: said`Many cases are closed straight from the status they started in`,
-      summary: said`${lead}${hidden}${openSaid} Some may be duplicates, spam or cases closed by automation, and some may be questions answered at once: the statuses alone can't tell them apart.`,
+      title,
+      summary: said`${lead}${hidden}${overSaid}${openSaid}${noChangeSaid} Some may be duplicates, spam or cases closed by automation, and some may be questions answered at once: the statuses alone can't tell them apart.`,
       recommendation: said`Look at a sample of these cases to see which they are. Filter duplicates and spam out where they come in, check that any automation closing cases should be, and leave quick answers as they are.`,
       recommendationType: "investigate",
       severity: "low",
@@ -598,7 +758,7 @@ export const closedStraight: Rule = {
       effort: { size: "S" },
       owner: OWNER,
       segmentsChecked: result.segmentsChecked,
-      subjects: result.hotspots.slice(0, 5).map((h) => ({ type: h.dimension, label: h.key })),
+      subjects: hotspots.slice(0, 5).map((h) => ({ type: h.dimension, label: h.key })),
       facts: { ...facts, ...(worst ? { worstSegmentRate: worst.rate, worstSegmentHits: worst.hits, worstSegmentN: worst.n } : {}) },
     };
   },

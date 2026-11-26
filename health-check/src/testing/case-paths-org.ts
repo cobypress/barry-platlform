@@ -57,6 +57,8 @@ export function caseRecords(specs: CaseSpec[], statuses: CaseStatus[] = CASE_PAT
     let status = s.start ?? "New";
     let lastAt = madeMs;
     s.steps.forEach(([to, after], k) => {
+      // A change after the run's instant hasn't happened yet.
+      if (madeMs + after * DAY > NOW) return;
       lastAt = madeMs + after * DAY;
       if (!s.noHistory) history.push({ Id: sfId("017", n * 20 + k), CaseId: id, Field: "Status", OldValue: status, NewValue: to, CreatedDate: stamp(lastAt) });
       status = to;
@@ -176,4 +178,28 @@ export function straightCases(): CaseSpec[] {
     ...Array.from({ length: 300 }, (_, i): CaseSpec => ({ made: 40 + i, priority: priorities[i % 3]!, origin: origins[Math.floor(i / 3) % 3]!, steps: i % 3 === 1 ? [["Duplicate", 0.2]] : [["Working", 0.5], ["Closed", 2]] })),
     { made: 3, steps: [["Working", 0.5]] },
   ];
+}
+
+/**
+ * A steady org for the stuck check: eight cases a day for a year, made between
+ * 01:00 and 08:00 UTC, each New, then Working after an hour, then (with
+ * `waiting`) Waiting on Customer after half a day, and closed after a stay that
+ * cycles through 0.5 to 10 days, so about 30 cases are open on any day. With
+ * `backlog`, the stays of the cases made in the last 30 days are three times as
+ * long.
+ */
+export function stuckCases(options: { backlog?: boolean; waiting?: boolean; perDay?: number } = {}): CaseSpec[] {
+  const stays = [0.5, 1, 2, 3, 4, 6, 8, 10];
+  const priorities = ["High", "Medium", "Low"];
+  const origins = ["Email", "Web", "Phone"];
+  const perDay = options.perDay ?? 8;
+  const specs: CaseSpec[] = [ANCHOR];
+  for (let d = 364; d >= 0; d--) {
+    for (let k = 0; k < perDay; k++) {
+      const stay = stays[(d * 3 + k) % stays.length]! * (options.backlog && d < 30 ? 3 : 1);
+      const steps: Array<[string, number]> = options.waiting ? [["Working", 0.04], ["Waiting", 0.5], ["Closed", 0.5 + stay]] : [["Working", 0.04], ["Closed", 0.04 + stay]];
+      specs.push({ made: d, at: `0${1 + (k % 8)}:00`, priority: priorities[k % 3]!, origin: origins[(d + k) % 3]!, steps });
+    }
+  }
+  return specs;
 }

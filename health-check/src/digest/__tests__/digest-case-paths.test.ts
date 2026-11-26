@@ -8,11 +8,13 @@ import { runHealthCheck } from "../../engine/run.ts";
 import { loadRun } from "../../render/render-run.ts";
 import { buildReport } from "../../narrative/sections.ts";
 import { tempDir } from "../../testing/harness.ts";
-import { caseOrg, caseRecords, richCases, straightCases, type CaseSpec, type CaseStatus } from "../../testing/case-paths-org.ts";
+import { caseOrg, caseRecords, richCases, straightCases, stuckCases, type CaseStatus } from "../../testing/case-paths-org.ts";
 import { loadAnswers, loadCalibration, loadRecording, ReplayTransport, syntheticProvider } from "../../testing/replay.ts";
 import { Simulator } from "../../testing/simulator.ts";
 import type { Transport } from "../../salesforce/transport.ts";
 import { AS_OF, CONNECTED_USER } from "../../testing/synthetic-org.ts";
+import { automaticSyntheticCalibration } from "../../testing/automatic.ts";
+import { NAMED_PEOPLE_SENTENCE } from "../../schemas/digest.ts";
 
 // A consultant-led run with Service Cloud and the case status paths on
 // (HC_CASE_PATHS, DECISIONS.md 776), the only run the lane reaches, end to end
@@ -54,9 +56,8 @@ describe("a consultant-led run with Service Cloud and the case status paths on",
   }
 
   test("a status is served marked as the org's, whole, even one with digits and a percent sign", async () => {
-    // Thirty more open cases waiting on the customer for a month or more, so the stuck check names that status.
-    const waiting = Array.from({ length: 30 }, (_, i): CaseSpec => ({ made: 30 + i, priority: ["High", "Medium", "Low"][i % 3]!, origin: ["Email", "Web", "Phone"][Math.floor(i / 3) % 3]!, steps: [["Working", 0.25], ["Waiting", 0.5]] }));
-    const { checked } = await consultant(new Simulator({ records: caseOrg(caseRecords([...richCases(), ...waiting], STATUSES)) }));
+    // A backlog waiting on the customer in the last month, so the stuck check names that status.
+    const { checked } = await consultant(new Simulator({ records: caseOrg(caseRecords(stuckCases({ backlog: true, waiting: true }), STATUSES)) }));
     const d = checked.digest!;
     const texts = digestTextsAt(d).filter((t) => t.text.includes(HOSTILE));
     assert.ok(texts.length >= 1, "the hostile status is in a served text");
@@ -80,6 +81,25 @@ describe("a consultant-led run with Service Cloud and the case status paths on",
     const rules = JSON.parse(readFileSync(join(dir, "rules.json"), "utf8")) as { rulesRun: string[]; rulesKnown: string[] };
     assert.ok(!rules.rulesRun.includes("svc.sent-back-cases") && !rules.rulesKnown.includes("svc.sent-back-cases"));
     for (const id of SERVED) assert.ok(rules.rulesRun.includes(id) && rules.rulesKnown.includes(id), id);
+  });
+
+  test("a status named like an email or an id, on an automatic run with Service Cloud: released as with the switch off, and never said to involve named people", async () => {
+    const calibration = await automaticSyntheticCalibration();
+    for (const label of ["jane.doe@example.com", "500000000000001AAA"]) {
+      const statuses = STATUSES.map((st) => (st.ApiName === "Waiting" ? { ...st, MasterLabel: label } : st));
+      const records = caseOrg(caseRecords(stuckCases({ backlog: true, waiting: true }), statuses));
+      const automatic = async (casePaths: boolean) => {
+        const run = await runHealthCheck({ provider: syntheticProvider, calibration, reviewMode: "automatic", modules: ALL_MODULES, outDir: tempDir(), now: new Date(AS_OF), transport: new Simulator({ records }), connectedUser: CONNECTED_USER, log: () => {}, ...(casePaths ? { casePaths } : {}) });
+        const { input, pseudonyms } = loadRun(run.dir);
+        return checkedDigest({ input, pseudonyms, inventory: null, madeAt: MADE_AT });
+      };
+      const [on, off] = [await automatic(true), await automatic(false)];
+      assert.deepEqual(counts(on), counts(off), label);
+      const stuck = on.digest!.findings.find((f) => f.ruleId === "svc.stuck-in-status")!;
+      assert.equal(stuck.status, "issue", label);
+      assert.ok(!JSON.stringify(on.digest!.findings.filter((f) => SERVED.includes(f.ruleId))).includes(NAMED_PEOPLE_SENTENCE), label);
+      assert.ok(!JSON.stringify(on.digest).includes(label), `${label} is never written`);
+    }
   });
 
   test("with the switch off, the run knows none of it", async () => {

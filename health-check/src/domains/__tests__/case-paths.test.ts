@@ -1,15 +1,15 @@
 import { test, describe, before } from "node:test";
 import assert from "node:assert/strict";
 import { analyseExtracts, loadExtracts, runFromRecording } from "../../testing/harness.ts";
-import { ANCHOR, CASE_PATH_STATUSES, caseRecords, richCases, withCases, type CaseSpec, type CaseStatus } from "../../testing/case-paths-org.ts";
+import { ANCHOR, CASE_PATH_STATUSES, seededRandom, stuckCases, caseRecords, richCases, withCases, type CaseSpec, type CaseStatus } from "../../testing/case-paths-org.ts";
 import { orgExtractor } from "../../extract/configuration.ts";
-import { serviceCasesExtractor } from "../../extract/service.ts";
+import { serviceActivityExtractor, serviceCasesExtractor } from "../../extract/service.ts";
 import { loadCalibration } from "../../testing/replay.ts";
 import { COUNTED_WHEN_MEASURED, INSIGHT_METRICS, INSIGHT_RULES, scoreDomains } from "../scoring.ts";
 import { ALL_MODULES, SERVICE_CLOUD_MODULES } from "../index.ts";
 import { casePathsModule, withCasePaths } from "../service/index.ts";
 import { serviceOperationsModule } from "../service/operations.ts";
-import { LEAST_LAG_DAYS } from "../service/paths.ts";
+import { LEAST_LAG_DAYS, lineSaid, snapshotAt, STUCK_BAR, type SnapCase } from "../service/paths.ts";
 import { zBar } from "../historic-pipeline/paths/insights.ts";
 import type { AnalysisOutput } from "../../engine/evaluate.ts";
 import type { Finding, Metric } from "../../schemas/index.ts";
@@ -37,6 +37,17 @@ const one = (a: AnalysisOutput, ruleId: string): Finding => {
 const textOf = (f: Finding): string => f.summary ?? f.notMeasurableReason ?? "";
 const metric = (a: AnalysisOutput): Metric => [...a.metrics, ...a.insightMetrics].find((m) => m.id === "service.status_paths")!;
 const leading = (e: string): number => Number(/^(\d+) /.exec(e)?.[1] ?? 0);
+const DAY = 86_400_000;
+const NOW = Date.parse("2026-10-31T12:00:00.000Z");
+const NEW = { key: "New", label: "New", closed: false };
+const WORKING = { key: "Working", label: "Working", closed: false };
+/** Cases for the stuck check's snapshot alone: each made `[daysBefore, stay]`, an hour in New, then Working for `stay` days (ended when that is before the run). `gap` shifts them `gap` days later. */
+const withStays = (stays: Array<[number, number]>, gap: number): SnapCase[] =>
+  stays.map(([before, stay], i) => {
+    const made = NOW - (before - gap) * DAY;
+    const end = made + 3_600_000 + stay * DAY;
+    return { id: `s${i}`, madeAt: made, priority: "High", origin: "Email", visits: [{ status: NEW, start: made, end: made + 3_600_000 }, { status: WORKING, start: made + 3_600_000, end: end <= NOW ? end : null }] };
+  });
 
 /**
  * Quick cases, New to Working to Closed in two days, made 40 days and more
@@ -109,11 +120,20 @@ describe("who is counted", () => {
   });
 
   test("every open case is counted by the stuck check or in a named exclusion", () => {
-    const specs: CaseSpec[] = [...richCases(), { made: 5, steps: [["Escalated", 1]] }, { made: 6, steps: [["Working", 0.5]], statusNow: "Waiting" }];
+    const specs: CaseSpec[] = [...stuckCases(), { made: 5, steps: [["Escalated", 1]] }, { made: 6, steps: [["Working", 0.5]], statusNow: "Waiting" }];
     const f = one(on(specs), "svc.stuck-in-status");
     const open = f.evidence.at(-1)!;
     assert.equal(open.count! + open.exclusions.reduce((t, e) => t + leading(e), 0), caseRecords(specs).cases.filter((c) => !c.IsClosed).length, open.exclusions.join(" | "));
     assert.ok(open.exclusions.includes("2 open cases whose status we couldn't place: not in your case status settings, a closed status, or not where their recorded changes end"), open.exclusions.join(" | "));
+  });
+
+  test("the period's last day is in it: a case made on that day is counted, the day after is too recent", () => {
+    // The lag here is our minimum of 14 days, so the period ends on 17 October 2026, 14 days before the run's day.
+    const base = one(on(quick(300)), "svc.closed-straight");
+    const onLast = one(on([...quick(300), { made: 14, steps: [["Working", 0.2], ["Closed", 0.5]] }]), "svc.closed-straight");
+    const after = one(on([...quick(300), { made: 13, steps: [["Working", 0.2], ["Closed", 0.5]] }]), "svc.closed-straight");
+    assert.equal(onLast.facts!.n, base.facts!.n + 1);
+    assert.equal(after.facts!.n, base.facts!.n);
   });
 
   test("the censoring rule: cases too recent for the lag are left out and said, never counted as cases that failed", () => {
@@ -170,35 +190,108 @@ describe("who is counted", () => {
   });
 });
 
-describe("open cases stuck in a status (C1)", () => {
-  test("raised from the stays of the period's cases, with the stays not yet ended counted as the longest, and the share strictly over the line", () => {
-    const f = one(on(richCases()), "svc.stuck-in-status");
-    assert.equal(f.status, "issue");
-    assert.equal(f.facts!.n, 40);
-    assert.match(textOf(f), /^We set each open case beside the cases made between .*\. \d+ of 40 open cases \(\d+(\.\d)?%\) have been in their current status longer than 75% of those cases' stays in it lasted\. Days are calendar days\./);
+describe("the order of changes and what a change says", () => {
+  // Each case moves New to Working at once, then half the cases go on to Waiting in the same second, and close at 3 days.
+  const tied = (): CaseSpec[] => [ANCHOR, ...Array.from({ length: 300 }, (_, i): CaseSpec => ({ made: 40 + i, priority: ["High", "Medium", "Low"][i % 3]!, origin: ["Email", "Web", "Phone"][Math.floor(i / 3) % 3]!, steps: i % 2 ? [["Working", 0.5], ["Waiting", 0.5], ["Closed", 3]] : [["Working", 0.5], ["Closed", 3]] })), { made: 3, steps: [["Working", 0.5]] }];
+  const history = (x: Map<string, unknown>) => (x.get(serviceActivityExtractor.id) as { statusChanges: { data: unknown[] } }).statusChanges.data;
+  const analysed = (mutate: (x: Map<string, unknown>) => void) => {
+    const x = withCases(extracts, caseRecords(tied()));
+    mutate(x);
+    const a = analyseExtracts(x, { modules: SERVICE_CLOUD_MODULES, casePaths: true });
+    return JSON.stringify([all(a).filter((f) => NEW_RULES.includes(f.ruleId)).map((f) => [f.ruleId, f.status, f.summary ?? f.notMeasurableReason, f.facts]), metric(a)]);
+  };
+
+  test("changes in the same second are chained, never taken in the order the read returned them", () => {
+    const m = metric(on(tied()));
+    assert.ok(m.status === "measured");
+    const paths = m.status === "measured" ? m.segments.filter((s) => s.dimension === "path").map((s) => s.key).sort() : [];
+    assert.deepEqual(paths, ["New > Working > Closed", "New > Working > Waiting > Closed"]);
+    assert.equal(analysed((x) => history(x).reverse()), analysed(() => {}));
   });
 
-  test("a stay not yet ended counts as the longest: an open case in a status no case has left sets no line", () => {
-    // Every case made in the period that reached Waiting is still there, so no line can be set for Waiting.
-    // More than the minimum of stays there, none ended: counted as the longest, so no line, and the open cases in it are left out.
-    const specs: CaseSpec[] = [...quick(300), ...Array.from({ length: 25 }, (_, i): CaseSpec => ({ made: 60 + i, steps: [["Working", 0.5], ["Waiting", 1]] })), { made: 3, steps: [["Working", 0.5], ["Waiting", 1]] }];
-    const f = one(on(specs), "svc.stuck-in-status");
-    const open = f.evidence.at(-1)!;
-    assert.ok(open.exclusions.some((e) => /^26 open cases in a status too few cases made .* spent time in, or left, to set a line$/.test(e)), open.exclusions.join(" | "));
+  test("the history read in any order gives the same results, to the byte", () => {
+    const base = analysed(() => {});
+    for (const seed of [1, 2, 3]) {
+      const r = seededRandom(seed);
+      assert.equal(analysed((x) => history(x).sort(() => r() - 0.5)), base, `shuffle ${seed}`);
+    }
   });
 
-  test("not measurable reads the period's minimum, and a pass says no segment is over the line", () => {
-    const calm = richCases().filter((s) => s.made > 12);
-    const f = one(on([...calm, { made: 2, steps: [["Working", 0.5]] }]), "svc.stuck-in-status");
-    assert.equal(f.status, "passed");
-    assert.match(textOf(f), /\. 0 of 1 open case \(0%\) have been in .* Days are calendar days\. No segment is above 60%\.$/);
+  test("ties that can't be put in one order leave the case out, named", () => {
+    // A to B and B to A in the same second: a cycle with no start.
+    const specs: CaseSpec[] = [...quick(300), { made: 80, steps: [["Working", 1], ["New", 1], ["Closed", 3]] }];
+    const f = one(on(specs), "svc.closed-straight");
+    assert.ok(f.evidence[1]!.exclusions.includes("1 case with status changes in the same second that we couldn't put in one order"), f.evidence[1]!.exclusions.join(" | "));
+  });
+
+  test("a first change with no old value is the case being made: its new value is the status it started in", () => {
+    const withMade = (x: Map<string, unknown>) => {
+      const cases = x.get(serviceCasesExtractor.id) as { open: { data: Array<{ Id: string; CreatedDate: string }> }; closedCases: { data: Array<{ Id: string; CreatedDate: string }> } };
+      for (const c of [...cases.open.data, ...cases.closedCases.data]) history(x).push({ CaseId: c.Id, OldValue: null, NewValue: "New", CreatedDate: c.CreatedDate });
+    };
+    const x = withCases(extracts, caseRecords(quick(300)));
+    withMade(x);
+    const f = all(analyseExtracts(x, { modules: SERVICE_CLOUD_MODULES, casePaths: true })).find((y) => y.ruleId === "svc.closed-straight")!;
+    assert.equal(f.facts!.n, one(on(quick(300)), "svc.closed-straight").facts!.n);
+  });
+});
+
+describe("open cases past their status's line, against earlier weeks (C1)", () => {
+  test("a steady org: today is set beside its own earlier weeks, and nothing is raised", () => {
+    const f = one(on(stuckCases()), "svc.stuck-in-status");
+    assert.equal(f.status, "passed", textOf(f));
+    assert.match(textOf(f), /^Today \d+ of \d+ open cases \([\d.]+%\) have been in their status longer than 75% of the stays that began there between 120 and 30 days earlier\. On the same day of the week in the \d+ earlier weeks we could compare, back to .*, the share was a median of [\d.]+%, and 90% of those weeks were at or below [\d.]+%\. Days are calendar days\. We raise this only when today's share is above [\d.]+% and at least \d+ points above [\d.]+%, and it isn't\.$/);
+  });
+
+  test("a backlog building in the last month is raised, naming the status, its line rounded up and both lines as ours", () => {
+    const f = one(on(stuckCases({ backlog: true, waiting: true })), "svc.stuck-in-status");
+    assert.equal(f.status, "issue", textOf(f));
+    assert.match(textOf(f), / In Waiting on Customer, \d+ of \d+ open cases are past that status's line: 75% of the stays that began there between 120 and 30 days earlier ended within [\d.]+ days?\. We raise this when today's share is above [\d.]+% and at least \d+ points above the median of [\d.]+%\. Both lines are ours\.$/);
+  });
+
+  test("the line uses only stays that began a gap before the day judged, so a recent backlog doesn't lift its own line", () => {
+    // Three stays of two days begun two months ago, and three of fifty days begun in the last fortnight, inside the gap.
+    const snap = snapshotAt([...withStays([[60, 2], [61, 2], [62, 2]], 0), ...withStays([[10, 50], [11, 50], [12, 50]], 0).map((x) => ({ ...x, id: `g${x.id}` }))], NOW, 0, 3);
+    assert.equal(snap.lines.get("Working"), 2);
+  });
+
+  test("a stay not ended by the day judged counts as the longest: no line when too few have ended", () => {
+    const snap = snapshotAt(withStays([[60, 200], [61, 200], [62, 2]], 0), NOW, 0, 3);
+    assert.equal(snap.lines.has("Working"), false);
+  });
+
+  test("compared unrounded: a line of 0.54 days holds a case 0.52 days in, and the line is said rounded up, in hours under a day", () => {
+    const cases = [...withStays([[60, 0.54], [61, 0.54], [62, 0.54]], 0), { id: "open", madeAt: NOW - 0.52 * DAY - 3_600_000, priority: "High", origin: "Email", visits: [{ status: NEW, start: NOW - 0.52 * DAY - 3_600_000, end: NOW - 0.52 * DAY }, { status: WORKING, start: NOW - 0.52 * DAY, end: null }] }];
+    const snap = snapshotAt(cases, NOW, 0, 3);
+    assert.equal(snap.lines.get("Working"), 0.54);
+    assert.deepEqual(snap.targets.map((t) => t.past), [false]);
+    assert.equal(lineSaid(0.54), "13 hours");
+    assert.equal(lineSaid(0.03), "an hour");
+    assert.equal(lineSaid(1.04), "1.1 days");
+    assert.equal(lineSaid(1), "1 day");
+  });
+
+  test("an open case with no change of its own, made before the first change found, has been in its status since that change, not since it was made", () => {
+    const from = NOW - 100 * DAY;
+    const old = { id: "old", madeAt: NOW - 400 * DAY, priority: "High", origin: "Email", visits: [{ status: WORKING, start: NOW - 400 * DAY, end: null }] };
+    const snap = snapshotAt([...withStays([[60, 2], [61, 2], [62, 2]], 0), old], NOW, from, 3);
+    const t = snap.targets.find((x) => x.id === "old")!;
+    assert.equal(t.since, from);
+  });
+
+  test("too few earlier weeks, or too few open cases today, each say so", () => {
+    assert.match(textOf(one(on(stuckCases().filter((x) => x.made < 150)), "svc.stuck-in-status")), /^We could set today's open cases beside (no earlier week|only \d+ earlier weeks?) with 20 or more open cases in a status with a line, and we need 12 to say what is usual for your cases\.$/);
+    assert.match(textOf(one(on(stuckCases({ perDay: 2 })), "svc.stuck-in-status")), /^\d+ open cases? (is|are) in a status with a line today, below the calibrated minimum of 20\.$/);
+  });
+
+  test("the bar: above what 90% of the earlier weeks were at or below, and by a margin the noise probe set", () => {
+    assert.deepEqual(STUCK_BAR, { quantile: 0.9, points: 10, z: 3 });
   });
 });
 
 describe("one of a thing, said in the singular", () => {
-  test("one open case past the line, one closed straight, one status compared", () => {
-    const stuck = one(on([...quickClosed(300), ANCHOR, { made: 3, steps: [["Working", 0.25]], at: "00:00" }]), "svc.stuck-in-status");
-    assert.match(textOf(stuck), /\. 1 of 1 open case \(100%\) has been in its current status/);
+  test("one closed straight, one status compared, one open case today", () => {
+    assert.match(textOf(one(on([...stuckCases({ perDay: 1 })]), "svc.stuck-in-status")), /^\d+ open cases? (is|are) in a status with a line today/);
     const straight = one(on([...quick(300), { made: 80, steps: [["Closed", 0.2]] }]), "svc.closed-straight");
     assert.match(textOf(straight), /, 1 \(0.3%\) was closed straight from the status they started in/);
     const compared = one(on(sentBackOrg(15, 20)), "svc.sent-back-cases");
@@ -211,6 +304,25 @@ describe("reopened cases (C2)", () => {
     const f = one(on(richCases()), "svc.reopened-time");
     assert.equal(f.status, "issue");
     assert.match(textOf(f), /^Of the 38 cases made between .* that were closed and then reopened, 38 spent longer from their first close to their final close, or to today, than they had taken to be closed the first time\. Before their first close they took a median of [\d.]+ calendar days( \(an average of [\d.]+\))?\. The 38 closed again took a median of [\d.]+ calendar days/);
+  });
+
+  test("equal time before and after a first close is not longer", () => {
+    const equal: CaseSpec[] = [...quick(200), ...Array.from({ length: 30 }, (_, i): CaseSpec => ({ made: 80 + i, steps: [["Working", 0.5], ["Closed", 4], ["Working", 5], ["Closed", 8]] }))];
+    const f = one(on(equal), "svc.reopened-time");
+    assert.equal(f.status, "passed", textOf(f));
+    assert.equal(f.facts!.longer, 0);
+  });
+
+  test("a close date that is the first close, though a later close is recorded, makes the check say it can't tell", () => {
+    const specs: CaseSpec[] = [...quick(200), ...Array.from({ length: 30 }, (_, i): CaseSpec => ({ made: 80 + i, steps: [["Working", 0.5], ["Closed", 4], ["Working", 5], ["Closed", 10]] }))];
+    const x = withCases(extracts, caseRecords(specs));
+    const cases = (x.get(serviceCasesExtractor.id) as { closedCases: { data: Array<{ Id: string; CreatedDate: string; ClosedDate: string }> } }).closedCases.data;
+    // Salesforce keeping the first close date on one reopened case.
+    const keep = cases.find((c) => c.Id === caseRecords(specs).cases[202]!.Id)!;
+    keep.ClosedDate = new Date(Date.parse(keep.CreatedDate.replace("+0000", "Z")) + 4 * DAY).toISOString().replace("Z", "+0000");
+    const f = all(analyseExtracts(x, { modules: SERVICE_CLOUD_MODULES, casePaths: true })).find((y) => y.ruleId === "svc.reopened-time")!;
+    assert.equal(f.status, "not_measurable");
+    assert.equal(f.notMeasurableReason, "On 1 reopened case, the close date we read is its first close, though a later close is recorded, so we can't tell from the close date how long these cases took after their first close.");
   });
 
   test("exactly half is not most: a pass, never an issue", () => {
@@ -241,11 +353,31 @@ describe("reopened cases (C2)", () => {
 });
 
 describe("cases closed straight (C3)", () => {
-  test("raised over the line, with the worst segment by starting status, priority or origin, and no cause claimed", () => {
+  test("raised over the line, titled by it, the line said as ours, the highest segment named, and no cause claimed", () => {
     const specs: CaseSpec[] = [...quick(200), ...Array.from({ length: 100 }, (_, i): CaseSpec => ({ made: 50 + i, steps: [["Duplicate", 0.2]], origin: "Web" }))];
     const f = one(on(specs), "svc.closed-straight");
     assert.equal(f.status, "issue");
-    assert.match(textOf(f), /^Of the 300 cases made between .*, 100 \(33.3%\) were closed straight from the status they started in, with no other status between\. Worst by origin: Web, at \d+(\.\d)?%\. Some may be duplicates, spam or cases closed by automation, and some may be questions answered at once: the statuses alone can't tell them apart\.$/);
+    assert.equal(f.title, "More than 25% of cases are closed straight from the status they started in");
+    assert.match(textOf(f), /^Of the 300 cases made between .*, 100 \(33.3%\) were closed straight from the status they started in, with no other status between\. That is over our line of 25%\. Highest by (origin: Web|priority: Medium), at \d+(\.\d)?%\. Some may be duplicates, spam or cases closed by automation, and some may be questions answered at once: the statuses alone can't tell them apart\.$/);
+  });
+
+  test("raised by one segment alone: titled by that segment and its line, never \"many\"", () => {
+    const specs: CaseSpec[] = [...quick(270), ...Array.from({ length: 30 }, (_, i): CaseSpec => ({ made: 50 + i, steps: [["Duplicate", 0.2]], origin: "Fax" }))];
+    const f = one(on(specs), "svc.closed-straight");
+    assert.equal(f.status, "issue");
+    assert.equal(f.title, "More than 50% of cases with origin Fax are closed straight from the status they started in");
+    assert.match(textOf(f), /The total is within our line of 25%, but by origin, Fax is at 100% \(30 of 30\), over our line of 50% for any one\./);
+  });
+
+  test("a segment is never named where every case shares it", () => {
+    const specs: CaseSpec[] = [...quick(200), ...Array.from({ length: 100 }, (_, i): CaseSpec => ({ made: 50 + i, steps: [["Duplicate", 0.2]] }))].map((x) => ({ ...x, origin: "Email", priority: "High" }));
+    const f = one(on(specs), "svc.closed-straight");
+    assert.doesNotMatch(textOf(f), /by (origin|priority)/);
+  });
+
+  test("closed cases with no recorded status change aren't counted, and the sentence says how many", () => {
+    const specs: CaseSpec[] = [...quick(300), ...Array.from({ length: 5 }, (_, i): CaseSpec => ({ made: 60 + i, start: "Closed", steps: [] }))];
+    assert.match(textOf(one(on(specs), "svc.closed-straight")), / 5 cases closed with no recorded status change aren't counted\./);
   });
 
   test("a case not yet closed isn't counted as closed straight, and the sentence says how many", () => {
@@ -314,7 +446,9 @@ describe("the org's words", () => {
     }).concat(Array.from({ length: 30 }, (_, i): CaseSpec => ({ made: 1 + (i % 10), steps: [["Working_9", 0.2], ["Waiting", 0.4]] })));
 
   test("every status in a sentence is marked as the org's, whatever it holds", () => {
-    const a = on(hostileSpecs(), { statuses: HOSTILE });
+    // With a backlog waiting in the status labelled "Closed", so the stuck check names it.
+    const backlog = stuckCases({ backlog: true, waiting: true }).map((x) => ({ ...x, steps: x.steps.map(([t, d]): [string, number] => [t === "Working" ? "Working_9" : t === "Closed" ? "Done" : t, d]) }));
+    const a = on([...hostileSpecs(), ...backlog], { statuses: HOSTILE });
     let seen = 0;
     for (const f of all(a).filter((x) => NEW_RULES.includes(x.ruleId))) {
       for (const field of ["title", "summary", "recommendation", "notMeasurableReason"] as const) {
@@ -336,21 +470,24 @@ describe("the org's words", () => {
     assert.ok(seen > 0);
   });
 
-  test("each hostile name, as the status the stuck check names, is in its sentence and marked whole", () => {
-    const waiting = Array.from({ length: 30 }, (_, i): CaseSpec => ({ made: 30 + i, priority: ["High", "Medium", "Low"][i % 3]!, origin: ["Email", "Web", "Phone"][Math.floor(i / 3) % 3]!, steps: [["Working", 0.25], ["Waiting", 0.5]] }));
-    const NAMES = ["Stage 9 of 12, 50% done", "Closed", "ask jane.doe@example.com <b>now</b>", "500000000000001", "500000000000001AAA", "Mary Smith", "Mary Smith ".repeat(27).trim(), "<script>x</script> 100%"];
+  test("each hostile name, as the status the stuck check names, is in its sentence and marked whole, or left out where it would read as a person", () => {
+    const NAMES = ["Stage 9 of 12, 50% done", "Closed", "<script>x</script> 100%", "ask jane.doe@example.com <b>now</b>", "500000000000001", "500000000000001AAA", "Mary Smith", "Mary Smith ".repeat(27).trim()];
+    const ALWAYS_SAID = new Set(["Stage 9 of 12, 50% done", "Closed", "<script>x</script> 100%"]);
+    const NEVER_SAID = new Set(["ask jane.doe@example.com <b>now</b>", "500000000000001", "500000000000001AAA"]);
     for (const name of NAMES) {
       const statuses = CASE_PATH_STATUSES.map((st) => (st.ApiName === "Waiting" ? { ...st, MasterLabel: name } : st));
-      const f = one(on([...richCases(), ...waiting], { statuses }), "svc.stuck-in-status");
+      const f = one(on(stuckCases({ backlog: true, waiting: true }), { statuses }), "svc.stuck-in-status");
       const text = f.summary!;
+      assert.equal(f.status, "issue", name);
+      assert.doesNotMatch(text, /\[\[/, `${name}: never a token`);
       if (!text.includes(name)) {
-        // The privacy scrub took part of it out (an email, an id): the sentence then loses its marks, so it can never be served as ours.
-        assert.match(text, /\[\[(email|id|[a-z]+)[^\]]*\]\]/, `${name}: ${text}`);
-        assert.equal(f.orgWords?.summary, undefined, `${name}: a scrubbed sentence keeps no marks`);
+        assert.ok(!ALWAYS_SAID.has(name), `${name} should be said: ${text}`);
+        assert.doesNotMatch(text, / In .*, \d+ of \d+ open cases are past that status's line/, `${name}: the status sentence is left out`);
         continue;
       }
-      const at = text.indexOf(`In ${name}, `) >= 0 ? text.indexOf(`In ${name}, `) + 3 : text.indexOf(`stays in ${name} ended`) + 9;
-      assert.ok(at > 8, `${name}: ${text}`);
+      assert.ok(!NEVER_SAID.has(name), `${name} must never be written: ${text}`);
+      const at = text.indexOf(`In ${name}, `) + 3;
+      assert.ok(at > 3, `${name}: ${text}`);
       assert.ok(f.orgWords!.summary!.spans.some((sp) => sp.start === at && sp.end === at + name.length), `${name} marked whole: ${text}`);
     }
   });
