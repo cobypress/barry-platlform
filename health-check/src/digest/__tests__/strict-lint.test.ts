@@ -51,10 +51,16 @@ async function runs(): Promise<Record<string, StrictShadow>> {
   for (const [name, options] of Object.entries(synthetic)) out[name] = await shadowOf((await runFromRecording(options)).dir);
   const first = await runFromRecording();
   const stages = stagesOf(first.dir);
-  const cal = (o: Record<string, unknown> = {}) => automaticCalibration(stages, { orgId: first.run.orgId, at: "2026-10-31T09:00:00.000Z", currency: "GBP", ...o }).calibration;
+  const cal = (answer?: Record<string, string>) => {
+    const parsed = answer ? parseStageAnswer(answer) : null;
+    if (parsed === "malformed") throw new Error("The stage answer is malformed.");
+    const built = automaticCalibration(stages, { orgId: first.run.orgId, at: "2026-10-31T09:00:00.000Z", currency: "GBP", stageAnswer: parsed });
+    if (!built.ok) throw new Error(built.reason);
+    return built.calibration;
+  };
   const ALL = { "Closed Lost": "lost", "Closed Lost - No Budget": "lost", "Closed No Decision": "no_decision" };
   out["stages/none"] = await shadowOf((await runFromRecording({ calibration: cal(), reviewMode: "automatic", transport: new AutomaticReplay() })).dir);
-  out["stages/answered"] = await shadowOf((await runFromRecording({ calibration: cal({ stageAnswer: parseStageAnswer(ALL) }), reviewMode: "automatic", transport: new AutomaticReplay() })).dir);
+  out["stages/answered"] = await shadowOf((await runFromRecording({ calibration: cal(ALL), reviewMode: "automatic", transport: new AutomaticReplay() })).dir);
   const through = deals(60, USUAL, 30, 60);
   const skip = [...through, ...deals(30, SKIPS, 25, 60)];
   const orgs = {
