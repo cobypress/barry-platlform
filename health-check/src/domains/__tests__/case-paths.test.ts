@@ -9,7 +9,7 @@ import { COUNTED_WHEN_MEASURED, INSIGHT_METRICS, INSIGHT_RULES, scoreDomains } f
 import { ALL_MODULES, SERVICE_CLOUD_MODULES } from "../index.ts";
 import { casePathsModule, withCasePaths } from "../service/index.ts";
 import { serviceOperationsModule } from "../service/operations.ts";
-import { LEAST_LAG_DAYS, lineSaid, snapshotAt, steadyMarginOf, steadyShare, STUCK_BAR, type SnapCase } from "../service/paths.ts";
+import { LEAST_LAG_DAYS, lineSaid, snapshotAt, steadyMarginOf, steadyShare, STUCK_BAR, survival, type SnapCase } from "../service/paths.ts";
 import { zBar } from "../historic-pipeline/paths/insights.ts";
 import type { AnalysisOutput } from "../../engine/evaluate.ts";
 import type { Finding, Metric } from "../../schemas/index.ts";
@@ -240,7 +240,7 @@ describe("open cases past their status's line, against earlier weeks (C1)", () =
   test("a steady org: today is set beside a steady queue and its own earlier weeks, and nothing is raised", () => {
     const f = one(on(stuckCases()), "svc.stuck-in-status");
     assert.equal(f.status, "passed", textOf(f));
-    assert.match(textOf(f), /^Today \d+ of \d+ open cases \([\d.]+%\) have been in their status longer than 75% of the stays that began there between 120 and 30 days earlier\. With your cases' own stay times, a steady queue would have about [\d.]+% past that point\. On the same day of the week in the \d+ earlier weeks we could compare, back to .*, the share was a median of [\d.]+%, and 90% of those weeks were at or below [\d.]+%\. Days are calendar days\. We raise this only when today's share is above [\d.]+% and at least \d+ points above the median of [\d.]+%, or at least \d+ points above the steady [\d.]+%, and it isn't\.$/);
+    assert.match(textOf(f), /^Today \d+ of \d+ open cases \([\d.]+%\) have been in their status longer than 75% of the stays that began there between 120 and 30 days earlier\. With your cases' own stay times, a steady queue would have about [\d.]+% past that point\. On the same day of the week in the \d+ earlier weeks we could compare, back to .*, the share was a median of [\d.]+%, and 90% of those weeks were at or below [\d.]+%\. Days are calendar days\. We raise this only when today's share is above [\d.]+% and at least \d+ points above the median of [\d.]+%, and at least \d+ points above the steady [\d.]+%, or when 5 or more open cases have been in their status more than 2 times as long as any stay there that ended, and neither is so\.$/);
     // The steady share, from the stays themselves, is close to what the steady org shows.
     assert.ok(Math.abs(f.facts!.steady! - f.facts!.rate!) < 5, JSON.stringify(f.facts));
   });
@@ -248,21 +248,38 @@ describe("open cases past their status's line, against earlier weeks (C1)", () =
   test("a backlog building in the last month is raised, naming the status, its line rounded up, which comparison it exceeds, and the lines as ours", () => {
     const f = one(on(stuckCases({ backlog: true, waiting: true })), "svc.stuck-in-status");
     assert.equal(f.status, "issue", textOf(f));
-    assert.match(textOf(f), / In Waiting on Customer, \d+ of \d+ open cases are past that status's line: 75% of the stays that began there between 120 and 30 days earlier ended within [\d.]+ days?\. That is more than both what was usual in earlier weeks and what a steady queue would have\. We raise this when today's share is above [\d.]+% and at least \d+ points above the median of [\d.]+%, or at least \d+ points above the steady [\d.]+%: these lines are ours\.$/);
+    assert.match(textOf(f), / In Waiting on Customer, \d+ of \d+ open cases are past that status's line: 75% of the stays that began there between 120 and 30 days earlier ended within [\d.]+ days?\. That is more than both what was usual in earlier weeks and what a steady queue would have\. We raise this when today's share is above [\d.]+% and at least \d+ points above the median of [\d.]+%, and at least \d+ points above the steady [\d.]+%, or when 5 or more open cases have been in their status more than 2 times as long as any stay there that ended: these lines are ours\.$/);
   });
 
-  test("a block of cases left in a status all year reads as usual against earlier weeks, and is raised against a steady queue", () => {
+  test("a block of cases left in a status all year reads as usual against earlier weeks, and is raised as far older than any stay there that ended", () => {
     const block = Array.from({ length: 30 }, (_, i): CaseSpec => ({ made: 300 + i, priority: ["High", "Medium", "Low"][i % 3]!, origin: ["Email", "Web", "Phone"][i % 3]!, steps: [["Working", 0.04]] }));
     const f = one(on([...stuckCases(), ...block]), "svc.stuck-in-status");
     assert.equal(f.status, "issue", textOf(f));
-    assert.match(textOf(f), / That is more than what a steady queue would have\./);
+    assert.match(textOf(f), / 30 open cases have been in their status more than 2 times as long as the longest stay there that ended in the year we read, all of them in Working\./);
+    assert.doesNotMatch(textOf(f), /That is more than/);
   });
 
-  test("a stay not yet ended counts in the steady share at its length so far, never left out", () => {
-    // Three two-day stays and one begun 63 days ago and still going: leaving that one out would say no case should be past the line.
-    const snap = snapshotAt(withStays([[60, 2], [61, 2], [62, 2], [63, 200]], 0), NOW, 0, 3);
+  test("a stay not yet ended is counted to its age and then censored, never as ended (Kaplan–Meier)", () => {
+    // Twenty two-day stays and one begun 63 days ago and still going: it stays in the curve, and its time counts.
+    const stays = withStays([...Array.from({ length: 20 }, (_, i): [number, number] => [60 + i * 0.01, 2]), [63, 200]], 0);
+    const snap = snapshotAt(stays, NOW, 0, 3);
     assert.equal(snap.lines.get("Working"), 2);
-    assert.ok(snap.expected.get("Working")! > 0.8, String(snap.expected.get("Working")));
+    assert.ok(snap.expected.get("Working")! > 0.5, String(snap.expected.get("Working")));
+    assert.deepEqual(survival([{ days: 1, ended: true }, { days: 2, ended: false }, { days: 3, ended: true }]).map((p) => [p.t, Math.round(p.s * 1000) / 1000]), [[1, 0.667], [3, 0]]);
+  });
+
+  test("a status whose stays leave too many still running past the longest seen has no line: the history doesn't cover its tail", () => {
+    const snap = snapshotAt(withStays([[60, 2], [61, 2], [62, 2], [63, 200]], 0), NOW, 0, 3);
+    assert.equal(snap.lines.has("Working"), false);
+  });
+
+  test("a status nobody has entered lately, whose open cases are far older than any stay there that ended: raised, never expected", () => {
+    // Waiting was used only 200 to 260 days ago, two-day stays; six cases have sat in it for 150 days.
+    const old = Array.from({ length: 30 }, (_, i): CaseSpec => ({ made: 200 + i * 2, steps: [["Working", 0.5], ["Waiting", 1], ["Closed", 3]] }));
+    const left = Array.from({ length: 6 }, (_, i): CaseSpec => ({ made: 150 + i, steps: [["Working", 0.5], ["Waiting", 1]] }));
+    const f = one(on([...stuckCases(), ...old, ...left]), "svc.stuck-in-status");
+    assert.equal(f.status, "issue", textOf(f));
+    assert.match(textOf(f), / 6 open cases have been in their status more than 2 times as long as the longest stay there that ended in the year we read, all of them in Waiting on Customer\./);
   });
 
   test("the steady margin: 10 points, the z bar's points at today's count, or 30% of the steady share, whichever is most", () => {
@@ -306,8 +323,8 @@ describe("open cases past their status's line, against earlier weeks (C1)", () =
     assert.equal(t.since, from);
   });
 
-  test("too few earlier weeks: the steady comparison alone, and said; too few open cases today: not measurable", () => {
-    assert.match(textOf(one(on(stuckCases().filter((x) => x.made < 150)), "svc.stuck-in-status")), / No earlier week had 20 or more open cases with a line to compare with\. Days are calendar days\. We raise this only when today's share is at least \d+ points above the steady [\d.]+%, and it isn't\.$/);
+  test("too few earlier weeks: the share isn't compared, and said; too few open cases today: not measurable", () => {
+    assert.match(textOf(one(on(stuckCases().filter((x) => x.made < 150)), "svc.stuck-in-status")), / No earlier week had 20 or more open cases with a line to compare with\. Days are calendar days\. We compare today's share only beside enough earlier weeks, so we raise this now only when 5 or more open cases have been in their status more than 2 times as long as any stay there that ended, and it isn't so\.$/);
     assert.match(textOf(one(on(stuckCases({ perDay: 2 })), "svc.stuck-in-status")), /^\d+ open cases? (is|are) in a status with a line today, below the calibrated minimum of 20\.$/);
   });
 
@@ -538,16 +555,14 @@ describe("scoring", () => {
     assert.deepEqual(scoreDomains(["service_operations"], added as Finding[]), base);
   });
 
-  test("the synthetic org's service operations score with the switch on, and the overall, are said in decision 776", () => {
+  test("the synthetic org with the switch on: its open cases left in Working from before the year are raised as far older than any stay there that ended", () => {
     const a = analyseExtracts(extracts, { modules: ALL_MODULES, casePaths: true });
-    const off = analyseExtracts(extracts, { modules: ALL_MODULES });
-    const [s, o] = [scoreDomains(["service_operations"], a.findings)[0]!, scoreDomains(["service_operations"], off.findings)[0]!];
-    assert.equal(s.status, "measured");
-    assert.equal(o.status, "measured");
-    assert.ok(s.status === "measured" && o.status === "measured" && s.score <= o.score);
-    assert.equal(loadCalibration().minSample, 20);
-    assert.ok(a.findings.some((f) => f.ruleId === "svc.stuck-in-status" && f.status === "issue"));
+    const f = a.findings.find((x) => x.ruleId === "svc.stuck-in-status")!;
+    assert.equal(f.status, "issue", textOf(f));
+    assert.match(textOf(f), /^\d+ open cases have been in their status more than 2 times as long as the longest stay there that ended in the year we read, all of them in Working\. No open case is in a status with a line today, below the calibrated minimum of 20\. We raise this when 5 or more open cases have been in their status more than 2 times as long as any stay there that ended: that line is ours\.$/);
+    assert.ok(f.evidence.at(-1)!.exclusions.some((e) => /too many of them still running to show how long they last/.test(e)), f.evidence.at(-1)!.exclusions.join(" | "));
     const cases = (extracts.get(serviceCasesExtractor.id) as { open: { data: unknown[] } }).open.data.length;
     assert.ok(cases > 0);
+    assert.equal(loadCalibration().minSample, 20);
   });
 });

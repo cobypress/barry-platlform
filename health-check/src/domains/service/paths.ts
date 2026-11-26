@@ -486,49 +486,132 @@ export type Snapshot = { at: number; lines: Map<string, number>; targets: Target
 /** The points today must be above the steady share by: our least, the z bar's at `n` open cases, or a share of it, whichever is most. */
 export const steadyMarginOf = (steady: number, n: number): number => Math.max(STUCK_BAR.points, Math.ceil(STUCK_BAR.z * Math.sqrt((steady * (100 - steady)) / n)), Math.ceil(STUCK_BAR.relative * steady));
 
-/**
- * The share of open cases a steady queue would have past a line, from the stays themselves: a case open on a given day
- * is in a stay with probability in proportion to its length, so the share past the line is E[max(0, X − line)] / E[X]
- * over the stays X (length bias). A stay not yet ended counts at its length so far, the least it can be.
- * A shared helper for the deal check's version is being built apart (hc/stuck-expected); the two are to be reconciled.
- */
-export function steadyShare(stays: number[], line: number): number {
-  const total = stays.reduce((t, x) => t + x, 0);
-  return total > 0 ? stays.reduce((t, x) => t + Math.max(0, x - line), 0) / total : 0;
+/** A stay as the line reads it: its length in days, and whether it ended (else it is still running, at that age). */
+export type Stay = { days: number; ended: boolean };
+
+/** The share of stays still running past each time, Kaplan–Meier: a running stay counts until its age, then drops out. */
+export function survival(stays: Stay[]): Array<{ t: number; s: number }> {
+  const sorted = [...stays].sort((a, b) => a.days - b.days || Number(b.ended) - Number(a.ended));
+  const out: Array<{ t: number; s: number }> = [];
+  let atRisk = sorted.length;
+  let s = 1;
+  for (let i = 0; i < sorted.length; ) {
+    const t = sorted[i]!.days;
+    let ended = 0;
+    let gone = 0;
+    while (i < sorted.length && sorted[i]!.days === t) {
+      if (sorted[i]!.ended) ended++;
+      gone++;
+      i++;
+    }
+    if (ended > 0) {
+      s *= 1 - ended / atRisk;
+      out.push({ t, s });
+    }
+    atRisk -= gone;
+  }
+  return out;
+}
+
+/** The time by which the share still running first falls to or below `left`, or null when the stays seen never show it. */
+export function survivalAt(curve: Array<{ t: number; s: number }>, left: number): number | null {
+  return curve.find((p) => p.s <= left + 1e-12)?.t ?? null;
 }
 
 /**
+ * The share of open cases a steady queue would have past a line, from the stays' survival: a case open on a given day
+ * is in a stay with probability in proportion to its length, so the share past the line is the area under the survival
+ * curve beyond the line over the whole area (length bias), E[max(0, X − line)] / E[X]. Stays still running are counted
+ * to their age and then censored (Kaplan–Meier), never as ended, so the curve doesn't read short; the area stops where
+ * the stays seen stop, which the line's tail rule keeps to a small remainder. Given plain lengths, every one ended.
+ * A shared helper for the deal check's version is being built apart (hc/stuck-expected); the two are to be reconciled.
+ */
+export function steadyShare(stays: Array<number | Stay>, line: number): number {
+  const list = stays.map((x) => (typeof x === "number" ? { days: x, ended: true } : x));
+  const curve = survival(list);
+  // To the longest stay seen, ended or not: beyond the last end, the share still running carries on to there.
+  const tau = Math.max(0, ...list.map((x) => x.days));
+  let area = 0;
+  let beyond = 0;
+  let prevT = 0;
+  let prevS = 1;
+  for (const p of [...curve, { t: tau, s: curve.at(-1)?.s ?? 1 }]) {
+    if (p.t < prevT) continue;
+    area += prevS * (p.t - prevT);
+    beyond += prevS * Math.max(0, p.t - Math.max(prevT, line));
+    prevT = p.t;
+    prevS = p.s;
+  }
+  return area > 0 ? beyond / area : 0;
+}
+
+/**
+ * Open cases in a status this many times longer than the longest stay in it that ended in the year read, with the
+ * calibrated minimum of ended stays: raised whatever the line says, so a status nobody has entered lately, whose open
+ * cases are far older than any stay there ever ended, is never read as usual. At least FAR_MIN such cases.
+ */
+export const FAR_TIMES = 2;
+export const FAR_MIN = 5;
+
+/** Open cases far older than any ended stay in their status (FAR_TIMES), with that status's longest ended stay. */
+export function farPast(cases: SnapCase[], at: number, since: number, historyFrom: number, minSample: number): Array<{ id: string; status: Status; days: number; longest: number }> {
+  const ended = new Map<string, number[]>();
+  for (const x of cases) x.visits.forEach((v, i) => {
+    if (v.status.closed || v.start < since || v.end === null || v.end > at || (i === 0 && x.madeAt < historyFrom)) return;
+    ended.set(v.status.key, [...(ended.get(v.status.key) ?? []), daysOf(v.end - v.start)]);
+  });
+  const out: Array<{ id: string; status: Status; days: number; longest: number }> = [];
+  for (const x of cases) {
+    if (x.madeAt > at) continue;
+    const i = x.visits.findIndex((v) => v.start <= at && (v.end === null || v.end > at));
+    const v = i >= 0 ? x.visits[i]! : null;
+    if (!v || v.status.closed) continue;
+    const list = ended.get(v.status.key) ?? [];
+    if (list.length < minSample) continue;
+    const longest = Math.max(...list);
+    const days = daysOf(at - (i > 0 ? v.start : Math.max(x.madeAt, historyFrom)));
+    if (days > FAR_TIMES * longest) out.push({ id: x.id, status: v.status, days, longest });
+  }
+  return out;
+}
+
+/** A status's stays may leave at most this share still running beyond the longest seen; more, and its tail isn't covered. */
+export const TAIL_LEFT = 0.05;
+
+/**
  * The open cases at an instant and which were past their status's line then.
- * A status's line is the 75th percentile (nearest rank) of the stays that began
- * in it in the LOOKBACK_DAYS before, a stay not ended by then counted as the
- * longest there is: so the line uses nothing the day didn't know, and at least
- * 75% of those stays really ended within it. A case with no change of its own
+ * A status's line is the 75th percentile of the stays that began in it in the
+ * LOOKBACK_DAYS ending GAP_DAYS before the instant, read from their survival
+ * (Kaplan–Meier: a stay still running then counts to its age, never as ended),
+ * so the line uses nothing the day didn't know and doesn't read short. A status
+ * whose stays leave more than TAIL_LEFT still running past the longest seen has
+ * no line: the history doesn't cover its tail. A case with no change of its own
  * before the instant has been in its status since it was made or, if it was
  * made before the first change found, at least since then. Compared unrounded.
  */
 export function snapshotAt(cases: SnapCase[], at: number, historyFrom: number, minSample: number): Snapshot {
   const until = at - GAP_DAYS * DAY;
   const from = until - LOOKBACK_DAYS * DAY;
-  const stays = new Map<string, number[]>();
-  const sofar = new Map<string, number[]>();
+  const stays = new Map<string, Stay[]>();
   for (const x of cases) {
     x.visits.forEach((v, i) => {
       if (v.status.closed || v.start >= until || v.start < from) return;
       // A first stay of a case made before the history starts began at a time we can't see.
       if (i === 0 && x.madeAt < historyFrom) return;
       const ended = v.end !== null && v.end <= at;
-      stays.set(v.status.key, [...(stays.get(v.status.key) ?? []), ended ? daysOf(v.end! - v.start) : Infinity]);
-      sofar.set(v.status.key, [...(sofar.get(v.status.key) ?? []), daysOf((ended ? v.end! : at) - v.start)]);
+      stays.set(v.status.key, [...(stays.get(v.status.key) ?? []), { days: daysOf((ended ? v.end! : at) - v.start), ended }]);
     });
   }
   const lines = new Map<string, number>();
   const expected = new Map<string, number>();
-  for (const [key, days] of stays) {
-    if (days.length < minSample) continue;
-    const line = nearestRank(days, STAY_QUANTILE);
-    if (!Number.isFinite(line)) continue;
+  for (const [key, list] of stays) {
+    if (list.length < minSample) continue;
+    const curve = survival(list);
+    const line = survivalAt(curve, 1 - STAY_QUANTILE);
+    // Too many still running past the longest stay seen: the history doesn't show how long this status's stays last.
+    if (line === null || (curve.at(-1)?.s ?? 1) > TAIL_LEFT) continue;
     lines.set(key, line);
-    expected.set(key, steadyShare(sofar.get(key) ?? [], line));
+    expected.set(key, steadyShare(list, line));
   }
   const targets: Target[] = [];
   let noLine = 0;
@@ -577,13 +660,30 @@ export const stuckInStatus: Rule = {
     const noLine = today.noLine;
     const exclusions = [
       ...(noStatus ? [named(said`${plural(noStatus, "open case")} whose status we couldn't place: not in your case status settings, a closed status, or not where ${noStatus === 1 ? said`its` : said`their`} recorded changes end`, { noStatus })] : []),
-      ...(noLine ? [named(said`${plural(noLine, "open case")} in a status with fewer than ${minSample} stays begun between ${LINE_FROM_DAYS} and ${GAP_DAYS} days earlier, or too few of them ended, to set a line`, { noLine, minSample, lineFrom: [LINE_FROM_DAYS, "day"], gap: [GAP_DAYS, "day"] })] : []),
+      ...(noLine ? [named(said`${plural(noLine, "open case")} in a status with fewer than ${minSample} stays begun between ${LINE_FROM_DAYS} and ${GAP_DAYS} days earlier, or too many of them still running to show how long they last, to set a line`, { noLine, minSample, lineFrom: [LINE_FROM_DAYS, "day"], gap: [GAP_DAYS, "day"] })] : []),
     ];
     const evidence = [...c.evidence, ctx.ev(c.openSource, { count: today.targets.length, note: "Open cases now, in a status with a line to compare", exclusions })];
     const n = today.targets.length;
+    // Open cases far older than any stay in their status that ended in the year: raised whatever the lines say.
+    const far = farPast(c.universe, now, Math.max(c.yearStart, c.historyFrom), c.historyFrom, minSample);
+    const farCount = far.length;
+    const overFar = farCount >= FAR_MIN;
+    const farStatus = [...groupBy(far, (x) => x.status.key)].map(([, xs]) => xs).sort((a, b) => b.length - a.length)[0];
+    const farLabel = farStatus && sayable(ctx, farStatus[0]!.status.label) ? farStatus[0]!.status.label : null;
+    const farCore = !overFar
+      ? said``
+      : farLabel
+        ? farStatus!.length === farCount
+          ? named(said`${farCount} open cases have been in their status more than ${FAR_TIMES} times as long as the longest stay there that ended in the year we read, all of them in ${org(farLabel)}.`, { farCount, times: [FAR_TIMES, "ratio"] })
+          : named(said`${farCount} open cases have been in their status more than ${FAR_TIMES} times as long as the longest stay there that ended in the year we read, ${farStatus!.length} of them in ${org(farLabel)}.`, { farCount, times: [FAR_TIMES, "ratio"], farThere: farStatus!.length })
+        : named(said`${farCount} open cases have been in their status more than ${FAR_TIMES} times as long as the longest stay there that ended in the year we read.`, { farCount, times: [FAR_TIMES, "ratio"] });
+    const farSaid = overFar ? said` ${farCore}` : said``;
+    const farLine = named(said`${FAR_MIN} or more open cases have been in their status more than ${FAR_TIMES} times as long as any stay there that ended`, { farMin: FAR_MIN, times: [FAR_TIMES, "ratio"] });
     if (n < minSample) {
-      const few = n === 1 ? said`1 open case is` : named(said`${n} open cases are`, { n });
-      return { outcome: "not_measurable", reason: named(said`${few} in a status with a line today, below the calibrated minimum of ${minSample}.`, { minSample }), evidence };
+      const few = n === 0 ? said`No open case is` : n === 1 ? said`1 open case is` : named(said`${n} open cases are`, { n });
+      const thin = named(said`${few} in a status with a line today, below the calibrated minimum of ${minSample}.`, { minSample });
+      if (!overFar) return { outcome: "not_measurable", reason: thin, evidence };
+      return { ...farIssue(said`${farCore} ${thin} We raise this when ${farLine}: that line is ours.`, evidence, farLabel, new Set(far.map((x) => x.status.key)).size), facts: { far: farCount, n } };
     }
     const hits = today.targets.filter((t) => t.past).length;
     const rate = pct(hits, n);
@@ -607,7 +707,7 @@ export const stuckInStatus: Rule = {
     const shareOf = (snap: Snapshot): number => pct(snap.targets.filter((t) => t.past).length, snap.targets.length);
     const shares = weeks.map(shareOf);
     const enoughWeeks = useWeeks && counted >= MIN_SNAPSHOTS;
-    if (!useSteady && !enoughWeeks) {
+    if (STUCK_BAR.mode === "weeks" && !enoughWeeks) {
       const fewWeeks = counted === 0 ? said`no earlier week` : counted === 1 ? said`only 1 earlier week` : named(said`only ${counted} earlier weeks`, { counted });
       return { outcome: "not_measurable", reason: named(said`We could set today's open cases beside ${fewWeeks} with ${minSample} or more open cases in a status with a line, and we need ${MIN_SNAPSHOTS} to say what is usual for your cases.`, { minSample, minSnapshots: MIN_SNAPSHOTS }), evidence };
     }
@@ -633,12 +733,18 @@ export const stuckInStatus: Rule = {
     const lead = said`${todaySaid}${steadySaid}${weeksSaid} Days are calendar days.`;
     const overWeeks = enoughWeeks && rate > usual && rate - middle >= margin;
     const overSteady = useSteady && rate - steady >= steadyMargin;
+    // Raised on the shares only when today is over BOTH: a steady queue alone reads a seasonal org's quiet weeks as stuck
+    // (the second generator: seasonal arrivals raised in 67% of orgs on the steady share alone), and earlier weeks alone
+    // read a block that has sat all year as usual (which the far clause catches). In the probes' "weeks" or "steady" mode,
+    // that comparison alone.
+    const overShare = STUCK_BAR.mode === "both" ? overWeeks && overSteady : STUCK_BAR.mode === "weeks" ? overWeeks : overSteady;
     const weeksLine = named(said`above ${usual}% and at least ${margin} points above the median of ${middle}%`, { usual: [usual, "percent"], margin: [margin, "points"], middle: [middle, "percent"] });
     const steadyLine = named(said`at least ${steadyMargin} points above the steady ${steady}%`, { steadyMargin: [steadyMargin, "points"], steady: [steady, "percent"] });
-    const lines = enoughWeeks && useSteady ? said`${weeksLine}, or ${steadyLine}` : enoughWeeks ? weeksLine : steadyLine;
+    const lines = STUCK_BAR.mode === "both" ? said`${weeksLine}, and ${steadyLine}` : STUCK_BAR.mode === "weeks" ? weeksLine : steadyLine;
     const facts = { hits, n, rate, steady, steadyMargin, weeks: counted, ...(enoughWeeks ? { median: middle, usual, margin } : {}), stayShare: STAY_SHARE, lookbackDays: LOOKBACK_DAYS };
-    if (!overWeeks && !overSteady) {
-      return { outcome: "pass", summary: said`${lead} We raise this only when today's share is ${lines}, and it isn't.`, evidence, segmentsChecked, facts };
+    if (!overShare && !overFar) {
+      const tail = STUCK_BAR.mode === "both" && !enoughWeeks ? said`We compare today's share only beside enough earlier weeks, so we raise this now only when ${farLine}, and it isn't so.` : said`We raise this only when today's share is ${lines}, or when ${farLine}, and neither is so.`;
+      return { outcome: "pass", summary: said`${lead} ${tail}`, evidence, segmentsChecked, facts: { ...facts, far: farCount } };
     }
     // The status with the most open cases past its line today, when its name can be written.
     const byStatus = [...groupBy(today.targets.filter((t) => t.past), (t) => t.status.key)].map(([key, ts]) => ({ key, past: ts.length, status: ts[0]!.status, there: today.targets.filter((t) => t.status.key === key).length }));
@@ -646,11 +752,11 @@ export const stuckInStatus: Rule = {
     const statusSaid = top
       ? named(said` In ${org(top.status.label)}, ${top.past} of ${top.there} open ${top.there === 1 ? said`case is` : said`cases are`} past that status's line: ${STAY_SHARE}% of the stays that began there between ${LINE_FROM_DAYS} and ${GAP_DAYS} days earlier ended within ${lineSaid(today.lines.get(top.key)!)}.`, { topPast: top.past, topThere: top.there, stayShare: [STAY_SHARE, "percent"], lineFrom: [LINE_FROM_DAYS, "day"], gap: [GAP_DAYS, "day"] })
       : said``;
-    const which = overWeeks && overSteady ? said`both what was usual in earlier weeks and what a steady queue would have` : overWeeks ? said`what was usual in earlier weeks` : said`what a steady queue would have`;
+    const which = !overShare ? said`` : overWeeks && overSteady ? said` That is more than both what was usual in earlier weeks and what a steady queue would have.` : overWeeks ? said` That is more than what was usual in earlier weeks.` : said` That is more than what a steady queue would have.`;
     return {
       outcome: "issue",
       title: said`More of your open cases are past the usual time in their status than we would expect`,
-      summary: said`${lead}${statusSaid} That is more than ${which}. We raise this when today's share is ${lines}: these lines are ours.`,
+      summary: said`${lead}${overShare ? statusSaid : said``}${which}${farSaid} ${STUCK_BAR.mode === "both" && !enoughWeeks ? said`We compare today's share only beside enough earlier weeks, so we raise this now only when ${farLine}: that line is ours.` : said`We raise this when today's share is ${lines}, or when ${farLine}: these lines are ours.`}`,
       recommendation: said`Go through the open cases that have waited longest in each status and move each one on or close it, then look at why cases wait there.`,
       recommendationType: "change",
       severity: "medium",
@@ -661,10 +767,29 @@ export const stuckInStatus: Rule = {
       owner: OWNER,
       segmentsChecked,
       ...(top ? { subjects: [{ type: "status", label: top.status.label }] } : {}),
-      facts,
+      facts: { ...facts, far: farCount },
     };
   },
 };
+
+/** The stuck check raised on open cases far older than any ended stay alone, with too few others to compare. */
+function farIssue(summary: Said, evidence: Evidence[], label: string | null, statuses: number): Omit<Extract<RuleResult, { outcome: "issue" }>, "facts"> {
+  return {
+    outcome: "issue",
+    title: said`Some open cases have been in their status far longer than any case before them`,
+    summary,
+    recommendation: said`Go through the open cases that have waited longest in each status and move each one on or close it, then look at why cases wait there.`,
+    recommendationType: "change",
+    severity: "medium",
+    confidence: "medium",
+    evidence,
+    value,
+    effort: { size: "S" },
+    owner: OWNER,
+    segmentsChecked: [{ dimension: "status", segments: statuses }],
+    ...(label ? { subjects: [{ type: "status", label }] } : {}),
+  };
+}
 
 // ─── C2: reopened cases, the time before their first close and after it ─────
 
