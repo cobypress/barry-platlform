@@ -23,6 +23,7 @@ const SIGNED_OFF: string[] = [
   'src/domains/data-quality/index.ts: word("one")',
   'src/domains/historic-pipeline/index.ts: word("one")',
   'src/domains/historic-pipeline/potential.ts: word("one")',
+  'src/domains/historic-pipeline/paths/insights.ts: word("one")',
   'src/domains/historic-pipeline/potential.ts: word("one")',
   'src/domains/historic-pipeline/potential.ts: word("one")',
   'src/domains/security/index.ts: word("one")',

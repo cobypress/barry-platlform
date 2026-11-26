@@ -6,6 +6,7 @@ import { fileURLToPath } from "node:url";
 import { digestDataset } from "../checked.ts";
 import { buildDigest } from "../build.ts";
 import { strictShadow, NAMED_VALUES_FILE, type StrictShadow } from "../strict.ts";
+import { NOT_FIGURES_FILE } from "../../engine/named.ts";
 import { automaticCalibration } from "../../connect/auto-calibration.ts";
 import { parseStageAnswer } from "../../connect/stage-outcomes.ts";
 import { buildReport } from "../../narrative/sections.ts";
@@ -35,7 +36,9 @@ async function shadowOf(dir: string, loaded = loadRun(dir)): Promise<StrictShado
   const report = buildReport(loaded.input);
   const digest = buildDigest({ report, pseudonyms: loaded.pseudonyms, inventory: null, madeAt: MADE });
   const named = existsSync(join(dir, NAMED_VALUES_FILE)) ? JSON.parse(readFileSync(join(dir, NAMED_VALUES_FILE), "utf8")) : {};
-  return strictShadow(digest, report, digestDataset(report, loaded.pseudonyms), named);
+  // And where its number words claim nothing (word(), DECISIONS.md 773), as the worker reads them.
+  const words = existsSync(join(dir, NOT_FIGURES_FILE)) ? JSON.parse(readFileSync(join(dir, NOT_FIGURES_FILE), "utf8")) : {};
+  return strictShadow(digest, report, digestDataset(report, loaded.pseudonyms), named, undefined, undefined, words);
 }
 
 async function runs(): Promise<Record<string, StrictShadow>> {
