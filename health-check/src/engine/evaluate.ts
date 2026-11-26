@@ -1,4 +1,5 @@
 import { createHash } from "node:crypto";
+import { namedIn, withNamedValues } from "./named.ts";
 import { stagesExtractor } from "../extract/opportunities.ts";
 import { guardPassedOn, marksOfMetric, orgValuesOf, rewordFinding, rewordMetric } from "./automatic-words.ts";
 import type { DomainModule } from "../domains/types.ts";
@@ -78,6 +79,12 @@ export type AnalysisOutput = {
    * to compare (`onlyIf`). Each one listed has a finding.
    */
   rulesRun: string[];
+  /**
+   * The values each finding's and metric's own sentences were named with as they
+   * were made (DECISIONS.md 768), by its id: for the strict check alone, kept in
+   * the run folder's named-values.json and nowhere else. Absent: none named.
+   */
+  named?: Record<string, Record<string, number>>;
 };
 
 /** Every finding of an analysis, the insights last: what the run folder and the console keep. */
@@ -370,7 +377,7 @@ export function analyse(input: AnalysisInput): AnalysisOutput {
   const outer = markingPeriods;
   markingPeriods = input.markPeriods === true;
   try {
-    return withOrgWords(() => analyseWithin(input));
+    return withNamedValues(() => withOrgWords(() => analyseWithin(input)));
   } finally {
     markingPeriods = outer;
   }
@@ -518,6 +525,12 @@ function analyseWithin(input: AnalysisInput): AnalysisOutput {
     .map((m) => (m.status === "not_measurable" && m.notMeasurableKind === undefined ? { ...m, notMeasurableKind: notMeasurableKind(m.reason) } : m))
     .map((m) => Metric.parse(pseudonyms.scrubDeep(m)));
   assumed = new Set();
+  // The values each metric's own texts were named with (DECISIONS.md 768), before any is reworded.
+  const namedValues: Record<string, Record<string, number>> = {};
+  for (const m of metrics) {
+    const values = namedIn([m.label, m.definition, ...m.assumptions, ...m.exclusions, m.status === "not_measurable" ? m.reason : null]);
+    if (values) namedValues[m.id] = values;
+  }
   const ctx: RuleContext = { ...base, metrics };
   const findings: Finding[] = [];
   const records: FindingRecords[] = [];
@@ -534,7 +547,13 @@ function analyseWithin(input: AnalysisInput): AnalysisOutput {
       currencyRead = false;
       noted = new Set();
       inRule = true;
-      findings.push(...runRule(rule, ctx, pseudonyms, records, assumed, () => (mode === "none" && currencyRead ? (r) => withoutCurrency(r, noCurrency()) : null), noted));
+      const made = runRule(rule, ctx, pseudonyms, records, assumed, () => (mode === "none" && currencyRead ? (r) => withoutCurrency(r, noCurrency()) : null), noted);
+      // And each finding's, from its own texts as made, before any is reworded (DECISIONS.md 768).
+      for (const f of made) {
+        const values = namedIn([f.title, f.summary, f.recommendation, f.notMeasurableReason, ...(f.value.kind === "not_sized" ? [f.value.reason] : [f.value.period, ...f.value.assumptions])]);
+        if (values) namedValues[f.id] = values;
+      }
+      findings.push(...made);
       inRule = false;
     }
   }
@@ -557,7 +576,8 @@ function analyseWithin(input: AnalysisInput): AnalysisOutput {
       manualSteps: [...raised.values()],
       records: records.filter((r) => issues.has(r.findingId)),
       rulesRun,
+      named: namedValues,
     };
   }
-  return { findings: findings.filter((f) => !INSIGHT_RULES.has(f.ruleId)), insights: findings.filter((f) => INSIGHT_RULES.has(f.ruleId)), metrics: metrics.filter((m) => !INSIGHT_METRICS.has(m.id)), insightMetrics: metrics.filter((m) => INSIGHT_METRICS.has(m.id)), manualSteps: [...raised.values()], records: records.filter((r) => issues.has(r.findingId)), rulesRun };
+  return { findings: findings.filter((f) => !INSIGHT_RULES.has(f.ruleId)), insights: findings.filter((f) => INSIGHT_RULES.has(f.ruleId)), metrics: metrics.filter((m) => !INSIGHT_METRICS.has(m.id)), insightMetrics: metrics.filter((m) => INSIGHT_METRICS.has(m.id)), manualSteps: [...raised.values()], records: records.filter((r) => issues.has(r.findingId)), rulesRun, named: namedValues };
 }
