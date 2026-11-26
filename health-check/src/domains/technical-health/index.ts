@@ -1,5 +1,5 @@
 import { apexExtractor, metadataExtractor, type ApexClassRow, type ApexTriggerRow } from "../../extract/automation.ts";
-import { named } from "../../engine/named.ts";
+import { each, named } from "../../engine/named.ts";
 import { componentChangesExtractor } from "../../extract/component-changes.ts";
 import { customObjectsExtractor, orgExtractor, recordCountsExtractor } from "../../extract/configuration.ts";
 import { apiLimitsExtractor } from "../../extract/integrations.ts";
@@ -447,7 +447,7 @@ const storageUse: Rule = {
     return {
       outcome: "issue",
       title: past ? said`Storage is past the allowance` : said`Storage is close to the allowance`,
-      summary: said`${sentence} Past the allowance, Salesforce can stop new records or files being saved until space is freed or more is bought.${largest.length ? said` The objects with the most records: ${joinSaid(largest.map((o) => named(said`${org(labelsOf(ctx).object(o.name))} (${grouped(o.count)})`, { records: o.count })), ", ")}.` : ""}`,
+      summary: named(said`${sentence} Past the allowance, Salesforce can stop new records or files being saved until space is freed or more is bought.${largest.length ? said` The objects with the most records: ${joinSaid(largest.map((o) => said`${org(labelsOf(ctx).object(o.name))} (${grouped(o.count)})`), ", ")}.` : ""}`, each(largest, (o) => ({ records: o.count }))),
       recommendation: past
         ? said`Archive or delete what you no longer need, starting with the largest objects and old files, and arrange extra storage now, because you are past the allowance.`
         : said`Archive or delete what you no longer need, starting with the largest objects and old files, and plan any extra storage before you reach the limit.`,

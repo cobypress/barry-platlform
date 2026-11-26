@@ -315,7 +315,7 @@ const firstReply: Rule = {
     return {
       outcome: "issue",
       title: said`Customers who email wait too long for a first reply`,
-      summary: said`Email cases waited a median ${med} hours for a first reply, and a quarter waited more than ${p75} hours. ${result.hits} of ${answered.length} replied cases (${result.rate}%) took longer than ${FIRST_REPLY_HOURS} hours.${worst ? named(said` Worst by ${dimensionWords(worst.dimension)}: ${org(worst.key)}, at ${worst.rate}%.`, { worstPct: worst.rate }) : ""}`,
+      summary: named(said`Email cases waited a median ${med} hours for a first reply, and a quarter waited more than ${p75} hours. ${result.hits} of ${answered.length} replied cases (${result.rate}%) took longer than ${FIRST_REPLY_HOURS} hours.${worst ? said` Worst by ${dimensionWords(worst.dimension)}: ${org(worst.key)}, at ${worst.rate}%.` : ""}`, { worstPct: worst?.rate }),
       recommendation: said`Send an automatic acknowledgement with a realistic reply time, route email cases into a watched queue, and set a first-response milestone so the wait is visible.`,
       recommendationType: "change",
       severity: "medium",

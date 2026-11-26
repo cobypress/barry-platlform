@@ -1,5 +1,5 @@
 import { metadataExtractor, apexExtractor } from "../../extract/automation.ts";
-import { named as valued } from "../../engine/named.ts";
+import { each, named as valued } from "../../engine/named.ts";
 import { componentChangesExtractor } from "../../extract/component-changes.ts";
 import {
   CORE_OBJECTS,
@@ -220,7 +220,7 @@ const undocumentedFields: Rule = {
     return {
       outcome: "issue",
       title: said`Most custom fields don't say what they're for`,
-      summary: said`Custom fields with neither help text nor a description: ${bare.length} of ${fields.length} (${rate}%), most on ${joinSaid(byObject.slice(0, 3).map((x) => valued(said`${org(labels.object(x.o))} (${x.n})`, { bare: x.n })), ", ")}. Users see no explanation when they fill these in, and whoever maintains the org can't tell what each one is for.`,
+      summary: valued(said`Custom fields with neither help text nor a description: ${bare.length} of ${fields.length} (${rate}%), most on ${joinSaid(byObject.slice(0, 3).map((x) => said`${org(labels.object(x.o))} (${x.n})`), ", ")}. Users see no explanation when they fill these in, and whoever maintains the org can't tell what each one is for.`, each(byObject.slice(0, 3), (x) => ({ bare: x.n }))),
       recommendation: said`Add help text to the fields people fill in and a description to every field you keep, and retire the ones nobody can explain.`,
       recommendationType: "change",
       severity: "low",

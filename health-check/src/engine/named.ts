@@ -36,6 +36,15 @@ export function named<T extends string>(text: T, values: Readonly<Record<string,
   return text;
 }
 
+/** Each item's values under one set of names, the second and later as "name#2" and on, for a sentence that lists them. */
+export function each<T>(items: readonly T[], values: (item: T) => Readonly<Record<string, number | null | undefined>>): Record<string, number | null | undefined> {
+  const out: Record<string, number | null | undefined> = {};
+  items.forEach((item, i) => {
+    for (const [name, value] of Object.entries(values(item))) out[i === 0 ? name : `${name}#${i + 1}`] = value;
+  });
+  return out;
+}
+
 /** Runs one analysis with its own ledger, as `said`'s marks are (DECISIONS.md 655). */
 export function withNamedValues<T>(run: () => T): T {
   const outer = ledger;

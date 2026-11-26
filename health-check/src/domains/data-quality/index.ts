@@ -1,5 +1,5 @@
 import { duplicateRulesExtractor, recordCountsExtractor, schemaExtractor } from "../../extract/configuration.ts";
-import { named } from "../../engine/named.ts";
+import { each, named } from "../../engine/named.ts";
 import { crmHealthExtractor, opportunitiesExtractor, stagesExtractor } from "../../extract/opportunities.ts";
 import { leadsExtractor } from "../../extract/leads.ts";
 import { actionRecordsExtractor } from "../../extract/action-records.ts";
@@ -319,7 +319,7 @@ const lossReasonMissing: Rule = {
     return {
       outcome: "issue",
       title: said`You can't see why deals are being lost`,
-      summary: said`Lost deals with no loss reason: ${result.hits} of ${result.n} (${result.rate}%).${worst ? named(said` Worst by ${dimensionWords(worst.dimension)}: ${org(worst.key)}, at ${worst.rate}%.`, { worstPct: worst.rate }) : ""}`,
+      summary: named(said`Lost deals with no loss reason: ${result.hits} of ${result.n} (${result.rate}%).${worst ? said` Worst by ${dimensionWords(worst.dimension)}: ${org(worst.key)}, at ${worst.rate}%.` : ""}`, { worstPct: worst?.rate }),
       recommendation: said`Make a reason required when a deal is lost, and keep the list short enough to be used honestly.`,
       recommendationType: "change",
       severity: "medium",
@@ -368,7 +368,7 @@ const inactiveRecordOwners: Rule = {
       outcome: "issue",
       title: said`Customer records belong to people who've left`,
       // The objects are our own fixed three.
-      summary: said`Accounts, contacts and leads with an inactive owner: ${strandedTotal} of ${total} (${joinSaid(objects.map((o) => named(said`${o}: ${stranded[o]!} of ${totals[o]!}`, { stranded: stranded[o]!, of: totals[o]! })), ", ")}).`,
+      summary: named(said`Accounts, contacts and leads with an inactive owner: ${strandedTotal} of ${total} (${joinSaid(objects.map((o) => said`${o}: ${stranded[o]!} of ${totals[o]!}`), ", ")}).`, each(objects, (o) => ({ stranded: stranded[o]!, of: totals[o]! }))),
       recommendation: said`Reassign these records in bulk, and make reassignment part of your leaver process.`,
       recommendationType: "change",
       severity: "medium",
@@ -685,7 +685,7 @@ const recordTypeUse: Rule = {
     return {
       outcome: "issue",
       title,
-      summary: said`${named(said`We could judge ${plural(judged.length, "record type")} of your own, on objects with at least ${RECORD_TYPE_MIN_RECENT} records made in the last 12 months.`, { minRecent: RECORD_TYPE_MIN_RECENT, recentMonths: 12 })} ${joinSaid(sentences, " ")} An active record type is still offered to anyone whose profile has it, and its page layouts and picklist values still have to be kept up.`,
+      summary: named(said`We could judge ${plural(judged.length, "record type")} of your own, on objects with at least ${RECORD_TYPE_MIN_RECENT} records made in the last 12 months. ${joinSaid(sentences, " ")} An active record type is still offered to anyone whose profile has it, and its page layouts and picklist values still have to be kept up.`, { minRecent: RECORD_TYPE_MIN_RECENT, recentMonths: 12 }),
       recommendation: said`Deactivate ${plural(flagged.length, "record type")} once you've checked that no profile defaults to ${one ? "it" : "them"} and no flow, Apex or integration names ${one ? "it" : "them"}.`,
       blockedRecommendation: said`Review ${plural(flagged.length, "record type")} with the people who own ${owners}; we aren't recommending deactivating ${one ? "it" : "them"}, because we can't see which profiles default to ${one ? "it" : "them"} or which flows, Apex and integrations name ${one ? "it" : "them"}.`,
       recommendationType: "deactivate",

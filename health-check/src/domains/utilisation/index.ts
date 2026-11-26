@@ -1,5 +1,5 @@
 import { fieldDescribeExtractor } from "../../extract/fields.ts";
-import { named as valued } from "../../engine/named.ts";
+import { each, named as valued } from "../../engine/named.ts";
 import { apexExtractor, metadataExtractor, scheduledJobsExtractor } from "../../extract/automation.ts";
 import { componentChangesExtractor } from "../../extract/component-changes.ts";
 import { orgExtractor, recordCountsExtractor, schemaExtractor } from "../../extract/configuration.ts";
@@ -247,7 +247,7 @@ const unassignedSeats: Rule = {
     return {
       outcome: "issue",
       title: said`You're paying for seats nobody holds`,
-      summary: said`Unassigned seats: ${seats}. ${joinSaid(spare.map((l) => valued(said`${l.TotalLicenses - l.UsedLicenses} of ${l.TotalLicenses} ${org(l.Name)}`, { spare: l.TotalLicenses - l.UsedLicenses, of: l.TotalLicenses })), "; ")}.`,
+      summary: valued(said`Unassigned seats: ${seats}. ${joinSaid(spare.map((l) => said`${l.TotalLicenses - l.UsedLicenses} of ${l.TotalLicenses} ${org(l.Name)}`), "; ")}.`, each(spare, (l) => ({ spare: l.TotalLicenses - l.UsedLicenses, of: l.TotalLicenses }))),
       recommendation: said`Reduce these seats at your next renewal, keeping whatever headroom your hiring plan needs.`,
       recommendationType: "change",
       severity: "medium",
@@ -310,7 +310,7 @@ const packageSeats: Rule = {
         };
     const parts = [
       unused.length ? said`${joinSaid(unused.map((p) => said`${named(p)} (${plural(p.AllowedLicenses, "seat")})`), ", ")} ${unused.length === 1 ? "has" : "have"} nobody assigned at all` : null,
-      spare.length ? said`${joinSaid(spare.map((p) => valued(said`${named(p)} has ${idle(p)} of ${p.AllowedLicenses} seats unassigned`, { idle: idle(p), of: p.AllowedLicenses })), "; ")}` : null,
+      spare.length ? valued(said`${joinSaid(spare.map((p) => said`${named(p)} has ${idle(p)} of ${p.AllowedLicenses} seats unassigned`), "; ")}`, each(spare, (p) => ({ idle: idle(p), of: p.AllowedLicenses }))) : null,
     ].filter((part): part is Said => part !== null);
     return {
       outcome: "issue",

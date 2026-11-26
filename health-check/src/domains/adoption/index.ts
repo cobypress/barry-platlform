@@ -1,5 +1,5 @@
 import { loginActivityExtractor, type LoginActivity, type LoginChannel } from "../../extract/adoption.ts";
-import { named } from "../../engine/named.ts";
+import { each, named } from "../../engine/named.ts";
 import { userKinds } from "../user-kinds.ts";
 import { daysBefore } from "../../extract/types.ts";
 import { reportsExtractor, usersExtractor, type UserRow } from "../../extract/users.ts";
@@ -330,7 +330,7 @@ const fallingAdoption: Rule = {
     return {
       outcome: "issue",
       title: whole ? said`Fewer people are using Salesforce` : said`Fewer people are using Salesforce in some teams`,
-      summary: said`${named(said`Monthly active users have fallen ${FALL_SHARE}% or more from their peak`, { fallPct: FALL_SHARE })}: ${joinSaid(all.map(line), "; ")}.`,
+      summary: named(said`Monthly active users have fallen ${FALL_SHARE}% or more from their peak: ${joinSaid(all.map(line), "; ")}.`, { fallPct: FALL_SHARE }),
       recommendation: said`Ask the people who've stopped why. Fix what gets in their way, and make Salesforce the place the team's meetings and figures come from.`,
       recommendationType: "investigate",
       severity: whole ? "high" : "medium",
@@ -369,7 +369,7 @@ const lowEngagement: Rule = {
     return {
       outcome: "issue",
       title: said`Some teams barely use Salesforce`,
-      summary: said`${named(said`In these groups, most people logged in on fewer than ${BARELY_DAYS} of the last ${RECENT_DAYS} days`, { barelyDays: BARELY_DAYS, recentDays: RECENT_DAYS })}: ${joinSaid(low.map((x) => named(said`${x.g.dimension} ${org(x.g.key)}, ${x.barely} of ${x.g.users.length}`, { barely: x.barely, of: x.g.users.length })), "; ")}.`,
+      summary: named(said`In these groups, most people logged in on fewer than ${BARELY_DAYS} of the last ${RECENT_DAYS} days: ${joinSaid(low.map((x) => said`${x.g.dimension} ${org(x.g.key)}, ${x.barely} of ${x.g.users.length}`), "; ")}.`, { barelyDays: BARELY_DAYS, recentDays: RECENT_DAYS, ...each(low, (x) => ({ barely: x.barely, of: x.g.users.length })) }),
       recommendation: said`Find out what these teams use instead of Salesforce, and bring that work into it: their pipeline, their reports, and their next steps.`,
       recommendationType: "investigate",
       severity: "medium",

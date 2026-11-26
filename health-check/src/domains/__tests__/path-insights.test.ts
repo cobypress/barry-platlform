@@ -684,9 +684,11 @@ function digestsOf(runDir: string): [string, string] {
   const madeAt = "2026-11-24T09:00:00.000Z";
   const without = { ...loaded.input, findings: loaded.input.findings.filter((f) => f.ruleId !== RULE), metrics: loaded.input.metrics.filter((m) => m.id !== PATH_VARIANTS) };
   // Apart from the digest's own paths block (DECISIONS.md 758), which serves the raised insights alone.
-  const { digest, pathsWithheld: _w, ...counts } = checkedDigest({ input: loaded.input, pseudonyms: loaded.pseudonyms, inventory: null, madeAt });
+  // And apart from the strict shadow (DECISIONS.md 768), which counts the paths block's figures too and is never served.
+  const { digest, pathsWithheld: _w, strictShadow: _s, ...counts } = checkedDigest({ input: loaded.input, pseudonyms: loaded.pseudonyms, inventory: null, madeAt });
   const { paths: _p, ...rest } = digest ?? {};
-  return [JSON.stringify({ digest: digest ? rest : null, ...counts }), JSON.stringify(checkedDigest({ input: without, pseudonyms: loaded.pseudonyms, inventory: null, madeAt }))];
+  const { strictShadow: _t, ...plain } = checkedDigest({ input: without, pseudonyms: loaded.pseudonyms, inventory: null, madeAt });
+  return [JSON.stringify({ digest: digest ? rest : null, ...counts }), JSON.stringify(plain)];
 }
 
 describe("the synthetic org keeps the insights in its files and serves none of them outside the digest's paths block (decisions 703, 758)", async () => {

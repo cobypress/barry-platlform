@@ -1,5 +1,5 @@
 import { notSized, pct, plural, segmentRate, type Rule, type RuleContext, type RuleResult, type SegmentedRate } from "../../engine/rule.ts";
-import { named } from "../../engine/named.ts";
+import { each, named } from "../../engine/named.ts";
 import type { Calibration, Metric, MetricSegment } from "../../schemas/index.ts";
 import { loadPipeline, unorderedReason, unsplitLostReason, type Deal, type PipelineData } from "./cohort.ts";
 import { daysByStage, stageLeftFrom } from "./deep-dive.ts";
@@ -195,7 +195,7 @@ export function processMetrics(ctx: Ctx): Metric[] {
 function worst(result: SegmentedRate): Said {
   const worse = result.hotspots.filter((h) => h.rate > result.rate).slice(0, 3);
   // A segment's key is the org's: a record type, a team, a lead source, a person's token.
-  return worse.length ? said` Highest: ${joinSaid(worse.map((h) => named(said`${dimensionWords(h.dimension)} ${org(h.key)}, ${h.hits} of ${h.n} (${h.rate}%)`, { hits: h.hits, of: h.n, ratePct: h.rate })), "; ")}.` : said``;
+  return worse.length ? named(said` Highest: ${joinSaid(worse.map((h) => said`${dimensionWords(h.dimension)} ${org(h.key)}, ${h.hits} of ${h.n} (${h.rate}%)`), "; ")}.`, each(worse, (h) => ({ hits: h.hits, of: h.n, ratePct: h.rate }))) : said``;
 }
 
 /** Said in the analysis, so the reason is marked (DECISIONS.md 663). */

@@ -165,7 +165,7 @@ const noResponse: Rule = {
     return {
       outcome: "issue",
       title: said`Leads are going unanswered`,
-      summary: named(said`Leads with no logged response after ${RESPONSE_GRACE_DAYS} days: ${result.hits} of ${result.n} (${result.rate}%).${worst ? named(said` Worst by ${dimensionWord(worst.dimension)}: ${org(worst.key)}, at ${worst.rate}%.`, { worstPct: worst.rate }) : ""}`, { graceDays: RESPONSE_GRACE_DAYS, worstPct: worst?.rate }),
+      summary: named(said`Leads with no logged response after ${RESPONSE_GRACE_DAYS} days: ${result.hits} of ${result.n} (${result.rate}%).${worst ? said` Worst by ${dimensionWord(worst.dimension)}: ${org(worst.key)}, at ${worst.rate}%.` : ""}`, { graceDays: RESPONSE_GRACE_DAYS, worstPct: worst?.rate }),
       recommendation: said`Check routing first: unassigned or queue-held leads are the usual cause.`,
       recommendationType: "change",
       severity: "medium",
@@ -199,7 +199,7 @@ const convertedWithoutOpportunity: Rule = {
     return {
       outcome: "issue",
       title: said`Converted leads aren't becoming opportunities`,
-      summary: said`Converted with no opportunity: ${result.hits} of ${result.n} (${result.rate}%).${worst ? named(said` Worst by ${dimensionWord(worst.dimension)}: ${org(worst.key)}, at ${worst.rate}%.`, { worstPct: worst.rate }) : ""} Conversion looks better than the pipeline it produced.`,
+      summary: named(said`Converted with no opportunity: ${result.hits} of ${result.n} (${result.rate}%).${worst ? said` Worst by ${dimensionWord(worst.dimension)}: ${org(worst.key)}, at ${worst.rate}%.` : ""} Conversion looks better than the pipeline it produced.`, { worstPct: worst?.rate }),
       recommendation: said`Agree when a lead should be converted. If it's only to tidy up, take these out of your conversion figures.`,
       recommendationType: "investigate",
       severity: "low",

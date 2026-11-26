@@ -1,7 +1,7 @@
 import { buildDataset, checkNumbers, scopeDataset, SOURCE, type FigureSet } from "../numbercheck/index.ts";
 import type { DatasetFigure } from "../numbercheck/dataset.ts";
 import { orgFree } from "../numbercheck/dataset.ts";
-import { countOf, effortHours } from "../fix/hours.ts";
+import { countOf } from "../fix/hours.ts";
 import { FIX_TABLE } from "../fix/table.ts";
 import { assembleMarked } from "../fix/prompt.ts";
 import { PROSE_SOURCES, type BuiltReport } from "../narrative/sections.ts";
@@ -121,7 +121,8 @@ function hoursFigures(f: Finding): DatasetFigure[] {
   const out: DatasetFigure[] = [];
   const number = (value: number) => out.push({ source, kind: "number", value });
   const duration = (value: number, unit: string) => out.push({ source, kind: "duration", value, unit });
-  const hours = effortHours(rule, f.facts);
+  // Its range as the finding holds it, worked out by the fix table (src/fix/index.ts) from its facts.
+  const hours = f.effortHours;
   if (hours) for (const h of [hours.low, hours.high]) (number(h), duration(h, "hour"));
   if (rule.kind === "fixed") return out;
   const count = countOf(rule, f.facts);
