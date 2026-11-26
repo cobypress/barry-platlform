@@ -64,6 +64,20 @@ describe("the expected share (decision 777)", () => {
     assert.ok(TOTAL_MARGIN.points > 0 && TOTAL_MARGIN.z > 0 && SEGMENT_MARGIN.points > 0 && SEGMENT_MARGIN.z > 0);
   });
 
+  test("a line from few closed deals is uncertain, and the uncertainty is counted: many open deals can't make it look sure", () => {
+    // 20 closed stays, exponential at even quantiles; 400 open deals, 12 points above the expected share.
+    const stays = Array.from({ length: 20 }, (_, i) => -15 * Math.log(1 - (i + 0.5) / 20));
+    const lines = new Map([["A", stageLine(stays, 0.75, quantile)]]);
+    const ages = Array.from({ length: 3650 }, (_, i) => i / 10);
+    const e = expectedShare(lines.get("A")!, ages)!;
+    const pastCount = Math.round(400 * (e.share + 0.12));
+    const open = Array.from({ length: 400 }, (_, i) => ({ age: i < pastCount ? lines.get("A")!.line + 1 : 0 }));
+    const j = judge({ open, stageOf: () => "A", ageOf: (d) => d.age, entries: ages.map((age) => ({ deal: open[0]!, stage: "A", age })), lines, dimensions: {}, stageDimension: "stage", minSegment: 10 });
+    assert.ok(j.total.excess > 10, `${j.total.excess}`);
+    assert.ok(j.total.z < TOTAL_MARGIN.z, `z ${j.total.z}: 12 points on 400 deals would read as sure on the binomial alone`);
+    assert.equal(j.total.raised, false);
+  });
+
   test("each segment against its own expectation: a stage's segment reads every entry into the stage", () => {
     // Two stages: A's stays are short, B's long. Deals now in B entered A long ago too.
     type D = { stage: string; age: number; rep: string };
