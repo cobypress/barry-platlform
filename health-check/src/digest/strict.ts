@@ -139,15 +139,24 @@ function hoursFigures(f: Finding): DatasetFigure[] {
   return out;
 }
 
+const UNIT_NAME: ReadonlyArray<[RegExp, string]> = [[/Days$/, "day"], [/Hours$/, "hour"], [/Months$/, "month"], [/Weeks$/, "week"], [/Minutes$/, "minute"], [/Years$/, "year"]];
+
 /**
- * A computed value of a finding or metric, in the units the set already holds
- * it in under that source (as the documents' set takes a fact's unit from how
- * the engine wrote it: the value is the computed one, only its unit is read),
- * else a percentage by its name, else a plain number.
+ * A computed value of a finding or metric as a row of the set: a plain number,
+ * and in the unit its name says (DECISIONS.md 768: `…Money` an amount in the
+ * run's currency, `…Pct` or a rate, share or percent a percentage, `…Days`,
+ * `…Hours`, `…Months`, `…Weeks`, `…Minutes`, `…Years` a duration), and in any
+ * unit the set already holds that same value in under that source (as the
+ * documents' set takes a fact's unit from how the engine wrote it: the value is
+ * the computed one, only its unit is read).
  */
-function typed(source: string, name: string, value: number, held: readonly DatasetFigure[]): DatasetFigure[] {
-  const kinds = held.filter((r) => r.value === value && r.kind !== "number").map((r) => ({ ...r, source }));
-  return [{ source, kind: PERCENT_NAME.test(name) ? "percent" : "number", value }, ...kinds];
+function typed(source: string, name: string, value: number, held: readonly DatasetFigure[], currency: string | undefined): DatasetFigure[] {
+  const out: DatasetFigure[] = [{ source, kind: "number", value }];
+  if (PERCENT_NAME.test(name)) out.push({ source, kind: "percent", value });
+  if (/Money$/.test(name)) out.push({ source, kind: "currency", value, ...(currency ? { currency } : {}) });
+  for (const [pattern, unit] of UNIT_NAME) if (pattern.test(name)) out.push({ source, kind: "duration", value, unit });
+  out.push(...held.filter((r) => r.value === value && r.kind !== "number").map((r) => ({ ...r, source })));
+  return out;
 }
 
 /**
@@ -176,11 +185,11 @@ export function strictDataset(report: BuiltReport, set: FigureSet, named: NamedV
       const amount = f.facts[name];
       if (typeof amount === "number" && amount > 0) extra.push({ source: f.id, kind: "currency", value: amount, ...(currency ? { currency } : {}) });
     }
-    for (const [name, value] of Object.entries(f.facts)) extra.push(...typed(f.id, name, value, bySource.get(f.id) ?? []).slice(1));
+    for (const [name, value] of Object.entries(f.facts)) extra.push(...typed(f.id, name, value, bySource.get(f.id) ?? [], currency));
   }
   for (const [id, values] of Object.entries(named)) {
     if (!own.has(id)) continue;
-    for (const [name, value] of Object.entries(values)) if (Number.isFinite(value)) extra.push(...typed(id, name, value, bySource.get(id) ?? []));
+    for (const [name, value] of Object.entries(values)) if (Number.isFinite(value)) extra.push(...typed(id, name, value, bySource.get(id) ?? [], currency));
   }
   // The fix prompt's fixed text, its rule's (src/fix/table.ts), put together with none of the finding's sentences in it.
   const prompts = findings.flatMap((f) => {

@@ -1,4 +1,5 @@
 import { duplicateRulesExtractor, recordCountsExtractor, schemaExtractor } from "../../extract/configuration.ts";
+import { named } from "../../engine/named.ts";
 import { crmHealthExtractor, opportunitiesExtractor, stagesExtractor } from "../../extract/opportunities.ts";
 import { leadsExtractor } from "../../extract/leads.ts";
 import { actionRecordsExtractor } from "../../extract/action-records.ts";
@@ -104,9 +105,9 @@ function dealRule(options: DealRuleOptions): Rule {
       }
       const worst = result.hotspots[0];
       const hidden = !overLimit
-        ? said` The total looks acceptable, but by ${dimensionWords(worst!.dimension)}, ${org(worst!.key)} is at ${worst!.rate}% (${worst!.hits} of ${worst!.n}).`
+        ? named(said` The total looks acceptable, but by ${dimensionWords(worst!.dimension)}, ${org(worst!.key)} is at ${worst!.rate}% (${worst!.hits} of ${worst!.n}).`, { worstPct: worst!.rate, worstHits: worst!.hits, worstN: worst!.n })
         : worst
-          ? said` Worst by ${dimensionWords(worst.dimension)}: ${org(worst.key)}, at ${worst.rate}%.`
+          ? named(said` Worst by ${dimensionWords(worst.dimension)}: ${org(worst.key)}, at ${worst.rate}%.`, { worstPct: worst.rate })
           : said``;
       return {
         outcome: "issue",
@@ -318,7 +319,7 @@ const lossReasonMissing: Rule = {
     return {
       outcome: "issue",
       title: said`You can't see why deals are being lost`,
-      summary: said`Lost deals with no loss reason: ${result.hits} of ${result.n} (${result.rate}%).${worst ? said` Worst by ${dimensionWords(worst.dimension)}: ${org(worst.key)}, at ${worst.rate}%.` : ""}`,
+      summary: said`Lost deals with no loss reason: ${result.hits} of ${result.n} (${result.rate}%).${worst ? named(said` Worst by ${dimensionWords(worst.dimension)}: ${org(worst.key)}, at ${worst.rate}%.`, { worstPct: worst.rate }) : ""}`,
       recommendation: said`Make a reason required when a deal is lost, and keep the list short enough to be used honestly.`,
       recommendationType: "change",
       severity: "medium",

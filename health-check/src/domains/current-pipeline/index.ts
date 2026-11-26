@@ -1,4 +1,5 @@
 import { schemaExtractor } from "../../extract/configuration.ts";
+import { named } from "../../engine/named.ts";
 import { quotasExtractor, revenueForecastType } from "../../extract/forecast.ts";
 import { nextStepsExtractor, opportunitiesExtractor, stagesExtractor } from "../../extract/opportunities.ts";
 import { daysBefore } from "../../extract/types.ts";
@@ -117,7 +118,7 @@ export function shareRule(options: ShareRule): Rule {
       }
       const worst = result.hotspots[0];
       // A segment's key is the org's: a stage, a record type, a team or a person's token.
-      const hidden = !overLimit ? said` The total looks acceptable, but by ${dimensionWords(worst!.dimension)}, ${org(worst!.key)} is at ${worst!.rate}% (${worst!.hits} of ${worst!.n}).` : worst ? said` Worst by ${dimensionWords(worst.dimension)}: ${org(worst.key)}, at ${worst.rate}%.` : said``;
+      const hidden = !overLimit ? named(said` The total looks acceptable, but by ${dimensionWords(worst!.dimension)}, ${org(worst!.key)} is at ${worst!.rate}% (${worst!.hits} of ${worst!.n}).`, { worstPct: worst!.rate, worstHits: worst!.hits, worstN: worst!.n }) : worst ? named(said` Worst by ${dimensionWords(worst.dimension)}: ${org(worst.key)}, at ${worst.rate}%.`, { worstPct: worst.rate }) : said``;
       return {
         outcome: "issue",
         // Made once when the rule is declared, so said again here, in the analysis, whose ledger vouches for it.

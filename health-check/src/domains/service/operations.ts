@@ -1,4 +1,5 @@
 import { notSized, pct, plural, segmentRate, type Rule, type RuleContext, type RuleResult } from "../../engine/rule.ts";
+import { named } from "../../engine/named.ts";
 import { orgExtractor } from "../../extract/configuration.ts";
 import { serviceActivityExtractor, serviceCasesExtractor, serviceSetupExtractor, SERVICE_MONTHS, type CaseVolumeRow, type ClosedCaseRow, type OpenCaseRow, type ServiceCases } from "../../extract/service.ts";
 import { monthsBefore, type Sourced } from "../../extract/types.ts";
@@ -82,7 +83,7 @@ function caseRate<R>(
   }
   const worst = result.hotspots[0];
   // The dimension is one of the rule's own names; the segment's key is the org's value.
-  const hidden = !over ? said` The total looks acceptable, but by ${dimensionWords(worst!.dimension)}, ${org(worst!.key)} is at ${worst!.rate}% (${worst!.hits} of ${worst!.n}).` : worst ? said` Worst by ${dimensionWords(worst.dimension)}: ${org(worst.key)}, at ${worst.rate}%.` : said``;
+  const hidden = !over ? named(said` The total looks acceptable, but by ${dimensionWords(worst!.dimension)}, ${org(worst!.key)} is at ${worst!.rate}% (${worst!.hits} of ${worst!.n}).`, { worstPct: worst!.rate, worstHits: worst!.hits, worstN: worst!.n }) : worst ? named(said` Worst by ${dimensionWords(worst.dimension)}: ${org(worst.key)}, at ${worst.rate}%.`, { worstPct: worst.rate }) : said``;
   return {
     outcome: "issue",
     title: options.title,
@@ -314,7 +315,7 @@ const firstReply: Rule = {
     return {
       outcome: "issue",
       title: said`Customers who email wait too long for a first reply`,
-      summary: said`Email cases waited a median ${med} hours for a first reply, and a quarter waited more than ${p75} hours. ${result.hits} of ${answered.length} replied cases (${result.rate}%) took longer than ${FIRST_REPLY_HOURS} hours.${worst ? said` Worst by ${dimensionWords(worst.dimension)}: ${org(worst.key)}, at ${worst.rate}%.` : ""}`,
+      summary: said`Email cases waited a median ${med} hours for a first reply, and a quarter waited more than ${p75} hours. ${result.hits} of ${answered.length} replied cases (${result.rate}%) took longer than ${FIRST_REPLY_HOURS} hours.${worst ? named(said` Worst by ${dimensionWords(worst.dimension)}: ${org(worst.key)}, at ${worst.rate}%.`, { worstPct: worst.rate }) : ""}`,
       recommendation: said`Send an automatic acknowledgement with a realistic reply time, route email cases into a watched queue, and set a first-response milestone so the wait is visible.`,
       recommendationType: "change",
       severity: "medium",
