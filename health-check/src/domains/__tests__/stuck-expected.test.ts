@@ -250,6 +250,11 @@ describe("fires on the trap, and on deals no estimate is needed to call long", (
     assert.equal(f.title, "Some deals are sitting in their stage longer than your stage times explain");
     assert.match(f.summary, /^Open deals that have been in their stage longer than about three quarters of stays in that stage last: \d+ of \d+ \(\d+(\.\d)?%\)\. If deals moved through each stage at the pace your history shows, about \d+(\.\d)?% of those still open would be past that point\./);
     assert.match(f.summary, / That is more than your stage times explain\. /);
+    // Deals past where 10 stays are still followed aren't compared: how far past, the history can't say.
+    assert.match(f.summary, /\d+ that have been in their stage longer than the history lets us follow stays there/);
+    // Compared and left out add up to the open pipeline (with any deal older than the read said apart).
+    const left = Number(/ (\d+) more open deals couldn't be compared/.exec(f.summary)![1]);
+    assert.equal(f.facts.compared! + left + f.facts.ancient!, f.facts.open);
     assert.deepEqual(f.value, { kind: "not_sized", reason: "Some deals would be past this point even if nothing were wrong, and we can't tell which of these are the extra ones, so we don't put a figure on them." });
     assert.match(f.fixPrompt!, /At each review, the share of open deals on the report falls towards the share your stage times would give\./);
     const rows = out.records.find((r) => r.ruleId === RULE)!.rows;
