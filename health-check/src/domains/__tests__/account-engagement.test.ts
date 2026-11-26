@@ -129,6 +129,16 @@ describe("unworked handovers", () => {
   });
 });
 
+describe("an empty lead source on a handed-over lead (DECISIONS.md 770)", () => {
+  test("is no source, the same as none: it stopped the run before", () => {
+    const withSource = (source: string | null) =>
+      edited<PardotLeads>("pardot-leads", (l) => {
+        for (const r of openRows(l)) r.LeadSource = source;
+      });
+    assert.deepEqual(withSource(""), withSource(null));
+  });
+});
+
 describe("scoring and grading", () => {
   test("three in four synced leads have no grade", () => {
     const f = one(output!.findings, "mkt.scoring-grading");
