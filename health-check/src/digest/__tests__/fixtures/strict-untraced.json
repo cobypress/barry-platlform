@@ -100,6 +100,5 @@
 {"ruleId":"rev.stalled-deals","kind":"summary","count":1},
 {"ruleId":"rev.win-backs","kind":"summary","count":1},
 {"ruleId":"sec.modify-all-data","kind":"summary","count":1},
-{"ruleId":"utl.unassigned-licence-seats","kind":"valueTexts","count":1},
 {"ruleId":"utl.unused-reports","kind":"valueTexts","count":1}
 ]

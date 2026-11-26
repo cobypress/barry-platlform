@@ -242,7 +242,7 @@ const unassignedSeats: Rule = {
             amount: spare.reduce((sum, l) => sum + (l.TotalLicenses - l.UsedLicenses) * costs[l.Name]!, 0),
             unit: ctx.calibration.currency,
             period: "per year",
-            assumptions: spare.map((l) => valued(said`${seatsSaid(l.TotalLicenses - l.UsedLicenses, l.Name)} at ${costs[l.Name]!} ${org(ctx.calibration.currency)} a year, from the calibration`, { costs: costs[l.Name]! })).concat(said`Assumes seats can be reduced at renewal`),
+            assumptions: spare.map((l) => valued(said`${seatsSaid(l.TotalLicenses - l.UsedLicenses, l.Name)} at ${costs[l.Name]!} ${org(ctx.calibration.currency)} a year, from the calibration`, { costs: [costs[l.Name]!, "money"] })).concat(said`Assumes seats can be reduced at renewal`),
           };
     // Each licence's free seats, worked out once for its sentence and the value it's named with (DECISIONS.md 768).
     const freeSeats = spare.map((l) => ({ l, free: l.TotalLicenses - l.UsedLicenses }));
