@@ -11,7 +11,7 @@ import { GoogleDrive } from "../worker/drive.ts";
 import { areaReasonsStartLine, readWorkerEnv, WORKER_ENV } from "../worker/env.ts";
 import { automaticStartLine } from "../worker/automatic.ts";
 import { stageModelStartLine, stageNamesStartLine } from "../worker/stage-answer.ts";
-import { leadJourneyStartLine, stuckExpectedStartLine } from "../worker/env.ts";
+import { casePathsStartLine, leadJourneyStartLine, stuckExpectedStartLine } from "../worker/env.ts";
 import { atRunStartLine, workerAtRun } from "../worker/at-run.ts";
 import { PostgresWorkerStore, type SqlPool } from "../worker/postgres-store.ts";
 import { retentionSweep, SWEEP_INTERVAL_MS } from "../worker/retention.ts";
@@ -132,6 +132,7 @@ export async function workerCommand(
     stageNamesModelConsole: config.stageNamesModelConsole,
     areaReasons: config.areaReasons,
     leadJourney: config.leadJourney,
+    casePaths: config.casePaths,
     stuckExpected: config.stuckExpected,
     atRun,
     codeLint: "found" in pmd ? { pmd: pmd.found } : { pmd: null, pmdMissing: pmd.missing },
@@ -180,6 +181,8 @@ export async function workerCommand(
   log(areaReasonsStartLine(config.areaReasons));
   // The lead journey (DECISIONS.md 770), said at every start so turning it on or off shows in the log.
   log(leadJourneyStartLine(config.leadJourney));
+  // The case status paths (DECISIONS.md 776), said at every start so turning it on or off shows in the log.
+  log(casePathsStartLine(config.casePaths));
   // And stuck-in-stage's version 3 (DECISIONS.md 777).
   log(stuckExpectedStartLine(config.stuckExpected));
   // And what each run records of this worker (DECISIONS.md 774).

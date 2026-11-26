@@ -87,6 +87,13 @@ const LITERAL_PIECES: string[] = [
   'src/domains/historic-pipeline/process.ts: noun :: "lost and no decision deals" | "won deals"',
   'src/domains/security/index.ts: what :: "Permission set assignments" | "Permission set groups" | "Permission sets" | "Profiles" | "Users"',
   'src/domains/service/operations.ts: what :: "Case history" | "Case milestones" | "Closed cases" | "Open cases"',
+  'src/domains/service/paths.ts: dimensionWords(d) :: "origin" | "priority" | "starting status" | "status" | OrgWords',
+  'src/domains/service/paths.ts: dimensionWords(top!.dimension) :: "origin" | "priority" | "starting status" | "status" | OrgWords',
+  'src/domains/service/paths.ts: dimensionWords(top!.dimension) :: "origin" | "priority" | "starting status" | "status" | OrgWords',
+  'src/domains/service/paths.ts: dimensionWords(top.dimension) :: "origin" | "priority" | "starting status" | "status" | OrgWords',
+  'src/domains/service/paths.ts: dimensionWords(top.dimension) :: "origin" | "priority" | "starting status" | "status" | OrgWords',
+  'src/domains/service/paths.ts: dimensionWords(top.dimension) :: "origin" | "priority" | "starting status" | "status" | OrgWords',
+  'src/domains/service/paths.ts: dimensionWords(top.dimension) :: "origin" | "priority" | "starting status" | "status" | OrgWords',
   'src/domains/service/setup.ts: isAre(activeSla.length) :: "are" | "is"',
 ];
 

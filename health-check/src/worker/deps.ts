@@ -78,6 +78,11 @@ export type WorkerDeps = {
   /** HC_STUCK_EXPECTED=on, exactly, read once at start in env.ts (DECISIONS.md 777): cur.stuck-in-stage at version 3. Off when absent. */
   stuckExpected?: boolean;
   /**
+   * HC_CASE_PATHS=on, exactly, read once at start in env.ts (DECISIONS.md 776): every analysis the worker makes of a
+   * run with Service Cloud adds the case status paths to service operations. Off when absent.
+   */
+  casePaths?: boolean;
+  /**
    * The worker's switches and build, read once at start (DECISIONS.md 774), recorded on each run it takes. Absent:
    * nothing recorded, as in tests that don't ask for it.
    */

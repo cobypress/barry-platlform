@@ -4,6 +4,7 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { ALL_MODULES } from "../../domains/index.ts";
 import { leadJourneyModule } from "../../domains/lead-funnel/index.ts";
+import { casePathsModule } from "../../domains/service/index.ts";
 import { runHealthCheck } from "../../engine/run.ts";
 import { buildReport } from "../../narrative/sections.ts";
 import { applyOverrides } from "../../narrative/overrides.ts";
@@ -31,7 +32,8 @@ import { FIX_TABLE, NEVER_RAISES } from "../table.ts";
 // never takes access away before its replacement is in place (principle B).
 
 // With the lead journey's rules (HC_LEAD_JOURNEY, DECISIONS.md 770), which the table declares though they run only with the switch on.
-const rules = [...ALL_MODULES.flatMap((m) => m.rules), ...leadJourneyModule.rules.filter((r) => !ALL_MODULES.some((m) => m.rules.some((x) => x.id === r.id)))];
+// And the case status paths' (HC_CASE_PATHS, DECISIONS.md 776), on the same terms.
+const rules = [...ALL_MODULES.flatMap((m) => m.rules), ...[...leadJourneyModule.rules, ...casePathsModule.rules].filter((r) => !ALL_MODULES.some((m) => m.rules.some((x) => x.id === r.id)))];
 const generatedRecords = buildScaleOrg(scaled(FIVE_HUNDRED_USERS, 0.005));
 const readFindings = (dir: string): Finding[] => (JSON.parse(readFileSync(join(dir, "findings.json"), "utf8")) as unknown[]).map((f) => Finding.parse(f));
 const recordedRun = await runFromRecording({ answers: loadAnswers(), modules: ALL_MODULES });
@@ -138,8 +140,8 @@ const ANALYSIS_ONLY = [
   "int.api-usage", "int.integration-user-licences", "lead.campaign-return", "lead.conversion-by-source", "lead.converted-no-opportunity", "lead.fast-conversion", "lead.source-return", "lead.source-win-rate",
   "mkt.scoring-grading", "mkt.unowned-prospects", "mkt.unworked-handovers", "pipe.calibration-contradicts-org", "pipe.going-backwards", "pipe.path-insights", "pipe.probability-vs-reality", "pipe.segment-divergence",
   "pipe.skipped-stages", "pipe.unmapped-stages", "rev.dormant-accounts", "rev.stalled-deals", "rev.win-backs", "sec.health-check-risks", "sec.health-check-score", "sec.peer-outlier-access",
-  "sec.personal-integration-accounts", "sec.sharing-defaults", "sec.unused-access", "svc.agent-licences", "svc.backlog-growth", "svc.knowledge-current",
-  "svc.macros-and-quick-text", "svc.queue-sprawl", "svc.unassigned-cases", "tech.apex-code-size", "tech.storage-use", "utl.dashboards-inactive-running-user",
+  "sec.personal-integration-accounts", "sec.sharing-defaults", "sec.unused-access", "svc.agent-licences", "svc.backlog-growth", "svc.closed-straight", "svc.knowledge-current",
+  "svc.macros-and-quick-text", "svc.queue-sprawl", "svc.reopened-time", "svc.sent-back-cases", "svc.stuck-in-status", "svc.unassigned-cases", "tech.apex-code-size", "tech.storage-use", "utl.dashboards-inactive-running-user",
   "utl.dormant-licensed-users", "utl.eac-connections", "utl.never-logged-in", "utl.package-seats", "utl.unassigned-licence-seats", "utl.unused-reports",
 ];
 

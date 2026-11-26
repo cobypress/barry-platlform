@@ -756,6 +756,32 @@ export const FIX_TABLE: Readonly<Record<string, FixRule>> = {
     prompt: change("cases", ["Show open cases with no contact or account, by channel.", "Check whether Email-to-Case and Web-to-Case find the contact from the sender's email, and where they don't, set out why.", "In a sandbox, build what's missing, for example a flow on new cases that looks up the contact by the sender's email, and test it with test cases."], ["New test cases in the sandbox are linked to a customer."]),
   },
 
+  // Behind HC_CASE_PATHS (DECISIONS.md 776).
+  "svc.stuck-in-status": {
+    complexity: "simple",
+    touches: { leavesOut: true },
+    hours: fixed(2, 4, PROCESS),
+    prompt: decide("open cases", ["List the open cases that have been in their status longest, by status, priority and origin, without naming anyone.", "For the status named, set out what a case is waiting for there and who moves it on.", "Prepare the options for moving these cases on or closing them."], ["The list and the options are ready for the service leaders."]),
+  },
+  "svc.reopened-time": {
+    complexity: "simple",
+    touches: { leavesOut: true },
+    hours: fixed(2, 4, PROCESS),
+    prompt: decide("reopened cases", ["List the reopened cases, with the time before their first close and after it, by priority and origin.", "Set out what these cases had in common when they were first closed.", "Prepare the options for a check with the customer before closing cases like them."], ["The analysis is ready for the service leaders to agree."]),
+  },
+  "svc.closed-straight": {
+    complexity: "simple",
+    touches: { leavesOut: true },
+    hours: fixed(2, 4, PROCESS),
+    prompt: decide("cases closed straight", ["Take a sample of the cases closed straight from the status they started in, by starting status, priority and origin.", "Sort the sample into duplicates, spam, cases closed by automation and questions answered at once.", "Prepare the options for each group."], ["The sample and the options are ready for the service leaders."]),
+  },
+  // Stored and never served (703, 776): declared, as every rule that can raise an issue declares some, and used by nothing.
+  "svc.sent-back-cases": {
+    complexity: "simple",
+    touches: { leavesOut: true },
+    hours: fixed(2, 4, PROCESS),
+    prompt: decide("cases sent back", ["List the cases sent back between the two statuses named, and the cases that reached the same point without it, by priority and origin.", "Set out what happens to the cases in each group after that point."], ["The comparison is ready for the service leaders to agree."]),
+  },
   "svc.escalation-rules": {
     complexity: "moderate",
     hours: fixed(2, 5, "Adding one escalation rule or an entitlement process"),

@@ -554,6 +554,7 @@ async function runLocked(runId: string, deps: WorkerDeps, attempt: Attempt, seen
       ...(deps.stageNames === true && deps.stageNamesModel === true && deps.stageNamesModelConsole === true ? { stageNamesModel: true } : {}),
       ...(deps.areaReasons === true ? { areaReasons: true } : {}),
       ...(deps.leadJourney === true ? { leadJourney: true } : {}),
+      ...(deps.casePaths === true ? { casePaths: true } : {}),
       ...(deps.stuckExpected === true ? { stuckExpected: true } : {}),
       baselineRunId: input.run.baselineRunId,
       keepApexSource: apexSummaries,

@@ -10,6 +10,7 @@ import { localDay, zoneOf } from "../time-zone.ts";
 import { missingFieldReason } from "../../extract/fields.ts";
 import { org, passedOn, said, type Said } from "../../engine/org-words.ts";
 import { grouped } from "../../engine/said-forms.ts";
+import { closedStraight, reopenedTime, sentBackCases, statusPathMetrics, stuckInStatus } from "./paths.ts";
 import { ageDays, byOrigin, caseQueues, HOUR, limitsOf, median, MIN_SEGMENT, originOf, ownerType, priorityOf, quantile, queueOwned, round1, yearRange, yearsCases } from "./shared.ts";
 
 /** Our name for a segment's dimension: one of the rules' own keys, or, to be safe, the org's words (DECISIONS.md 657). */
@@ -474,6 +475,9 @@ const customerLinked: Rule = {
   evaluate(ctx) {
     const open = rowsOf<OpenCaseRow>(ctx, cases(ctx).open, "Open cases", "Every open case");
     if ("reason" in open) return nm(open.reason, open.evidence);
+    // With no open case at all there is nothing linked or unlinked to say (DECISIONS.md 776): a pass would be empty. An
+    // org with none used to stop the run, so this changes no result that was ever made.
+    if (open.rows.length === 0) return nm(said`There are no open cases to check.`, open.evidence);
     return caseRate(ctx, open.rows, open.evidence, {
       hit: (c) => !c.ContactId && !c.AccountId,
       dimensions: { ...byOrigin(cases(ctx).open), "owner type": ownerType },
@@ -491,6 +495,20 @@ const customerLinked: Rule = {
   },
 };
 
+/**
+ * Cases by origin as segments, most first. A null and an empty Origin are both none, put together in one row, so
+ * no segment's key is empty; an org with no empty Origin gets exactly the rows it got before.
+ */
+function originSegments(rows: Array<{ Origin: string | null; n: number }>, total: number): MetricSegment[] {
+  const merged = new Map<string | null, number>();
+  for (const r of rows) {
+    const key = r.Origin === "" ? null : r.Origin;
+    merged.set(key, (merged.get(key) ?? 0) + r.n);
+  }
+  const listed = rows.some((r) => r.Origin === "") ? [...merged].map(([Origin, n]) => ({ Origin, n })) : rows;
+  return [...listed].sort((a, b) => b.n - a.n).map((r) => ({ dimension: "origin", key: r.Origin ?? "No origin", n: r.n, value: pct(r.n, total), notMeasurableReason: null }));
+}
+
 // The figures behind the chapter, for the raw notes and the deck.
 function metrics(ctx: Omit<RuleContext, "metrics">): Metric[] {
   const data = ctx.data(serviceCasesExtractor);
@@ -506,7 +524,9 @@ function metrics(ctx: Omit<RuleContext, "metrics">): Metric[] {
   const openDef = base("service.open_cases", "Open cases", "count", "Cases not closed today, with the median age in days.");
   if (data.open.status === "ok") {
     const ages = data.open.data.map((c) => ageDays(c.CreatedDate, ctx.now));
-    out.push({ ...openDef, status: "measured", value: data.open.data.length, n: data.open.data.length, dateRange: null, segments: segmentsBy(data.open.data, priorityOf, (g) => g.length, "priority"), segmentExemptReason: null, series: [], stats: { medianAgeDays: ages.length ? round1(median(ages)) : 0, queueOwned: data.open.data.filter((c) => queueOwned(c.OwnerId)).length }, evidence: [ctx.ev(data.open.source, { count: data.open.data.length })], exclusions: data.open.truncated ? ["Rows past the read limit"] : [] });
+    // No case open at all: nothing to split by priority, and the metric says so (DECISIONS.md 776), where it stopped the run.
+    const none = data.open.data.length === 0;
+    out.push({ ...openDef, status: "measured", value: data.open.data.length, n: data.open.data.length, dateRange: null, segments: segmentsBy(data.open.data, priorityOf, (g) => g.length, "priority"), segmentExemptReason: none ? "No case is open, so there is nothing to split by priority." : null, series: [], stats: { medianAgeDays: ages.length ? round1(median(ages)) : 0, queueOwned: data.open.data.filter((c) => queueOwned(c.OwnerId)).length }, evidence: [ctx.ev(data.open.source, { count: data.open.data.length })], exclusions: data.open.truncated ? ["Rows past the read limit"] : [] });
   } else out.push({ ...openDef, status: "not_measurable", reason: `Open cases couldn't be read: ${data.open.reason}`, evidence: [ctx.ev(data.open.source, { count: null })] });
 
   const resolutionDef = base("service.resolution_days", "Time to resolve a case", "days", "Days from a case being created to being closed, for cases closed in the last year: the median, with the upper quartile. Calendar time, not business hours.");
@@ -548,7 +568,8 @@ function metrics(ctx: Omit<RuleContext, "metrics">): Metric[] {
       value: pct(known, total),
       n: total,
       dateRange: yearRange(ctx, SERVICE_MONTHS),
-      segments: [...data.origins.data].sort((a, b) => b.n - a.n).map((r) => ({ dimension: "origin", key: r.Origin ?? "No origin", n: r.n, value: pct(r.n, total), notMeasurableReason: null })),
+      // An empty Origin is none, as a null one is (DECISIONS.md 776): an empty key stopped the run with a schema error.
+      segments: originSegments(data.origins.data, total),
       segmentExemptReason: total ? null : "No case was created in the last year.",
       series: [],
       stats: Object.fromEntries(channels.map((c) => [`records${c.channel}`, c.count.status === "ok" ? c.count.data : 0])),
@@ -575,5 +596,19 @@ export const serviceOperationsModule: DomainModule = {
   metrics: [metrics],
   rules: [backlogGrowth, backlogAge, priorityResolution, milestoneBreaches, firstReply, reopened, unassigned, originMissing, classification, customerLinked],
 };
+
+/**
+ * Service operations with the case status paths on (HC_CASE_PATHS, DECISIONS.md 776): the same reads, and the paths'
+ * stored metric, two served checks and two stored insights after the rest, so every finding and metric before them
+ * keeps its place. Reaches only a run that includes the service module.
+ */
+export const casePathsModule: DomainModule = {
+  ...serviceOperationsModule,
+  metrics: [metrics, statusPathMetrics],
+  rules: [...serviceOperationsModule.rules, stuckInStatus, reopenedTime, closedStraight, sentBackCases],
+};
+
+/** The modules a run analyses with the switch on: service operations swapped for its paths', and nothing else touched. */
+export const withCasePaths = (modules: DomainModule[]): DomainModule[] => modules.map((m) => (m === serviceOperationsModule ? casePathsModule : m));
 
 export const SERVICE_OPERATIONS_METRIC_IDS = ["service.open_cases", "service.resolution_days", "service.cases_created", "service.cases_by_origin", "service.routing_declined"];

@@ -5,6 +5,7 @@ import { join } from "node:path";
 import { SALES_CLOUD_MODULES } from "../domains/index.ts";
 import { withLeadJourney } from "../domains/lead-funnel/index.ts";
 import { withStuckExpected } from "../domains/current-pipeline/index.ts";
+import { withCasePaths } from "../domains/service/index.ts";
 import { usersExtractor, type UserRow } from "../extract/users.ts";
 import { analyse, type AnalysisOutput } from "../engine/evaluate.ts";
 import type { DomainModule } from "../domains/types.ts";
@@ -39,14 +40,13 @@ export function loadExtracts(dir: string): Map<string, unknown> {
   return new Map(entries);
 }
 
-export function analyseExtracts(extracts: Map<string, unknown>, options: { answers?: ManualAnswer[]; calibration?: Calibration; now?: Date; window?: DateRange; modules?: DomainModule[]; markPeriods?: boolean; stageNames?: boolean; stageNamesModel?: boolean; leadJourney?: boolean; stuckExpected?: boolean } = {}): AnalysisOutput {
-  const given = options.leadJourney ? withLeadJourney(options.modules ?? SALES_CLOUD_MODULES) : (options.modules ?? SALES_CLOUD_MODULES);
+export function analyseExtracts(extracts: Map<string, unknown>, options: { answers?: ManualAnswer[]; calibration?: Calibration; now?: Date; window?: DateRange; modules?: DomainModule[]; markPeriods?: boolean; stageNames?: boolean; stageNamesModel?: boolean; leadJourney?: boolean; casePaths?: boolean; stuckExpected?: boolean } = {}): AnalysisOutput {
   const users = extracts.get(usersExtractor.id) as { status: string; data?: UserRow[] } | undefined;
   const directory = new Map((users?.data ?? []).map((u) => [u.Id, { name: u.Name, aliases: [u.Username, u.Email] }]));
   const pseudonyms = new Pseudonymiser();
   for (const [id, entry] of [...directory].sort(([a], [b]) => a.localeCompare(b))) pseudonyms.label("user", id, entry.name, entry.aliases);
   return analyse({
-    modules: options.stuckExpected ? withStuckExpected(given) : given,
+    modules: ((list: DomainModule[]) => { const pathed = options.casePaths ? withCasePaths(list) : list; return options.stuckExpected ? withStuckExpected(pathed) : pathed; })(options.leadJourney ? withLeadJourney(options.modules ?? SALES_CLOUD_MODULES) : (options.modules ?? SALES_CLOUD_MODULES)),
     extracts,
     calibration: options.calibration ?? loadCalibration(),
     now: options.now ?? new Date(AS_OF),

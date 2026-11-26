@@ -49,6 +49,7 @@ describe("what is stored: the boolean switches, by name, and nothing else (DECIS
         ["stageNamesModelConsole", "HC_STAGE_NAMES_MODEL_CONSOLE"],
         ["areaReasons", "HC_AREA_REASONS"],
         ["leadJourney", "HC_LEAD_JOURNEY"],
+        ["casePaths", "HC_CASE_PATHS"],
         ["stuckExpected", "HC_STUCK_EXPECTED"],
       ],
     );
@@ -319,6 +320,7 @@ describe("the column may not be there yet: the run goes on either way (DECISIONS
     assert.deepEqual(row.switches.stageNames, { on: true, state: "on" });
     assert.deepEqual(row.switches.areaReasons, { on: false, state: "set_not_on" });
     assert.deepEqual(row.switches.leadJourney, { on: false, state: "unset" });
+    assert.deepEqual(row.switches.casePaths, { on: false, state: "unset" });
     const without = await runWith(() => {}, false);
     assert.equal(without.deps.store.workerAtRun.size, 0);
     assert.deepEqual(without.outcome, outcome);
