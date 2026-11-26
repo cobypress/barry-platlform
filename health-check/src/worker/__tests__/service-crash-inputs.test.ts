@@ -7,6 +7,7 @@ import { baseDeps, consoleRun, RUN_ID, runInput, syntheticConnection } from "./h
 import { ALL_MODULES } from "../../domains/index.ts";
 import { Simulator, SYNTHETIC_RECORDS, type OrgRecords } from "../../testing/simulator.ts";
 import type { Finding, Metric } from "../../schemas/index.ts";
+import { scoreDomains } from "../../domains/scoring.ts";
 
 // Two inputs that stopped a consultant-led run with Service Cloud at the base,
 // with the case status paths' switch off or on (DECISIONS.md 776): an org with
@@ -35,10 +36,17 @@ describe("Service Cloud inputs that stopped a run", () => {
       assert.equal(open.status, "measured");
       assert.ok(open.status === "measured" && open.value === 0 && open.segments.length === 0);
       assert.equal(open.status === "measured" ? open.segmentExemptReason : null, "No case is open, so there is nothing to split by priority.");
-      for (const id of ["svc.backlog-age", "svc.unassigned-cases", "svc.case-customer"]) {
+      // Nothing is old or waiting, so those two pass honestly; "linked to a customer" has nothing to say of no case.
+      for (const id of ["svc.backlog-age", "svc.unassigned-cases"]) {
         const f = findings.find((x) => x.ruleId === id)!;
         assert.equal(f.summary, "There are no open cases to check.", id);
       }
+      const linked = findings.find((x) => x.ruleId === "svc.case-customer")!;
+      assert.equal(linked.status, "not_measurable");
+      assert.equal(linked.notMeasurableReason, "There are no open cases to check.");
+      // The area keeps its score: one check unmeasured among the area's many.
+      const ops = scoreDomains(["service_operations"], findings)[0]!;
+      assert.equal(ops.status, "measured");
     });
 
     test(`an empty Origin: done, and read as no origin in the cases by channel (switch ${casePaths ? "on" : "off"})`, async () => {

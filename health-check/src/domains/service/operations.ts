@@ -475,6 +475,9 @@ const customerLinked: Rule = {
   evaluate(ctx) {
     const open = rowsOf<OpenCaseRow>(ctx, cases(ctx).open, "Open cases", "Every open case");
     if ("reason" in open) return nm(open.reason, open.evidence);
+    // With no open case at all there is nothing linked or unlinked to say (DECISIONS.md 776): a pass would be empty. An
+    // org with none used to stop the run, so this changes no result that was ever made.
+    if (open.rows.length === 0) return nm(said`There are no open cases to check.`, open.evidence);
     return caseRate(ctx, open.rows, open.evidence, {
       hit: (c) => !c.ContactId && !c.AccountId,
       dimensions: { ...byOrigin(cases(ctx).open), "owner type": ownerType },
@@ -596,8 +599,8 @@ export const serviceOperationsModule: DomainModule = {
 
 /**
  * Service operations with the case status paths on (HC_CASE_PATHS, DECISIONS.md 776): the same reads, and the paths'
- * stored metric, three checks and a stored insight after the rest, so every finding and metric before them keeps its
- * place. Reaches only a run that includes the service module.
+ * stored metric, two served checks and two stored insights after the rest, so every finding and metric before them
+ * keeps its place. Reaches only a run that includes the service module.
  */
 export const casePathsModule: DomainModule = {
   ...serviceOperationsModule,
