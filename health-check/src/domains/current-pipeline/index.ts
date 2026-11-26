@@ -1,5 +1,5 @@
 import { schemaExtractor } from "../../extract/configuration.ts";
-import { named } from "../../engine/named.ts";
+import { named, aside } from "../../engine/named.ts";
 import { quotasExtractor, revenueForecastType } from "../../extract/forecast.ts";
 import { nextStepsExtractor, opportunitiesExtractor, stagesExtractor } from "../../extract/opportunities.ts";
 import { daysBefore } from "../../extract/types.ts";
@@ -23,6 +23,8 @@ import { moneySaid } from "../../engine/said-forms.ts";
 // with `org`, so the digest can say which words are the org's (DECISIONS.md 655,
 // 657). A reason passed on from an extract quotes Salesforce and stays plain.
 
+/** What a deal with no amount counts as in open pipeline: its definition says "counts as zero" (DECISIONS.md 773). */
+const NO_AMOUNT = 0;
 const DOMAIN = "current_pipeline";
 const MIN_SEGMENT = 10;
 const STUCK_PERCENTILE = 0.75;
@@ -331,7 +333,8 @@ function concentrationRule(options: { id: string; title: string; limit: number; 
 
 const accountConcentration = concentrationRule({
   id: "cur.account-concentration",
-  title: "Open pipeline resting on one account",
+  // The check's name, which a pass carries: "one" names no count (DECISIONS.md 773).
+  title: aside("Open pipeline resting on one account", "one"),
   limit: ACCOUNT_SHARE_LIMIT,
   keyOf: (d) => d.AccountId,
   subject: "account",
@@ -345,7 +348,7 @@ const accountConcentration = concentrationRule({
 
 const repConcentration = concentrationRule({
   id: "cur.rep-concentration",
-  title: "Open pipeline resting on one rep",
+  title: aside("Open pipeline resting on one rep", "one"),
   limit: REP_SHARE_LIMIT,
   keyOf: (d) => d.OwnerId,
   subject: "rep",
@@ -451,7 +454,7 @@ function currentMetrics(ctx: Ctx): Metric[] {
   const loaded = openDeals(ctx);
   const definitions = {
     count: { id: "current.open_deals", domain: DOMAIN, label: "Open deals", unit: "count" as const, definition: "Deals in a stage the calibration calls open, today." },
-    value: { id: "current.open_pipeline", domain: DOMAIN, label: "Open pipeline", unit: "currency" as const, definition: "Total Amount of open deals today. A deal with no amount counts as zero." },
+    value: { id: "current.open_pipeline", domain: DOMAIN, label: "Open pipeline", unit: "currency" as const, definition: named("Total Amount of open deals today. A deal with no amount counts as zero.", { countedAs: NO_AMOUNT }) },
     age: { id: "current.median_days_in_stage", domain: DOMAIN, label: "Days in current stage", unit: "days" as const, definition: "Median days open deals have been in their current stage." },
   };
   const shared = { exclusions: [] as string[], assumptions: [zoneNote(ctx)] };
@@ -466,7 +469,7 @@ function currentMetrics(ctx: Ctx): Metric[] {
   const metrics: Metric[] = [{ ...definitions.count, ...common, status: "measured", value: deals.length, n: deals.length, segments: [...segment(deals, dims, 1, (group) => group.length), ...retiredStages(ctx, deals)], ...rest }];
   if (data.multiCurrency) metrics.push({ ...definitions.value, ...common, status: "not_measurable", reason: "The org is multi-currency, and amounts can't be added until historic rates are supplied." });
   else {
-    const total = (group: Deal[]): number => Math.round(group.reduce((sum, d) => sum + (d.Amount ?? 0), 0));
+    const total = (group: Deal[]): number => Math.round(group.reduce((sum, d) => sum + (d.Amount ?? NO_AMOUNT), 0));
     metrics.push({ ...definitions.value, ...common, status: "measured", value: total(deals), n: deals.length, segments: segment(deals, dims, 1, total), ...rest });
   }
   const placed = deals.filter((d) => enteredCurrentStage(d));

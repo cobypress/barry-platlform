@@ -87,6 +87,19 @@ export function notFigures(text: string, spans: Array<{ start: number; end: numb
   else if (fixedWords.size < FIXED_MAX && !fixedWords.has(text)) fixedWords.set(text, spans);
 }
 
+/**
+ * word() for a whole literal of ours that can't be a said template without
+ * losing what it is (a metric's definition, a rule's title, which the engine
+ * texts' scan knows as written): the text, unchanged, with each whole `w` in it
+ * recorded as no figure. The same lint holds `w` to one fixed word, never a digit.
+ */
+export function aside<T extends string>(text: T, w: string): T {
+  const spans: Array<{ start: number; end: number }> = [];
+  for (const m of text.matchAll(new RegExp(String.raw`(?<![\w-])${w.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}(?![\w-])`, "g"))) spans.push({ start: m.index, end: m.index + w.length });
+  if (spans.length > 0) notFigures(text, spans);
+  return text;
+}
+
 /** The sentences these texts hold whole that carry word() pieces, made while `by` ran or at a module's load. */
 export function notFiguresIn(texts: ReadonlyArray<string | null | undefined>, by: string | readonly string[]): Array<{ sentence: string; spans: Array<{ start: number; end: number }> }> | null {
   const owners = new Set(typeof by === "string" ? [by] : by);

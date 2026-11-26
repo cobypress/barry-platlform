@@ -135,19 +135,20 @@ test("the lint sees what it should", () => {
 // It may only ever wrap one fixed word as written: never a digit, which is a figure, and never a value,
 // which could be anything; a claim ("one account holds…") is named, never wrapped.
 function wordFaults(path: string, text: string): string[] {
-  if (!text.includes("word(")) return [];
+  if (!text.includes("word(") && !text.includes("aside(")) return [];
   const file = ts.createSourceFile(path, text, ts.ScriptTarget.Latest, true);
-  const local = new Set<string>();
+  const local = new Map<string, string>();
   for (const s of file.statements) {
-    if (!ts.isImportDeclaration(s) || !ts.isStringLiteral(s.moduleSpecifier) || !/org-words\.ts$/.test(s.moduleSpecifier.text)) continue;
+    if (!ts.isImportDeclaration(s) || !ts.isStringLiteral(s.moduleSpecifier) || !/(org-words|named)\.ts$/.test(s.moduleSpecifier.text)) continue;
     const b = s.importClause?.namedBindings;
-    if (b && ts.isNamedImports(b)) for (const el of b.elements) if ((el.propertyName ?? el.name).text === "word") local.add(el.name.text);
+    // word(w), and aside(text, w), its form for a whole literal: w is what is checked.
+    if (b && ts.isNamedImports(b)) for (const el of b.elements) if (["word", "aside"].includes((el.propertyName ?? el.name).text)) local.set(el.name.text, (el.propertyName ?? el.name).text);
   }
   const out: string[] = [];
   const visit = (n: ts.Node): void => {
     if (ts.isCallExpression(n) && ts.isIdentifier(n.expression) && local.has(n.expression.text)) {
       const at = `${relative(ROOT, path)}:${file.getLineAndCharacterOfPosition(n.getStart()).line + 1}`;
-      const [arg, ...rest] = n.arguments;
+      const [arg, ...rest] = local.get(n.expression.text) === "aside" ? n.arguments.slice(1) : n.arguments;
       if (!arg || rest.length > 0 || !(ts.isStringLiteral(arg) || ts.isNoSubstitutionTemplateLiteral(arg))) out.push(`${at}: word() around something other than one literal`);
       else if (/\d/.test(arg.text)) out.push(`${at}: word() around a digit`);
     }
@@ -164,4 +165,7 @@ test("word() wraps only one fixed word, never a digit or a value (DECISIONS.md 7
   assert.deepEqual(wordFaults("x.ts", `${imp}word("3 deals");`), ["x.ts:2: word() around a digit"]);
   assert.deepEqual(wordFaults("x.ts", `${imp}word(count);`), ["x.ts:2: word() around something other than one literal"]);
   assert.deepEqual(wordFaults("x.ts", `${imp}word(\`one \${n}\`);`), ["x.ts:2: word() around something other than one literal"]);
+  const asideImp = 'import { aside } from "../engine/named.ts";\n';
+  assert.deepEqual(wordFaults("x.ts", `${asideImp}aside("Each move from one stage", "one");`), []);
+  assert.deepEqual(wordFaults("x.ts", `${asideImp}aside("A gap of 10 points", "10");`), ["x.ts:2: word() around a digit"]);
 });
