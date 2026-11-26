@@ -269,9 +269,13 @@ describe("sources that convert well and win poorly, or the reverse (L2's check)"
     const specs: LeadSpec[] = [];
     for (let j = 0; j < 120; j++) specs.push({ source: "Web", made: 100 + ((j * 7) % 600), owner: (j % 3) + 1, convertedAfter: 3, outcome: j % 10 < 6 ? "won" : "lost", closedAfter: 40 });
     for (let j = 0; j < 110; j++) specs.push({ source: "Webinar", made: 100 + ((j * 7) % 600), owner: (j % 3) + 1, convertedAfter: 3, outcome: j < 10 ? "open" : j < 56 ? "won" : "lost", closedAfter: 40 });
-    for (let j = 0; j < 200; j++) specs.push({ source: j % 2 ? "Web" : "Webinar", made: 100 + ((j * 11) % 600), owner: (j % 3) + 1 });
+    // Webinar converts every lead it has, Web 120 of 320: Webinar converts more and wins less, so only the gap stops it.
+    for (let j = 0; j < 200; j++) specs.push({ source: "Web", made: 100 + ((j * 11) % 600), owner: (j % 3) + 1 });
     const f = one(on(specs), "lead.source-win-rate");
     assert.equal(f.status, "passed", f.title ?? "");
+    // With the open deals counted as lost, the same org's gap would clear: the test has something to hold.
+    const lost = one(on(specs.map((x) => (x.outcome === "open" ? { ...x, outcome: "lost" as const } : x))), "lead.source-win-rate");
+    assert.equal(lost.status, "issue");
   });
 
   test("even sources pass, saying how many were compared", () => {
