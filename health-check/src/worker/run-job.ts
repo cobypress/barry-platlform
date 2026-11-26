@@ -24,6 +24,7 @@ import { safeReason, type Attempt, type JobOutcome, type WorkerDeps } from "./de
 import { appFor, appNotSetUp, needsReconnection } from "./apps.ts";
 import { withJobLock } from "./lock.ts";
 import { automaticRefusal } from "./automatic.ts";
+import { atRunRow } from "./at-run.ts";
 import { recalibrateForRunAgain, type Recalibrated } from "./connect-job.ts";
 import { CalibrationUnsettled, nameCurrencyBeforeRun } from "./name-currency.ts";
 import { setStagesBeforeRun } from "./stage-answer.ts";
@@ -257,6 +258,31 @@ async function runThenLetGo(runId: string, deps: WorkerDeps, attempt: Attempt, o
   return outcome;
 }
 
+/**
+ * The worker's switches and build on the run's row (DECISIONS.md 774), raced
+ * against the same timer as the delivery's row. A courtesy: never throws, and a
+ * store without the column says so itself and the run goes on.
+ */
+async function noteWorker(runId: string, at: string, deps: WorkerDeps): Promise<void> {
+  if (!deps.atRun || !deps.store.recordRunWorker) return;
+  const log = deps.log ?? (() => {});
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const limit = deps.deliveryWriteMs ?? DELIVERY_WRITE_MS;
+  const timedOut = new Promise<"timeout">((resolve) => {
+    timer = setTimeout(() => resolve("timeout"), limit);
+  });
+  try {
+    const write = deps.store.recordRunWorker(runId, atRunRow(deps.atRun, at));
+    write.catch(() => {});
+    if ((await Promise.race([write, timedOut])) === "timeout") log(`Run ${runId}'s record of this worker's switches and build wasn't saved within ${limit / 1000} seconds, so the run went on without it.`);
+  } catch {
+    // Only our own words: the error's text could name a value.
+    log(`Run ${runId}'s record of this worker's switches and build couldn't be saved, so the run went on without it.`);
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
 /** The longest the run times' write may hold the run's lock and the queue's slot (DECISIONS.md 722). */
 export const DELIVERY_WRITE_MS = 5_000;
 
@@ -364,6 +390,8 @@ async function runLocked(runId: string, deps: WorkerDeps, attempt: Attempt, seen
   }
   // From here the delivery is working on the run: its time counts (DECISIONS.md 722).
   seen.delivery = { startedAt: now().toISOString(), steps: [] };
+  // Which switches and build ran it, for staff (DECISIONS.md 774): never a reason for the run to stop or wait.
+  await noteWorker(runId, seen.delivery.startedAt, deps);
   const steps = seen.delivery.steps;
 
   const fail = async (reason: string): Promise<JobOutcome> => {
