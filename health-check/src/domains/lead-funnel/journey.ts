@@ -1,5 +1,6 @@
 import { pct, plural, notSized, type Rule, type RuleContext, type RuleResult } from "../../engine/rule.ts";
 import { org, said, type Said } from "../../engine/org-words.ts";
+import { named } from "../../engine/named.ts";
 import { andList } from "../../engine/said-forms.ts";
 import type { Evidence, Metric, MetricSegment, SegmentCheck, SeriesPoint } from "../../schemas/index.ts";
 import { meanStat } from "../average.ts";
@@ -39,6 +40,8 @@ const DAY = 86_400_000;
 const LEAST_LAG_DAYS = 30;
 /** "Converted quickly", for the stored insight: within a week of the lead's creation, fixed before looking. */
 export const FAST_DAYS = 7;
+/** The share of the closed journeys the lag is set to, as a sentence says it ("90%"). */
+const LAG_SHARE = Math.round(LAG_QUANTILE * 100);
 /** Sources raised at most by the journey's check, the widest gaps first. */
 const MOST_RAISED = 3;
 
@@ -96,14 +99,15 @@ export function journeyOf(ctx: Ctx): Cohort {
 
   const closedDays = [...followed.values()].flatMap((d) => (d.days === null ? [] : [d.days]));
   const evidence = data.evidence;
-  if (closedDays.length < minSample) return { status: "not_measurable", reason: said`${closedDays.length} closed deals from leads is below the calibrated minimum of ${minSample}.`, evidence };
+  const closedCount = closedDays.length;
+  if (closedCount < minSample) return { status: "not_measurable", reason: named(said`${closedCount} closed deals from leads is below the calibrated minimum of ${minSample}.`, { closedCount, minSample }), evidence };
   const percentile = Math.ceil(quantile(closedDays, LAG_QUANTILE));
   // Under our least time, the period ends that many days before the run instead, and the sentences say so.
   const floored = percentile < LEAST_LAG_DAYS;
   const lagDays = Math.max(LEAST_LAG_DAYS, percentile);
   const from = ctx.window.from;
   const to = dayPlus(localDay(ctx.now, zone), -lagDays);
-  if (to < from) return { status: "not_measurable", reason: said`Leads here can take ${lagDays} days to become closed deals, so none created since ${daySaid(from)} has had the time yet, and none can be counted.`, evidence };
+  if (to < from) return { status: "not_measurable", reason: named(said`Leads here can take ${lagDays} days to become closed deals, so none created since ${daySaid(from)} has had the time yet, and none can be counted.`, { lagDays: [lagDays, "day"] }), evidence };
 
   const inPeriod = (l: Lead): boolean => dayOf(l) >= from && dayOf(l) <= to;
   const recent = data.leads.filter((l) => dayOf(l) > to).length;
@@ -119,21 +123,22 @@ export function journeyOf(ctx: Ctx): Cohort {
     ...data.exclusions,
     ...(recent
       ? [floored
-          ? said`${plural(recent, "lead")} created after ${daySaid(to)}, too recent to have had ${lagDays} days, the least time we allow for a lead to become a closed deal`
-          : said`${plural(recent, "lead")} created after ${daySaid(to)}, too recent to have had the ${lagDays} days that 9 in 10 of the leads that became closed deals took`]
+          ? named(said`${plural(recent, "lead")} created after ${daySaid(to)}, too recent to have had ${lagDays} days, the least time we allow for a lead to become a closed deal`, { recent, lagDays: [lagDays, "day"] })
+          : named(said`${plural(recent, "lead")} created after ${daySaid(to)}, too recent to have had the ${lagDays} days that ${LAG_SHARE}% of the leads that became closed deals took`, { recent, lagDays: [lagDays, "day"], lagShare: [LAG_SHARE, "percent"] })]
       : []),
-    ...(left ? [said`${plural(left, "lead")} converted into a deal we couldn't follow: not read, at a stage with no meaning, or closed before the lead was made`] : []),
-    ...(second ? [said`${plural(second, "lead")} converted into the same deal as an earlier lead, which is counted from that lead`] : []),
+    ...(left ? [named(said`${plural(left, "lead")} converted into a deal we couldn't follow: not read, at a stage with no meaning, or closed before the lead was made`, { left })] : []),
+    ...(second ? [named(said`${plural(second, "lead")} converted into the same deal as an earlier lead, which is counted from that lead`, { second })] : []),
   ];
   const kept = [...followed.values()].filter((d) => inPeriod(d.lead));
-  return { status: "ok", from, to, lagDays, floored, leads, deals: kept, exclusions, evidence: [{ ...evidence[0]!, count: leads.length, exclusions }] };
+  return { status: "ok", from, to, lagDays, floored, leads, deals: kept, exclusions, evidence: [{ ...evidence[0]!, count: leads.length, dateRange: { from, to }, exclusions }] };
 }
 
 
 /** Too many still open to say how the period's deals end, or null when few enough are. */
 function tooOpen(c: Extract<Cohort, { status: "ok" }>): Said | null {
   const open = c.deals.filter((d) => d.open).length;
-  return c.deals.length > 0 && open > OPEN_SHARE * c.deals.length ? said`Of the ${c.deals.length} deals from leads made early enough to judge, ${open} are still open, too many to say how these deals end.` : null;
+  const deals = c.deals.length;
+  return deals > 0 && open > OPEN_SHARE * deals ? named(said`Of the ${deals} deals from leads made early enough to judge, ${open} are still open, too many to say how these deals end.`, { deals, open }) : null;
 }
 
 /** The cohort, or not measurable with the reason: a reason of its own, too many still open, or too few leads in it. */
@@ -141,13 +146,14 @@ function readyOrWhy(ctx: Ctx): Extract<Cohort, { status: "ok" }> | { reason: str
   const c = journeyOf(ctx);
   if (c.status !== "ok") return { reason: c.reason, evidence: c.evidence };
   const { minSample } = ctx.calibration;
-  if (c.leads.length < minSample) return { reason: said`${c.leads.length} leads made early enough to judge is below the calibrated minimum of ${minSample}.`, evidence: c.evidence };
+  const leads = c.leads.length;
+  if (leads < minSample) return { reason: named(said`${leads} leads made early enough to judge is below the calibrated minimum of ${minSample}.`, { leads, minSample }), evidence: c.evidence };
   const open = tooOpen(c);
   return open ? { reason: open, evidence: c.evidence } : c;
 }
 
 const periodSaid = (c: { from: string; to: string }): Said => said`between ${daySaid(c.from)} and ${daySaid(c.to)}`;
-const thin = (n: number, minSample: number): string => said`Sample below the calibrated minimum (${n} of ${minSample})`;
+const thin = (n: number, minSample: number): string => named(said`Sample below the calibrated minimum (${n} of ${minSample})`, { n, minSample });
 
 // ─── The metrics ─────────────────────────────────────────────────────────────
 
@@ -168,17 +174,18 @@ export function journeyMetrics(ctx: Ctx): Metric[] {
   const assumptions = [
     zoneNote(ctx),
     c.floored
-      ? said`Leads made ${periodSaid(c)} are counted. The period ends ${c.lagDays} days before the run, our minimum, so recent leads have time to close`
-      : said`Leads made ${periodSaid(c)} are counted. The period ends ${c.lagDays} days before the run: the time 9 in 10 of the leads that became closed deals took to get there`,
+      ? named(said`Leads made ${periodSaid(c)} are counted. The period ends ${c.lagDays} days before the run, our minimum, so recent leads have time to close`, { lagDays: [c.lagDays, "day"] })
+      : named(said`Leads made ${periodSaid(c)} are counted. The period ends ${c.lagDays} days before the run: the time ${LAG_SHARE}% of the leads that became closed deals took to get there`, { lagDays: [c.lagDays, "day"], lagShare: [LAG_SHARE, "percent"] }),
     said`Days are whole calendar days, from the day a lead was made to the day its deal closed, because Salesforce records the day a lead converted but not the time`,
-    said`A deal converted from more than one lead is counted once, from the first of them`,
+    said`A deal converted from several leads is counted once, from the first of them`,
   ];
   const rest = { dateRange: { from: c.from, to: c.to }, segmentExemptReason: null, series: [] as SeriesPoint[], exclusions: c.exclusions, assumptions };
   const metrics: Metric[] = [];
   const evidence = c.evidence;
 
   const won = c.deals.filter((d) => d.won);
-  if (won.length < minSample) metrics.push({ ...definitions.days, evidence, status: "not_measurable", reason: said`${won.length} won deals from leads is below the calibrated minimum of ${minSample}.` });
+  const wonCount = won.length;
+  if (wonCount < minSample) metrics.push({ ...definitions.days, evidence, status: "not_measurable", reason: named(said`${wonCount} won deals from leads is below the calibrated minimum of ${minSample}.`, { wonCount, minSample }) });
   else {
     const days = (group: JourneyDeal[]): number => round1(median(group.map((d) => d.days!)));
     const segments: MetricSegment[] = [...groupBy(won, (d) => d.lead.source)].sort(([a], [b]) => a.localeCompare(b)).map(([key, group]) => ({ dimension: "source", key, n: group.length, value: group.length < minSample ? null : days(group), notMeasurableReason: group.length < minSample ? thin(group.length, minSample) : null }));
@@ -297,7 +304,8 @@ export const sourceWinRate: Rule = {
       });
     const tried = round(new Set());
     if (tried.length === 0) {
-      return { outcome: "not_measurable", reason: said`No lead source had ${ctx.calibration.minSample} or more leads and closed deals, with ${MIN_EACH_OUTCOME} won and ${MIN_EACH_OUTCOME} lost, to compare with the deals from other sources.`, evidence: c.evidence };
+      const { minSample } = ctx.calibration;
+      return { outcome: "not_measurable", reason: named(said`No lead source had ${minSample} or more leads and closed deals, with ${MIN_EACH_OUTCOME} won and ${MIN_EACH_OUTCOME} lost, to compare with the deals from other sources.`, { minSample, eachOutcome: MIN_EACH_OUTCOME }), evidence: c.evidence };
     }
     type Tried = (typeof tried)[number];
     // One search at a bar: in each round, of the sources that clear it, those on the side of the pooled rate fewer of
@@ -374,7 +382,7 @@ export const sourceWinRate: Rule = {
         severity: "low",
         confidence: confidenceOf(ctx, cmp),
         evidence: c.evidence,
-        value: notSized(said`We can't say what a different win rate from one source would be worth until we know why it differs.`),
+        value: notSized(said`We can't say what a different win rate from a source would be worth until we know why it differs.`),
         effort: { size: "S" },
         owner: "Head of marketing",
         segmentsChecked: checked,

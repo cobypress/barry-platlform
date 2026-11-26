@@ -132,7 +132,7 @@ describe("leads that became won deals (L2's measure)", () => {
     const m = measured(metric(a, "lead.won_lead_rate"));
     assert.equal(m.value, base.value);
     assert.equal(m.n, base.n);
-    assert.ok(m.exclusions.some((e) => /^100 leads created after .*, too recent to have had the \d+ days that 9 in 10 of the leads that became closed deals took$/.test(e)), m.exclusions.join(" | "));
+    assert.ok(m.exclusions.some((e) => /^100 leads created after .*, too recent to have had the \d+ days that 90% of the leads that became closed deals took$/.test(e)), m.exclusions.join(" | "));
     assert.deepEqual(one(a, "lead.source-win-rate").facts, one(on(richSpecs()), "lead.source-win-rate").facts);
   });
 
@@ -151,7 +151,7 @@ describe("leads that became won deals (L2's measure)", () => {
     assert.deepEqual(m.dateRange, { from: "2024-10-31", to: "2026-10-01" });
     assert.ok(m.assumptions.includes("Leads made between 31 October 2024 and 1 October 2026 are counted. The period ends 30 days before the run, our minimum, so recent leads have time to close"), m.assumptions.join(" | "));
     assert.ok(m.exclusions.includes("1 lead created after 1 October 2026, too recent to have had 30 days, the least time we allow for a lead to become a closed deal"), m.exclusions.join(" | "));
-    assert.ok(!JSON.stringify(m).includes("9 in 10"));
+    assert.ok(!JSON.stringify(m).includes("90%"));
   });
 
   test("a lead converted into the same deal as an earlier lead of another source is left out, so the share and the comparisons agree", () => {

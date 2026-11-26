@@ -157,6 +157,7 @@
 {"ruleId":"lead.median_response_hours","kind":"metricAssumptions","count":1},
 {"ruleId":"lead.no-first-response","kind":"summary","count":1},
 {"ruleId":"lead.source-return","kind":"summary","count":1},
+{"ruleId":"lead.source-win-rate","kind":"summary","count":1},
 {"ruleId":"lead.won_per_lead","kind":"metricAssumptions","count":1},
 {"ruleId":"pipe.dead-end-stage","kind":"notMeasurableReason","count":1},
 {"ruleId":"pipe.going-backwards","kind":"notMeasurableReason","count":1},
