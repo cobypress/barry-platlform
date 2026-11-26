@@ -14,6 +14,7 @@ import type { Interview } from "../interviews/questions.ts";
 import type { StoredSummaries, SummariesToSave } from "../handbook/summary-row.ts";
 import type { RunDigest } from "../schemas/digest.ts";
 import type { RunLosses } from "./release.ts";
+import type { WorkerAtRun } from "./at-run.ts";
 
 // What the worker takes from the queue, and what it needs from the console's
 // database. Jobs carry ids only (the contract with the console, lane C2), so
@@ -423,6 +424,14 @@ export interface WorkerStore {
    * store without it keeps no run times.
    */
   recordDelivery?(delivery: RunDelivery): Promise<boolean>;
+  /**
+   * The worker's switches and build as this delivery took the run (DECISIONS.md
+   * 774), into the run row's "worker" column, replacing what an earlier delivery
+   * wrote. A courtesy: never throws. False when the console has no such column
+   * yet (its migration 20261221 not applied), or the write failed; the run goes
+   * on either way. A store without it records nothing.
+   */
+  recordRunWorker?(runId: string, worker: WorkerAtRun): Promise<boolean>;
 
   loadConnectJob(linkId: string): Promise<ConnectJobInput | null>;
   /**

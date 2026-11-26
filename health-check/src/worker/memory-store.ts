@@ -9,6 +9,7 @@ import { ORG_SETTINGS_CALIBRATOR } from "../connect/auto-calibration.ts";
 import { unstorableAt } from "./inventory.ts";
 import { Run, type BenchmarkRow, type Calibration, type ConnectLink, type Metric, type Release, type ReportSection } from "../schemas/index.ts";
 import { assertChecks, CONSOLE_CHECKS } from "./console-checks.ts";
+import { WorkerAtRun } from "./at-run.ts";
 import { PULSE_HOLD_REASONS, readLosses, type RunLosses } from "./release.ts";
 import { CODE_CLEARED_BY, pulseShowAudit, pulseShowRefusal, type KeptPulse } from "./postgres-store.ts";
 import { storedFromRow, waitingRow, type ConsoleSummariesRow, type SummariesToSave } from "../handbook/summary-row.ts";
@@ -338,6 +339,18 @@ export class MemoryWorkerStore implements WorkerStore {
     if (!this.runs.has(delivery.runId)) return false;
     assertChecks({ outcome: delivery.outcome }, CONSOLE_CHECKS.deliveryOutcome);
     this.deliveries.push(structuredClone(delivery));
+    return true;
+  }
+
+  /** Each run's worker at its last delivery (DECISIONS.md 774), apart from `writes`, as the deliveries. */
+  readonly workerAtRun = new Map<string, WorkerAtRun>();
+  /** False: a console without the "worker" column, as the Postgres store finds 42703. */
+  workerColumn = true;
+
+  async recordRunWorker(runId: string, worker: WorkerAtRun): Promise<boolean> {
+    if (!this.workerColumn || !this.runs.has(runId)) return false;
+    // Held to the schema the console reads, as the Postgres store's write is.
+    this.workerAtRun.set(runId, WorkerAtRun.parse(structuredClone(worker)));
     return true;
   }
 

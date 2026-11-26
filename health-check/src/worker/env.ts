@@ -4,6 +4,7 @@ import type { OAuthClient } from "../salesforce/oauth.ts";
 import type { DriveConfig } from "./drive.ts";
 import { MicrositeKeyError, micrositeKey } from "../microsite/seal.ts";
 import { readAutomaticOrgs, type AutomaticSwitch } from "./automatic.ts";
+import { BUILD_COMMIT } from "./at-run.ts";
 import { DocumentsKeyError, documentsKey, type PortalDocumentsSwitch } from "./portal-documents.ts";
 
 
@@ -53,6 +54,7 @@ export const WORKER_ENV = {
     HC_STAGE_NAMES_MODEL_CONSOLE: "ready, exactly, once the console's copy of the calibration carries a model's readings of closed stages (DECISIONS.md 766: its schema refuses them until then, and every page that reads such a calibration would fail). Anything else, or unset: HC_STAGE_NAMES_MODEL is ignored, and the worker says so at start",
     HC_AREA_REASONS: "on, exactly, to have an area we couldn't score say why from its own checks' reasons, said as each check says it, in the portal, the PDFs and the raw notes (DECISIONS.md 769). Anything else, or unset, is off: the area says what it said before",
     HC_LEAD_JOURNEY: "on, exactly, to add the lead journey to the lead funnel (DECISIONS.md 770): the days from a lead to a won deal, the share of leads that became won deals, a check of lead sources whose deals are won more or less often than they convert, and a stored insight that isn't served; and to read whether Salesforce kept the leads' Status history, so first-response checks on an org that doesn't keep it say they couldn't be measured. It changes findings, metrics and lead funnel scores. Anything else, or unset, is off: every result is as before",
+    RENDER_GIT_COMMIT: "Set by Render, not by hand: the commit the worker was built from. Each run records it, and which of the switches above were on, for staff on the run's page (DECISIONS.md 774). Anything that isn't 7 to 40 hex characters is taken as not given",
     HC_DOCUMENTS_KEY: "Seals the portal's documents: 32 bytes, base64 (openssl rand -base64 32), the same value as the console's, and different from HC_CONNECT_KEY, HC_TOKEN_KEY and HC_MICROSITE_KEY. Missing or wrong, the worker still starts and every portal request is refused, with nothing made",
   },
 } as const;
@@ -113,6 +115,8 @@ export type WorkerConfig = {
   areaReasons: boolean;
   /** HC_LEAD_JOURNEY=on, exactly: the lead funnel analyses the lead journey too (DECISIONS.md 770). */
   leadJourney: boolean;
+  /** RENDER_GIT_COMMIT when it reads as a commit, lower case, or null (DECISIONS.md 774). */
+  build: string | null;
 };
 
 const key32 = (raw: string): Buffer | null => {
@@ -234,6 +238,8 @@ export function readWorkerEnv(env: NodeJS.ProcessEnv): { ok: true; config: Worke
       // Exactly "on", untrimmed, as the other switches that change what a customer reads with no person reading it.
       areaReasons: env.HC_AREA_REASONS === "on",
       leadJourney: env.HC_LEAD_JOURNEY === "on",
+      // Only ever hex, so nothing else from the environment can ride into a run's row as its build.
+      build: BUILD_COMMIT.test(get("RENDER_GIT_COMMIT").toLowerCase()) ? get("RENDER_GIT_COMMIT").toLowerCase() : null,
     },
   };
 }

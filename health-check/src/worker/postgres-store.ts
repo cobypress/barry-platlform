@@ -17,6 +17,7 @@ import { SURVEY_METRIC_IDS } from "../survey/summary.ts";
 import { Interview } from "../interviews/questions.ts";
 import { BenchmarkRow, HeadcountBand, Industry } from "../schemas/benchmark.ts";
 import { storedFromRow, waitingRow, type ConsoleSummariesRow, type StoredSummaries } from "../handbook/summary-row.ts";
+import { WorkerAtRun } from "./at-run.ts";
 import { PULSE_HOLD_REASONS, readLosses, SHOWABLE_PULSE_HOLDS, type PulseHoldReason, type RunLosses } from "./release.ts";
 import { Calibration, ConnectLink, ManualAnswer, NumberOverride, ReportSection, Run, SectionVersion, type Finding, type ManualStep, type Metric, type Score } from "../schemas/index.ts";
 import {
@@ -469,6 +470,14 @@ export const SURVEY_METRICS_DELETE_SQL = `DELETE FROM "HealthCheckMetric" WHERE 
 export const RUN_SCORE_AND_HOST_MIGRATION = "20261128_health_check_run_score_and_host.sql";
 /** The console's migration that makes HealthCheckRunDelivery (DECISIONS.md 722). */
 export const RUN_DELIVERY_MIGRATION = "20261218_health_check_run_delivery.sql";
+/** The console's migration adding HealthCheckRun's "worker" column (DECISIONS.md 774). */
+export const RUN_WORKER_MIGRATION = "20261221_health_check_run_worker.sql";
+/**
+ * One statement of its own, outside every transaction, naming only the new
+ * column: a console without it (42703) refuses this alone, and nothing else
+ * the run writes ever names it (DECISIONS.md 774).
+ */
+export const RUN_WORKER_SQL = `UPDATE "HealthCheckRun" SET "worker" = $2::jsonb WHERE "id" = $1`;
 /** The most steps a delivery's row keeps: well inside the migration's 32 KB CHECK (about 95 bytes a step). */
 export const MAX_DELIVERY_STEPS = 100;
 /** The row that stands for the steps a capped delivery left out: their time and calls added up, and how many. */
@@ -1312,6 +1321,33 @@ export class PostgresWorkerStore implements WorkerStore {
           code === "42P01"
             ? `The console's database has no HealthCheckRunDelivery table yet, so run times aren't kept. Apply the console's ${RUN_DELIVERY_MIGRATION} migration.`
             : `The console's HealthCheckRunDelivery table refused a delivery's row with SQLSTATE ${code}, so run times aren't kept. Check the table and its rights against the console's ${RUN_DELIVERY_MIGRATION} migration.`,
+        );
+      }
+      return false;
+    }
+  }
+
+  #saidWorker = new Set<string>();
+
+  /**
+   * DECISIONS.md 774. A courtesy, as the delivery's row: the row is checked
+   * against the schema the console reads before it's sent, and any error is
+   * said by its SQLSTATE alone, once per worker process for a missing column
+   * (42703), and the run goes on. Never throws.
+   */
+  async recordRunWorker(runId: string, worker: WorkerAtRun): Promise<boolean> {
+    try {
+      const row = WorkerAtRun.parse(worker);
+      const result = await this.#pool.query(RUN_WORKER_SQL, [runId, JSON.stringify(row)]);
+      return result.rowCount === 1;
+    } catch (err) {
+      const code = sqlState((err as { code?: unknown } | null)?.code);
+      if (!this.#saidWorker.has(code)) {
+        this.#saidWorker.add(code);
+        this.#log(
+          code === "42703"
+            ? `The console's HealthCheckRun table has no "worker" column yet, so runs don't record this worker's switches and build. Apply the console's ${RUN_WORKER_MIGRATION} migration.`
+            : `A run's record of this worker's switches and build couldn't be saved (SQLSTATE ${code}), so runs may not show them; each run goes on as before.`,
         );
       }
       return false;

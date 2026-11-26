@@ -10,6 +10,7 @@ import type { DocumentDrive, FolderSharing } from "./drive.ts";
 import type { WorkerStore } from "./types.ts";
 import type { AutomaticSwitch } from "./automatic.ts";
 import type { PortalDocumentsSwitch } from "./portal-documents.ts";
+import type { WorkerAtRun } from "./at-run.ts";
 
 export type WorkerDeps = {
   store: WorkerStore;
@@ -74,6 +75,11 @@ export type WorkerDeps = {
    * the lead journey to the lead funnel and reads whether the leads' Status history was kept. Off when absent.
    */
   leadJourney?: boolean;
+  /**
+   * The worker's switches and build, read once at start (DECISIONS.md 774), recorded on each run it takes. Absent:
+   * nothing recorded, as in tests that don't ask for it.
+   */
+  atRun?: Omit<WorkerAtRun, "at">;
   /** The worker's switch for automatic runs, read once at start in env.ts (DECISIONS.md 688). Absent: off. */
   automatic?: AutomaticSwitch;
   /**
