@@ -416,9 +416,11 @@ describe("cases closed straight (C3)", () => {
   });
 
   test("a segment is never named where every case shares it", () => {
-    const specs: CaseSpec[] = [...quick(200), ...Array.from({ length: 100 }, (_, i): CaseSpec => ({ made: 50 + i, steps: [["Duplicate", 0.2]] }))].map((x) => ({ ...x, origin: "Email", priority: "High" }));
+    // Two in three closed straight, every case Email and High and made New: each one-value segment is the total again.
+    const specs: CaseSpec[] = [...quick(100), ...Array.from({ length: 200 }, (_, i): CaseSpec => ({ made: 50 + i, steps: [["Duplicate", 0.2]] }))].map((x) => ({ ...x, origin: "Email", priority: "High" }));
     const f = one(on(specs), "svc.closed-straight");
-    assert.doesNotMatch(textOf(f), /by (origin|priority|starting status)|Highest/);
+    assert.equal(f.status, "issue");
+    assert.doesNotMatch(textOf(f), /by (origin|priority|starting status)|Highest|highest/);
   });
 
   test("closed cases with no recorded status change aren't counted, and the sentence says how many", () => {
@@ -489,6 +491,19 @@ describe("before and after a first close, by place, never by time (review round 
     const f = one(on(specs), "svc.closed-straight");
     assert.notEqual(f.status, "not_measurable", textOf(f));
     assert.equal(f.facts!.n, 300);
+  });
+
+  test("a single length is in hours under a day too: the one case closed again", () => {
+    // Thirty reopened: twenty-nine still open long after their first close, one closed again twelve hours after reopening.
+    const specs: CaseSpec[] = [
+      ...quick(600),
+      ...Array.from({ length: 29 }, (_, i): CaseSpec => ({ made: 60 + i, steps: [["Working", 0.5], ["Closed", 1], ["Working", 1.5]] })),
+      { made: 100, steps: [["Working", 0.5], ["Closed", 1], ["Working", 1.5], ["Closed", 2]] },
+    ];
+    const f = one(on(specs), "svc.reopened-time");
+    assert.match(textOf(f), / The 1 closed again took 1 calendar day from its first close to its final close\./, textOf(f));
+    const quickAgain = specs.slice(0, -1).concat([{ made: 100, steps: [["Working", 0.5], ["Closed", 1], ["Working", 1.2], ["Closed", 1.5]] }]);
+    assert.match(textOf(one(on(quickAgain), "svc.reopened-time")), / The 1 closed again took 12 hours from its first close to its final close\./);
   });
 
   test("every length the lane says is in hours under a day, and a day from 23.5 hours up", () => {
