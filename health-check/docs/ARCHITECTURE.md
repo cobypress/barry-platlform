@@ -170,6 +170,8 @@ The benchmark set is kept apart, in `~/.barometer/benchmarks/rows.jsonl` (folder
 | `raw-notes.md` | Real names | Never: customer deliverable |
 | `raw-notes.docx`, `executive-summary.pdf`, `full-health-check.pdf` | Real names in the notes, team level in the PDFs | Never: customer deliverables |
 | `report-sections.json`, `layout-report.json`, `narrative-rejections.json` | Section text, tokens and check results | No: review records |
+| `named-values.json` | The values each finding's and metric's sentences were named with, by id (DECISIONS.md 768): numbers only, for the strict check alone. Never in a finding, the digest or a stored row | No |
+| `strict-shadow.json` | What the strict per-finding check would have masked on an automatic run or gated pulse, by rule, kind of text and the figure as written (DECISIONS.md 768). Never in the digest or a stored row, never shown; the worker's log has its counts only | No |
 
 ## Milestone 3 notes on the Claude API
 
