@@ -36,20 +36,30 @@ export type PipelineProblem =
   /** `share` x the open target extra deals sit in Proposal, entered 45 to 180 days ago, never moved. */
   | { kind: "abandoned"; share: number }
   /** A deal that will be lost from a stage sits there `factor` times as long first. */
-  | { kind: "lostSlowly"; factor: number };
+  | { kind: "lostSlowly"; factor: number; noDecision?: boolean };
+
+export type PipelineOptions = {
+  /** Every stay gets a second history row in the same stage halfway through, as an Amount or close date edit makes. */
+  edits?: boolean;
+  /** Days of history before the run, 1,095 unless given: an org younger than the read. */
+  historyDays?: number;
+  /** Every stay this many times as long, the arrival rate scaled to keep the open target: a longer sales cycle. */
+  stayScale?: number;
+};
 
 type Run = [stage: string, start: number, end: number | null];
 
 /** The opportunities and stage history of a steady pipeline, as the opportunities extract holds them. */
-export function steadyPipeline(shape: StayShape, openTarget: number, seed: number, now: Date, problem: PipelineProblem = { kind: "none" }): { opportunities: unknown[]; history: unknown[] } {
+export function steadyPipeline(shape: StayShape, openTarget: number, seed: number, now: Date, problem: PipelineProblem = { kind: "none" }, options: PipelineOptions = {}): { opportunities: unknown[]; history: unknown[] } {
   const r = seeded(seed);
   const dist = STAY_SHAPES[shape];
   const NOW = now.getTime();
   const windowFrom = NOW - 730 * DAY;
-  const rate = openTarget / (dist.mean * [0, 1, 2, 3].reduce((s, k) => s + (1 - LOSS) ** k, 0));
+  const scale = options.stayScale ?? 1;
+  const rate = openTarget / (scale * dist.mean * [0, 1, 2, 3].reduce((s, k) => s + (1 - LOSS) ** k, 0));
   const deals: Array<{ id: string; owner: string; created: number; runs: Run[]; closed: number | null; won: boolean }> = [];
   const add = (created: number, runs: Run[], closed: number | null, won: boolean) => deals.push({ id: `006${String(deals.length + 1).padStart(12, "0")}AAA`, owner: OWNERS[Math.floor(r() * OWNERS.length)]!, created, runs, closed, won });
-  for (let t = NOW - SPAN * DAY; ; ) {
+  for (let t = NOW - (options.historyDays ?? SPAN) * DAY; ; ) {
     t += (-Math.log(1 - r()) / rate) * DAY;
     if (t >= NOW) break;
     const runs: Run[] = [];
@@ -59,7 +69,7 @@ export function steadyPipeline(shape: StayShape, openTarget: number, seed: numbe
     for (let s = 0; s < STAGES.length; s++) {
       const last = s === STAGES.length - 1;
       const lostHere = problem.kind === "lostSlowly" && !last ? r() < LOSS : false;
-      let stay = Math.min(dist.draw(r), 1000);
+      let stay = Math.min(scale * dist.draw(r), 1000 * scale);
       if (lostHere && problem.kind === "lostSlowly") stay = Math.min(stay * problem.factor, 1000);
       const end = at + stay * DAY;
       if (end >= NOW) {
@@ -92,11 +102,16 @@ export function steadyPipeline(shape: StayShape, openTarget: number, seed: numbe
   const history: unknown[] = [];
   for (const d of deals) {
     if (!(d.closed === null || d.created >= windowFrom || d.closed >= windowFrom)) continue;
-    const stage = d.closed === null ? d.runs.at(-1)![0] : d.won ? "Closed Won" : "Closed Lost";
+    const lostAs = problem.kind === "lostSlowly" && problem.noDecision ? "Closed No Decision" : "Closed Lost";
+    const stage = d.closed === null ? d.runs.at(-1)![0] : d.won ? "Closed Won" : lostAs;
     const closeDate = d.closed === null ? day(NOW + 30 * DAY) : day(d.closed);
     opportunities.push({ Id: d.id, OwnerId: d.owner, StageName: stage, Amount: 10000, CloseDate: closeDate, CreatedDate: iso(d.created), IsClosed: d.closed !== null, IsWon: d.won, LastActivityDate: day(NOW - 3 * DAY), Type: "New Business", LeadSource: "Web", RecordType: "New_Business", CurrencyIsoCode: null, LossReason: null, AccountId: null });
     const row = (s: string, ms: number) => history.push({ Id: `008${String(history.length + 1).padStart(12, "0")}AAA`, OpportunityId: d.id, StageName: s, Amount: 10000, CloseDate: closeDate, CreatedDate: iso(ms) });
-    for (const [s, start] of d.runs) row(s, start);
+    for (const [s, start, end] of d.runs) {
+      row(s, start);
+      // An edit inside the stay, the same stage again: one stay, not two.
+      if (options.edits) row(s, (start + (end ?? NOW)) / 2);
+    }
     if (d.closed !== null) row(stage, d.closed);
   }
   return { opportunities, history };

@@ -884,7 +884,7 @@ export const FIX_BY_VERSION: Readonly<Record<string, Readonly<Record<number, Fix
   "cur.stuck-in-stage": {
     3: {
       ...FIX_TABLE["cur.stuck-in-stage"]!,
-      prompt: change("deals", ["Build a report of open deals in their stage longer than three quarters of closed deals spent in that stage, by stage and owner.", "Add it to the pipeline review, where each owner decides on their own deals."], ["At each review, the share of open deals on the report falls towards the share your closed deals' stage times would give."]),
+      prompt: change("deals", ["Build a report of open deals in their stage longer than three quarters of stays in that stage last, by stage and owner.", "Add it to the pipeline review, where each owner decides on their own deals."], ["At each review, the share of open deals on the report falls towards the share your stage times would give."]),
     },
   },
 };

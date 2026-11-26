@@ -2,173 +2,217 @@
 // probe can run it on simulated orgs as the rule does on a real one.
 //
 // Version 2 counted the open deals that had sat in their stage longer than the
-// line (the 75th percentile of completed stays) and raised an issue above a fixed
-// share. A snapshot of open deals over-samples long stays: on a steady pipeline,
-// where nothing gets worse, the share of open deals past the q-th percentile of
-// completed stays X is E[max(0, X - q)] / E[X], which is 25% only for exponential
-// stays and 57% or more for the heavy tails B2B stages usually have. So the fixed
-// share raised an issue on every run of a steady heavy-tailed org.
+// line (the 75th percentile of won deals' completed stays) and raised an issue
+// above a fixed share. A snapshot of open deals over-samples long stays: on a
+// steady pipeline the share past the q-th percentile of stays X is
+// E[max(0, X - q)] / E[X], 25% only for exponential stays and 57% or more for the
+// long tails B2B stages usually have, so the fixed share raised an issue on every
+// run of a steady long-tailed org.
 //
-// Version 3 keeps the line and the count, and compares the count with the share
-// the same deals would show if they had moved through each stage as the completed
-// stays did. Every entry into a stage the history shows, at age a today, would
-// still be in it with chance S(a), the share of completed stays longer than a. So,
-// given the deals that really entered, the stage would hold sum S(a) of them, and
-// sum S(a) over a past the line of those past it. With entries arriving evenly
-// that ratio is E[max(0, X - q)] / E[X]; reading the real entries also keeps a
-// pipeline whose intake has grown or shrunk, or an org whose history is short,
-// from looking stuck when nothing is (the e45 probes: arrivals falling to a third
-// over a year raised up to 23% of steady heavy-tailed orgs under the even-flow
-// formula, and none this way).
+// The stay in a stage. Every entry into the stage since the history we read
+// starts is one stay: finished when the deal moved on or closed, still running
+// (censored at its age today) when the deal is still there. A deal that re-enters
+// the stage has a stay each time; a deal that skips it has none. The share of
+// stays lasting longer than t, S(t), is the Kaplan-Meier estimate from all of
+// them, so stays still running count for as long as they have run: a long cycle
+// or a short history doesn't read short, as finished stays alone did (the e45
+// review: 8 points low on a 9-month cycle, 15 on a 180-day history). Only entries
+// since the read's start are used, since an older entry is in the read only if
+// its deal was still open or closed inside it, which favours long stays.
 //
-// Each open deal in a stage is then past the line with that chance, independently
-// (the stays in progress at a moment of a Poisson flow are a Poisson sample), so a
-// group's count past the line has mean sum(e) and variance sum(e(1 - e)). The
-// expected share comes from a finite sample of stays, and its spread (the delta
-// method for a ratio of means over the stays) is added, scaled by the group's
-// deals in that stage, since they all share the one estimate. A group is raised
-// only when it is clearly above (z) and far enough above (points) its own expected
-// share: the total and every segment alike, each against its own entries, since a
-// segment tested against a fixed share would bring the fault back.
+// The tail. After the longest finished stay, S stays where it was (some stays
+// still running are longer), unless the history covers twice the longest finished
+// stay: then deals were followed long enough to have been seen leaving later, none
+// did, and those still there are past every stay the stage's times explain, so S is
+// taken as none beyond it. Otherwise a stage whose estimate still has more than
+// TAIL_LIMIT of stays running at its longest finished stay is not measurable: the
+// history doesn't yet cover how long deals stay there, and an estimate would be a
+// guess.
+//
+// The expectation. Each entry at age a today is still in the stage with chance
+// S(a); so, given the deals that really entered, the stage would hold sum S(a) of
+// them, and sum S(a) over a past the line of those past it. Each open deal is then
+// past the line with that share, independently (stays in progress at a moment are
+// a Poisson sample), so a group's count past the line has mean sum(e) and variance
+// sum(e(1 - e)); the share's own uncertainty, from Greenwood's variance of the
+// Kaplan-Meier estimate carried through the ratio by the delta method (a bootstrap
+// would cost a hundred estimates a stage a group, and Greenwood is exact to the
+// same first order), is added, scaled by the group's deals in that stage, since
+// they share the one estimate. When no entry would still be there at all, none of
+// the open deals there is expected: every one is past what the stage's times
+// explain. A group is raised only when it is clearly above (z) and far enough
+// above (points) its own expected share: the total and every segment alike.
 
-/** Count of sorted values strictly below x. */
-function below(sorted: readonly number[], x: number): number {
+/** One stay in a stage: finished (`done`) after `days`, or still running after `days`. */
+export type Stay = { days: number; done: boolean };
+
+/** A stage's estimate of how long stays last. */
+export type StageModel = {
+  /** Days: the percentile of stays, by the estimate. */
+  line: number;
+  /** The longest finished stay, in days. */
+  longest: number;
+  /** The share of stays still running after the longest finished one (before any cut). */
+  plateau: number;
+  /** True when the history covers twice the longest finished stay, so nothing is expected past it. */
+  cut: boolean;
+  /** Distinct finished stays, ascending, with S just after each and Greenwood's sum up to it. */
+  times: number[];
+  surv: number[];
+  greenwood: number[];
+  finished: number;
+};
+
+/** The most of a stage's stays the estimate may leave running at its longest finished stay, short of the cut. */
+export const TAIL_LIMIT = 0.05;
+/** The history must cover this many times the longest finished stay for nothing to be expected past it. */
+export const CUT_COVER = 2;
+
+export type ModelOutcome = StageModel | { why: "few" | "uncovered" };
+
+/** A stage's estimate from its stays, given how many days of history the read covers for it, at `percentile` (0 to 1). */
+export function stageModel(stays: readonly Stay[], coverDays: number, percentile: number, minFinished: number): ModelOutcome {
+  const finished = stays.filter((s) => s.done).length;
+  if (finished < minFinished) return { why: "few" };
+  const sorted = [...stays].sort((a, b) => a.days - b.days || Number(b.done) - Number(a.done));
+  const times: number[] = [];
+  const surv: number[] = [];
+  const greenwood: number[] = [];
+  let atRisk = sorted.length;
+  let s = 1;
+  let g = 0;
+  for (let i = 0; i < sorted.length; ) {
+    const t = sorted[i]!.days;
+    let d = 0;
+    let c = 0;
+    while (i < sorted.length && sorted[i]!.days === t) {
+      if (sorted[i]!.done) d++;
+      else c++;
+      i++;
+    }
+    if (d > 0) {
+      s *= 1 - d / atRisk;
+      if (atRisk > d) g += d / (atRisk * (atRisk - d));
+      times.push(t);
+      surv.push(s);
+      greenwood.push(g);
+    }
+    atRisk -= d + c;
+  }
+  const longest = times.at(-1)!;
+  const plateau = surv.at(-1)!;
+  const cut = coverDays >= CUT_COVER * longest;
+  if (!cut && plateau > TAIL_LIMIT) return { why: "uncovered" };
+  const at = surv.findIndex((x) => x <= 1 - percentile);
+  // With the cut, the stays still running past the longest finished one are past the line, which is that stay.
+  const line = at >= 0 ? times[at]! : longest;
+  return { line, longest, plateau, cut, times, surv, greenwood, finished };
+}
+
+/** Count of sorted values at or below x. */
+function upTo(sorted: readonly number[], x: number): number {
   let lo = 0;
   let hi = sorted.length;
   while (lo < hi) {
     const mid = (lo + hi) >> 1;
-    if (sorted[mid]! < x) lo = mid + 1;
+    if (sorted[mid]! <= x) lo = mid + 1;
     else hi = mid;
   }
   return lo;
 }
 
-/** A stage's line and the completed stays it was read from. */
-export type StageLine = {
-  /** Days: the percentile of the completed stays. */
-  line: number;
-  /** The completed stays, in days. */
-  stays: readonly number[];
-};
+/** S(age), the share of stays longer than `age`, and Greenwood's sum at it. */
+export function survival(model: StageModel, age: number): { s: number; g: number } {
+  if (model.cut && age > model.longest) return { s: 0, g: 0 };
+  const k = upTo(model.times, age);
+  return k === 0 ? { s: 1, g: 0 } : { s: model.surv[k - 1]!, g: model.greenwood[k - 1]! };
+}
 
-export const stageLine = (stays: readonly number[], percentile: number, quantile: (values: number[], q: number) => number): StageLine => ({ line: quantile([...stays], percentile), stays });
+/** The share of a stage's deals past its line, given the ages today of the entries into it, and its variance. */
+export type Expected = { share: number; spread: number };
 
-/** The share of a stage's deals past its line in a pipeline whose stays were the completed ones, and its spread. */
-export type Expected = {
-  /** 0 to 1. */
-  share: number;
-  /** The variance of `share` as an estimate, from the stays' own spread. */
-  spread: number;
-};
-
-/**
- * The expected share past the line, given the ages today of every entry into the stage (in days), or null when no
- * entry would still be in the stage at all (every one is older than every completed stay).
- */
-export function expectedShare(ref: StageLine, ages: readonly number[]): Expected | null {
-  const sorted = [...ages].sort((a, b) => a - b);
-  // Entries at or under the line: never past it, however long they stay.
-  const notPast = below(sorted, ref.line) + sorted.filter((a) => a === ref.line).length;
-  // For each stay x, the entries it would outlast (age < x), and those of them past the line: their means over the
-  // stays are sum S(a) and sum S(a) over a past the line.
-  let all = 0;
-  let past = 0;
-  const pairs: Array<[number, number]> = [];
-  for (const x of ref.stays) {
-    const c = below(sorted, x);
-    const p = Math.max(0, c - notPast);
-    all += c;
-    past += p;
-    pairs.push([c, p]);
+export function expectedShare(model: StageModel, ages: readonly number[]): Expected {
+  const rows = [...ages].sort((a, b) => a - b).map((a) => ({ past: a > model.line, ...survival(model, a) }));
+  const all = rows.reduce((t, r) => t + r.s, 0);
+  // No entry would still be there: none of the deals there is expected, past the line or not.
+  if (!(all > 0)) return { share: 0, spread: 0 };
+  const share = rows.reduce((t, r) => t + (r.past ? r.s : 0), 0) / all;
+  // Var(sum h_j S_j-hat) with Cov(S(a), S(b)) = S(a) S(b) g(min(a, b)), the entries in age order.
+  const h = rows.map((r) => ((r.past ? 1 : 0) - share) * r.s);
+  let after = 0;
+  let v = 0;
+  for (let j = rows.length - 1; j >= 0; j--) {
+    v += h[j]! * rows[j]!.g * (h[j]! + 2 * after);
+    after += h[j]!;
   }
-  const m = ref.stays.length;
-  if (!(all > 0)) return null;
-  const share = past / all;
-  const mean = all / m;
-  const residual = m > 1 ? pairs.reduce((a, [c, p]) => a + (p - share * c) ** 2, 0) / (m - 1) : 0;
-  return { share, spread: residual / m / mean ** 2 };
+  return { share, spread: Math.max(0, v) / all ** 2 };
 }
 
 /** One group's count past the line against what it would be. Shares are raw (0 to 100), never rounded. */
 export type Comparison = {
   n: number;
   hits: number;
-  /** Raw share past the line, in percent. */
   share: number;
-  /** Raw expected share, in percent. */
   expectedShare: number;
-  /** Raw points above the expected share (negative below it). */
   excess: number;
   z: number;
 };
 
-/** How far above its expectation a group must be, by both tests, to be raised. */
 export type Margin = { points: number; z: number };
 
 /**
- * The margins version 3 ships (DECISIONS.md 777), chosen on the e45 probes (orchestration/health-check/probes/
- * e45-stuck-expected): four stay shapes at 100, 300 and 1,000 open deals, 200 orgs a cell. The z tests keep steady
- * orgs quiet; the points keep a large org from being raised for a gap too small to act on. The total's z is the
- * higher: the closed deals lack the longest stays, still going, so the expectation reads up to 2 points low on long
- * tails (3 on a growing pipeline), which a large org's total turns into z. A segment needs more points, since about
- * a dozen are tested.
+ * The margins version 3 ships (DECISIONS.md 777), chosen on the e45 fix round's probes on two generators (the
+ * builder's and the reviewer's, 99 quiet cells of 200 orgs): at most 0.5% raised in any. The z tests keep steady orgs
+ * quiet; the points keep a large org from being raised for a gap too small to act on. A segment is held to a higher
+ * z and more points, since about a dozen are tested: at z 3.5, 50 reps raised 1.5% of steady orgs.
  */
-export const TOTAL_MARGIN: Margin = { points: 5, z: 4 };
-export const SEGMENT_MARGIN: Margin = { points: 8, z: 3.5 };
+export const TOTAL_MARGIN: Margin = { points: 5, z: 3 };
+export const SEGMENT_MARGIN: Margin = { points: 8, z: 4 };
 
-/** Whether a comparison is raised at a margin: above by more than its points and its z, on the raw figures. */
 export const above = (c: Comparison, margin: Margin): boolean => c.n > 0 && c.excess > margin.points && c.z > margin.z;
 
 export type SegmentComparison = Comparison & { dimension: string; key: string };
 
 export type Judged = {
   total: Comparison & { raised: boolean };
-  /** Every segment of at least `minSegment` deals, with whether it was raised. */
   segments: Array<SegmentComparison & { raised: boolean }>;
-  /** The raised segments, furthest above their own expected share first. */
   raised: SegmentComparison[];
   segmentsChecked: Array<{ dimension: string; segments: number }>;
 };
 
 export type Inputs<D> = {
-  /** The open deals compared: each in a stage with a line, with its entry shown. */
   open: readonly D[];
   stageOf: (deal: D) => string;
-  /** Days in its current stage today. */
   ageOf: (deal: D) => number;
-  /** Every entry into a stage with a line, by any deal, with its age today in days. */
+  /** Every entry since the read's start into a stage with a model, by any deal, with its age today in days. */
   entries: ReadonlyArray<{ deal: D; stage: string; age: number }>;
-  lines: ReadonlyMap<string, StageLine>;
+  models: ReadonlyMap<string, StageModel>;
   dimensions: Record<string, (deal: D) => string>;
-  /**
-   * The dimension that is the deal's stage: its segment's entries are every entry into that stage, by any deal, and
-   * not the entries of the deals in it now, which would leave out every deal that has moved on.
-   */
+  /** The dimension that is the deal's stage: its segment's entries are every entry into that stage. */
   stageDimension: string;
   minSegment: number;
   total?: Margin;
   segment?: Margin;
 };
 
-/** One group of open deals against its own entries' expectation. */
+/** Whether an open deal is past its stage's line: strictly longer, as version 2 counts. */
+export const pastLine = (age: number, model: StageModel): boolean => age > model.line;
+
 function compareGroup<D>(open: readonly D[], entries: Inputs<D>["entries"], input: Inputs<D>): Comparison {
-  let hits = 0;
   let expected = 0;
   let binomial = 0;
   let estimate = 0;
   const inStage = new Map<string, number>();
   for (const deal of open) inStage.set(input.stageOf(deal), (inStage.get(input.stageOf(deal)) ?? 0) + 1);
   for (const [stage, k] of inStage) {
-    const ref = input.lines.get(stage);
-    if (!ref) throw new Error("No line for the stage of a compared deal");
-    // Every entry older than every completed stay: none would still be there, and as S(a) falls to nothing the share
-    // of those left that are past the line rises to all of them, its limit, so an open deal there is expected past it.
-    const e = expectedShare(ref, entries.filter((x) => x.stage === stage).map((x) => x.age)) ?? { share: 1, spread: 0 };
+    const model = input.models.get(stage);
+    if (!model) throw new Error("No model for the stage of a compared deal");
+    const e = expectedShare(model, entries.filter((x) => x.stage === stage).map((x) => x.age));
     expected += k * e.share;
     binomial += k * e.share * (1 - e.share);
     estimate += k * k * e.spread;
   }
-  for (const deal of open) if (input.ageOf(deal) > input.lines.get(input.stageOf(deal))!.line) hits++;
+  const hits = open.filter((d) => pastLine(input.ageOf(d), input.models.get(input.stageOf(d))!)).length;
   const n = open.length;
   const variance = binomial + estimate;
   const diff = hits - expected;
@@ -194,7 +238,8 @@ export function judge<D>(input: Inputs<D>): Judged {
     }
     segmentsChecked.push({ dimension, segments: groups.size });
     for (const [key, group] of groups) {
-      if (group.length < input.minSegment) continue;
+      // A segment holding every compared deal is the total, said once as the total.
+      if (group.length < input.minSegment || group.length === input.open.length) continue;
       const c = compareGroup(group, input.entries.filter((x) => (dimension === input.stageDimension ? x.stage : keyOf(x.deal)) === key), input);
       segments.push({ ...c, dimension, key, raised: above(c, segmentMargin) });
     }

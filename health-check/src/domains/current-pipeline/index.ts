@@ -18,7 +18,7 @@ import { deliveryOutlook, openStageMetrics, OUTLOOK_LABELS, retiredStages } from
 import { eng, joinSaid, org, said, type Said, word } from "../../engine/org-words.ts";
 import { moneySaid } from "../../engine/said-forms.ts";
 import { STUCK_LIMITS_BEFORE_3 } from "../../engine/loosened.ts";
-import { judge, stageLine, type StageLine } from "./stuck-expected.ts";
+import { judge, pastLine, stageModel, type StageModel, type Stay } from "./stuck-expected.ts";
 
 // Every title, summary, recommendation and reason is written with `said`, and
 // every name the org chose (a stage, a record type, a team, a person's token)
@@ -210,26 +210,27 @@ const stuckInStage = shareRule({
   fix: "Move it on with a dated next step, or close it",
 });
 
-/** The categories a closed deal can have: a stay in an open stage ends with the deal moving on, or with one of these. */
-const CLOSED = new Set(["won", "lost", "no_decision"]);
+const DAY_MS = 86_400_000;
 
 /**
- * Version 3's reference (DECISIONS.md 777): every completed stay in each open stage, from every closed deal, won,
- * lost or no decision. The open pipeline holds deals that will be lost as well as won, and lost deals usually sit
- * longer, so won stays alone would set the line and the expectation too low for it.
+ * Each stay in an open stage since `from` (DECISIONS.md 777): one run of the stage in the deal's history, same-stage
+ * rows (an Amount or close date edited mid-stay) merged, a re-entry a stay of its own. It ended when the next run
+ * began, or when a closed deal closed; it is still running on an open deal in that stage now. The last run of an
+ * open deal whose history doesn't show its current stage is left out, as its end isn't known.
  */
-function closedStays(data: Ready): Map<string, number[]> {
-  const byStage = new Map<string, number[]>();
-  for (const deal of data.deals) {
-    if (deal.category === null || !CLOSED.has(deal.category)) continue;
-    for (const run of stageRuns(deal)) {
-      if (data.stages.categoryOf(run.stage) !== "open") continue;
-      const days = byStage.get(run.stage);
-      if (days) days.push(run.days);
-      else byStage.set(run.stage, [run.days]);
-    }
+function stageStays(deal: Deal, data: Ready, from: Date): Array<{ stage: string; start: Date; end: Date | null }> {
+  const runs = stageEntries(deal);
+  const out: Array<{ stage: string; start: Date; end: Date | null }> = [];
+  for (let i = 0; i < runs.length; i++) {
+    const { stage, entered } = runs[i]!;
+    if (data.stages.categoryOf(stage) !== "open" || entered < from) continue;
+    const next = runs[i + 1];
+    if (next) out.push({ stage, start: entered, end: next.entered });
+    else if (deal.category === "open") {
+      if (deal.StageName === stage) out.push({ stage, start: entered, end: null });
+    } else if (deal.closedAt > entered) out.push({ stage, start: entered, end: deal.closedAt });
   }
-  return byStage;
+  return out;
 }
 
 /**
@@ -248,24 +249,37 @@ function wonLineReading(ctx: RuleContext, data: Ready, open: Deal[]): Record<str
 /** A share for a sentence, to one decimal place, as `pct` gives the observed one. The comparison reads the raw share. */
 const shown = (share: number): number => Math.round(share * 10) / 10;
 
+/** Days for a deal's line: one decimal place, a whole number without it. */
+const daysText = (d: number): string => (Number.isInteger(d) ? `${d}` : d.toFixed(1));
+const dayWord = (d: number): string => (d === 1 ? "day" : "days");
+
+type LeftOut = { few: number; uncovered: number; noEntry: number; before: number };
+
 /** The open deals version 3 couldn't compare, in a sentence, or nothing when it compared them all. */
-function leftOutSentence3(noLine: number, noEntry: number): Said | undefined {
-  const n = noLine + noEntry;
+function leftOutSentence3(left: LeftOut): Said | undefined {
+  const { few, uncovered, noEntry, before } = left;
+  const n = few + uncovered + noEntry + before;
   if (n === 0) return undefined;
-  const lead = named(said`${n === 1 ? "One more open deal" : said`${n} more open deals`} couldn't be compared`, { leftOut: n, noLine, noEntry });
-  const line = (k: number) => said`${k === 1 ? "a stage" : "stages"} with too few closed deals to set a line`;
-  const entry = (k: number) => said`history that doesn't show when ${k === 1 ? "it" : "they"} entered ${k === 1 ? "its" : "their"} stage`;
-  if (!noEntry) return said`${lead}, as ${n === 1 ? "it's" : "they're"} in ${line(n)}.`;
-  if (!noLine) return said`${lead}, as ${n === 1 ? "it has" : "they have"} ${entry(n)}.`;
-  return named(said`${lead}: ${noLine} in ${line(noLine)}, and ${noEntry} with ${entry(noEntry)}.`, { noLine, noEntry });
+  const lead = named(said`${n === 1 ? "One more open deal" : said`${n} more open deals`} couldn't be compared`, { leftOut: n, few, uncovered, noEntry, before });
+  const one = n === 1;
+  // Each reason as a list item ("2 in stages with ...") and, when it is the only one, as the reason for them all.
+  const parts: Array<[number, (k: number) => Said, Said]> = [
+    [few, (k) => said`${k === 1 ? "in a stage" : "in stages"} with too few finished stays to set a line`, said`as ${one ? "it's in a stage" : "they're in stages"} with too few finished stays to set a line`],
+    [uncovered, (k) => said`${k === 1 ? "in a stage" : "in stages"} where your history doesn't yet cover how long deals stay`, said`as ${one ? "it's in a stage" : "they're in stages"} where your history doesn't yet cover how long deals stay`],
+    [noEntry, (k) => said`whose history doesn't show when ${k === 1 ? "it" : "they"} entered ${k === 1 ? "its" : "their"} stage`, said`as ${one ? "its" : "their"} history doesn't show when ${one ? "it" : "they"} entered ${one ? "its" : "their"} stage`],
+    [before, (k) => said`that entered ${k === 1 ? "its" : "their"} stage before the history we read starts`, said`as ${one ? "it" : "they"} entered ${one ? "its" : "their"} stage before the history we read starts`],
+  ];
+  const given = parts.filter(([k]) => k > 0);
+  if (given.length === 1) return said`${lead}, ${given[0]![2]}.`;
+  return said`${lead}: ${joinSaid(given.map(([k, words]) => named(said`${k} ${words(k)}`, { k })), "; ")}.`;
 }
 
 const STUCK_SCOPE = said`open deals with a stage to compare`;
 
 /**
- * cur.stuck-in-stage version 3, behind HC_STUCK_EXPECTED (DECISIONS.md 777): the same line and count as version 2,
- * from every closed deal's stays, compared with the share a steady pipeline would have past it
- * (src/domains/current-pipeline/stuck-expected.ts says how), the total and each segment against its own.
+ * cur.stuck-in-stage version 3, behind HC_STUCK_EXPECTED (DECISIONS.md 777): each stage's stays, finished and still
+ * running, give the line and what the same entries would show past it (src/domains/current-pipeline/stuck-expected.ts
+ * says how); the total and each segment are compared against their own.
  */
 const stuckInStageExpected: Rule = {
   id: "cur.stuck-in-stage",
@@ -278,33 +292,69 @@ const stuckInStageExpected: Rule = {
     const { data, deals: open } = loaded;
     const base = { ...data.evidence[0]!, dateRange: { from: ctx.window.to, to: ctx.window.to } };
     const { minSample } = ctx.calibration;
-    const refs = new Map<string, StageLine>([...closedStays(data)].filter(([, days]) => days.length >= minSample).map(([stage, days]) => [stage, stageLine(days, STUCK_PERCENTILE, quantile)]));
-    if (refs.size === 0) return { outcome: "not_measurable", reason: named(said`No open stage has ${minSample} closed deals to compare with.`, { minSample }), evidence: [{ ...base, count: null }] };
-    const deals = open.filter((d) => refs.has(d.StageName) && enteredCurrentStage(d));
-    const noLine = open.filter((d) => !refs.has(d.StageName)).length;
-    const noEntry = open.filter((d) => refs.has(d.StageName) && !enteredCurrentStage(d)).length;
-    const exclusions = [...(noLine ? [named(said`${plural(noLine, "deal")} in stages with too few closed deals to compare`, { noLine })] : []), ...(noEntry ? [named(said`${plural(noEntry, "deal")} whose history doesn't show when they entered this stage`, { noEntry })] : [])];
+    const from = new Date(`${ctx.window.from}T00:00:00.000Z`);
+    // Every stay since the read's start, by stage, and every entry with its age today.
+    const stays = new Map<string, Stay[]>();
+    const oldest = new Map<string, number>();
+    const all: Array<{ deal: Deal; stage: string; age: number }> = [];
+    for (const deal of data.deals) {
+      if (deal.category === null || deal.category === "excluded") continue;
+      for (const s of stageStays(deal, data, from)) {
+        const age = daysSince(s.start, ctx.now);
+        if (age < 0) continue;
+        const stay: Stay = s.end ? { days: (s.end.getTime() - s.start.getTime()) / DAY_MS, done: true } : { days: age, done: false };
+        (stays.get(s.stage) ?? stays.set(s.stage, []).get(s.stage)!).push(stay);
+        oldest.set(s.stage, Math.max(oldest.get(s.stage) ?? 0, age));
+        all.push({ deal, stage: s.stage, age });
+      }
+    }
+    const models = new Map<string, StageModel>();
+    const uncoveredStages: string[] = [];
+    for (const [stage, list] of stays) {
+      const m = stageModel(list, oldest.get(stage)!, STUCK_PERCENTILE, minSample);
+      if ("why" in m) {
+        if (m.why === "uncovered") uncoveredStages.push(stage);
+      } else models.set(stage, m);
+    }
+    if (models.size === 0) {
+      const reason = uncoveredStages.length
+        ? said`Your history doesn't yet cover how long deals stay in ${joinSaid(uncoveredStages.sort().map((s) => said`${org(s)}`), ", ")}, so we can't tell which are stuck.`
+        : named(said`No open stage has ${minSample} finished stays to compare with.`, { minSample });
+      return { outcome: "not_measurable", reason, evidence: [{ ...base, count: null }] };
+    }
+    const entered = (d: Deal): Date | null => enteredCurrentStage(d);
+    const deals = open.filter((d) => models.has(d.StageName) && entered(d) !== null && entered(d)! >= from);
+    const left: LeftOut = {
+      few: open.filter((d) => !models.has(d.StageName) && !uncoveredStages.includes(d.StageName)).length,
+      uncovered: open.filter((d) => uncoveredStages.includes(d.StageName)).length,
+      noEntry: open.filter((d) => models.has(d.StageName) && entered(d) === null).length,
+      before: open.filter((d) => models.has(d.StageName) && entered(d) !== null && entered(d)! < from).length,
+    };
+    const exclusions = [
+      ...(left.few ? [named(said`${plural(left.few, "deal")} in stages with too few finished stays to compare`, { few: left.few })] : []),
+      ...(left.uncovered ? [named(said`${plural(left.uncovered, "deal")} in stages your history doesn't yet cover`, { uncovered: left.uncovered })] : []),
+      ...(left.noEntry ? [named(said`${plural(left.noEntry, "deal")} whose history doesn't show when they entered this stage`, { noEntry: left.noEntry })] : []),
+      ...(left.before ? [named(said`${plural(left.before, "deal")} that entered their stage before the history we read starts`, { before: left.before })] : []),
+    ];
     const evidence: Evidence[] = [{ ...base, count: deals.length, exclusions: [...data.exclusions, ...exclusions], note: STUCK_SCOPE }];
     // What versions 1 and 2 would have said, on every reading, so a change of verdict between runs is told apart (DECISIONS.md 732, 754).
     const before = wonLineReading(ctx, data, open);
-    const left = leftOutSentence3(noLine, noEntry);
-    const leftOut = left ? said` ${left}` : said``;
-    if (deals.length === 0) return { outcome: "pass", summary: said`There are no ${STUCK_SCOPE} to check.`, evidence, segmentExemptReason: "There are no deals to segment.", facts: before };
+    const leftWords = leftOutSentence3(left);
+    const leftOut = leftWords ? said` ${leftWords}` : said``;
+    if (deals.length === 0) return { outcome: "pass", summary: said`There are no ${STUCK_SCOPE} to check.${leftOut}`, evidence, segmentExemptReason: "There are no deals to segment.", facts: before };
 
-    const days = (d: Deal): number => daysSince(enteredCurrentStage(d)!, ctx.now);
-    const isPast = (d: Deal): boolean => days(d) > refs.get(d.StageName)!.line;
-    // Every entry into a stage with a line, by any deal the read holds, open or closed: the intake the expectation is read for.
-    const entries = data.deals.flatMap((deal) => stageEntries(deal).filter((e) => refs.has(e.stage) && e.entered <= ctx.now).map((e) => ({ deal, stage: e.stage, age: daysSince(e.entered, ctx.now) })));
-    const judged = judge({ open: deals, stageOf: (d) => d.StageName, ageOf: days, entries, lines: refs, dimensions: dimensions(ctx), stageDimension: "stage", minSegment: MIN_SEGMENT });
+    const days = (d: Deal): number => daysSince(entered(d)!, ctx.now);
+    const isPast = (d: Deal): boolean => pastLine(days(d), models.get(d.StageName)!);
+    const judged = judge({ open: deals, stageOf: (d) => d.StageName, ageOf: days, entries: all.filter((e) => models.has(e.stage)), models, dimensions: dimensions(ctx), stageDimension: "stage", minSegment: MIN_SEGMENT });
     const { hits, n } = judged.total;
     const rate = pct(hits, n);
     const expectedRate = shown(judged.total.expectedShare);
-    const lead = named(said`Open deals that have been in their stage longer than three quarters of your closed deals spent in it: ${hits} of ${n} (${rate}%). If deals moved through each stage as your closed deals did, about ${expectedRate}% of those still open would be past that point.`, { closedWithinPct: STUCK_PCT, hits, n, rate: [rate, "percent"], expectedRate: [expectedRate, "percent"] });
+    const lead = named(said`Open deals that have been in their stage longer than three quarters of stays in that stage last: ${hits} of ${n} (${rate}%). If deals moved through each stage at the pace your history shows, about ${expectedRate}% of those still open would be past that point.`, { stayWithinPct: STUCK_PCT, hits, n, rate: [rate, "percent"], expectedRate: [expectedRate, "percent"] });
     const facts = { hits, n, rate, expectedRate, ...before };
     if (!judged.total.raised && judged.raised.length === 0) {
       return {
         outcome: "pass",
-        summary: said`${lead}${leftOut} Neither the total nor any segment is far enough above what we'd expect to call it a problem.`,
+        summary: said`${lead}${leftOut} In total and in each segment, that share is within what your stage times would give, so it doesn't show whether any of these deals are stuck.`,
         evidence,
         segmentsChecked: judged.segmentsChecked,
         facts,
@@ -319,14 +369,17 @@ const stuckInStageExpected: Rule = {
       : judged.total.raised
         ? named(said` By ${dimensionWords(worst.dimension)}, ${org(worst.key)} is furthest above what we'd expect, at ${worstRate}% against about ${worstExpected}%.`, { worstRate: [worstRate, "percent"], worstExpected: [worstExpected, "percent"] })
         : named(said` The total is within what those times could show, but by ${dimensionWords(worst.dimension)}, ${org(worst.key)} is at ${worstRate}% (${worst.hits} of ${worst.n}) against about ${worstExpected}%.`, { worstRate: [worstRate, "percent"], worstHits: worst.hits, worstN: worst.n, worstExpected: [worstExpected, "percent"] });
-    const totalSentence = judged.total.raised ? said` That is more than your closed deals' times explain.` : said``;
-    // The deals the issue is about: every deal past the line when the total is raised, else those in the raised segments.
+    const totalSentence = judged.total.raised ? said` That is more than your stage times explain.` : said``;
+    // The deals the issue is about: past the line, all of them when the total is raised, else those in the raised
+    // segments; and only where the days printed are beyond the line printed, so no line reads against itself.
     const keyed = dimensions(ctx);
     const inRaised = (d: Deal): boolean => judged.total.raised || judged.raised.some((s) => keyed[s.dimension as keyof typeof keyed](d) === s.key);
-    const listed = deals.filter((d) => isPast(d) && inRaised(d));
+    const shownDays = (d: Deal): number => Math.floor(days(d) * 10) / 10;
+    const shownLine = (d: Deal): number => Math.ceil(models.get(d.StageName)!.line * 10) / 10;
+    const listed = deals.filter((d) => isPast(d) && inRaised(d) && shownDays(d) > shownLine(d));
     return {
       outcome: "issue",
-      title: said`Some deals are sitting in their stage longer than your closed deals' times explain`,
+      title: said`Some deals are sitting in their stage longer than your stage times explain`,
       summary: said`${lead}${totalSentence}${leftOut}${segmentSentence}`,
       recommendation: said`Go through these in pipeline reviews, and either move each deal on with a dated next step or close it.`,
       recommendationType: "change",
@@ -342,7 +395,7 @@ const stuckInStageExpected: Rule = {
       facts: { ...facts, ...(worst ? { worstSegmentRate: worstRate, worstSegmentExpectedRate: worstExpected } : {}) },
       records: {
         object: "Opportunity" as const,
-        rows: listed.map((d) => ({ id: d.Id, problem: `In ${d.StageName} for ${Math.floor(days(d))} days, where three quarters of closed deals had left it within ${Math.ceil(refs.get(d.StageName)!.line)} days` })),
+        rows: listed.map((d) => ({ id: d.Id, problem: `In ${d.StageName} for ${daysText(shownDays(d))} ${dayWord(shownDays(d))}, where three quarters of stays in that stage last ${daysText(shownLine(d))} ${dayWord(shownLine(d))} or less` })),
         fix: "Move it on with a dated next step, or close it",
       },
     };
