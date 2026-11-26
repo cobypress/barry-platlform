@@ -6,6 +6,7 @@ import { checkedDigest, digestTextsAt, marksOf, type CheckedDigest } from "../ch
 import { SALES_CLOUD_MODULES } from "../../domains/index.ts";
 import { runHealthCheck } from "../../engine/run.ts";
 import { loadRun } from "../../render/render-run.ts";
+import { buildReport } from "../../narrative/sections.ts";
 import { AutomaticReplay, automaticSyntheticCalibration } from "../../testing/automatic.ts";
 import { tempDir } from "../../testing/harness.ts";
 import { journeyOrg, journeyRecords, richSpecs, type LeadSpec } from "../../testing/lead-journey-org.ts";
@@ -26,9 +27,20 @@ const automatic = async (transport: Transport, leadJourney = true) => {
   const { input, pseudonyms } = loadRun(run.dir);
   return { dir: run.dir, input, checked: checkedDigest({ input, pseudonyms, inventory: null, madeAt: MADE_AT }) };
 };
-const released = (c: CheckedDigest, what: string): void => {
+/**
+ * Released, nothing unmarked or unmatched, and no detail withheld that the same org's run withholds with the switch
+ * off: the constructed lead orgs' campaign figures withhold 3 at the tip already, with no lead journey at all.
+ */
+const released = (c: CheckedDigest, what: string, masksOff = 0): void => {
   const unmarked = c.digest ? digestTextsAt(c.digest).filter((t) => !marksOf(c.digest!, t)).map((t) => `${t.path}: ${t.text}`) : [];
-  assert.deepEqual({ held: c.held, unmarked: c.unmarked, unmatched: c.unmatched, masks: c.masks }, { held: null, unmarked: 0, unmatched: 0, masks: 0 }, `${what}\n${unmarked.join("\n")}`);
+  assert.deepEqual({ held: c.held, unmarked: c.unmarked, unmatched: c.unmatched, masks: c.masks }, { held: null, unmarked: 0, unmatched: 0, masks: masksOff }, `${what}\n${unmarked.join("\n")}`);
+};
+/** The org's run with the switch on, released as the same org's run with it off is. */
+const releasedAsOff = async (options: SimulatorOptions, what: string): Promise<Awaited<ReturnType<typeof automatic>>> => {
+  const [on, off] = [await automatic(new Simulator(options)), await automatic(new Simulator(options), false)];
+  released(off.checked, `${what}, off`, off.checked.masks);
+  released(on.checked, what, off.checked.masks);
+  return on;
 };
 const HOSTILE = "Lost 50% of 10 deals.";
 const fastWins = (): LeadSpec[] =>
@@ -46,15 +58,14 @@ describe("an automatic run with the lead journey on", () => {
     ["the same org on Professional Edition", { records: journeyOrg(journeyRecords(richSpecs())), organizationType: "Professional Edition" }],
   ];
   for (const [name, options] of VARIANTS) {
-    test(`${name}: released, nothing unmarked, unmatched or withheld`, async () => released((await automatic(new Simulator(options))).checked, name));
+    test(`${name}: released, nothing unmarked or unmatched, and nothing more withheld than with the switch off`, async () => void (await releasedAsOff(options, name)));
   }
 
   test("on the replayed synthetic org too", async () => released((await automatic(new AutomaticReplay())).checked, "replay"));
 
   test("the source check's finding is served, the source marked as the org's, whole, even a hostile one", async () => {
     const specs = richSpecs().map((s) => (s.source === "Webinar" ? { ...s, source: HOSTILE } : s));
-    const { checked } = await automatic(new Simulator({ records: journeyOrg(journeyRecords(specs)) }));
-    released(checked, "hostile source");
+    const { checked } = await releasedAsOff({ records: journeyOrg(journeyRecords(specs)) }, "hostile source");
     const d = checked.digest!;
     const texts = digestTextsAt(d).filter((t) => t.text.includes(`Leads from ${HOSTILE} convert well`) || t.text.includes(`from ${HOSTILE} were converted`));
     assert.ok(texts.length >= 2, texts.map((t) => t.path).join(", "));
@@ -67,14 +78,16 @@ describe("an automatic run with the lead journey on", () => {
   });
 
   test("the stored insight is in the run folder's findings and nowhere a customer reads: not the digest, scores, rules or documents' input", async () => {
-    const { dir, input, checked } = await automatic(new Simulator({ records: journeyOrg(journeyRecords(fastWins())) }));
+    const { dir, input, checked } = await releasedAsOff({ records: journeyOrg(journeyRecords(fastWins())) }, "fast wins");
     const stored = (JSON.parse(readFileSync(join(dir, "findings.json"), "utf8")) as Array<{ id: string; ruleId: string; status: string; summary?: string }>).filter((f) => f.ruleId === "lead.fast-conversion");
     assert.equal(stored.length, 1);
     assert.equal(stored[0]!.status, "issue");
-    released(checked, "fast wins");
     const served = JSON.stringify(checked.digest);
     assert.ok(!served.includes("lead.fast-conversion") && !served.includes("converted within 7 days"));
-    assert.ok(!input.findings.some((f) => f.ruleId === "lead.fast-conversion"));
+    // The folder's findings, read back, keep it as they keep the path insights; what is built for a customer leaves it out.
+    assert.ok(input.findings.some((f) => f.ruleId === "lead.fast-conversion"));
+    assert.ok(!checked.digest!.findings.some((f) => f.id === stored[0]!.id));
+    assert.ok(!JSON.stringify(buildReport(input)).includes("converted within 7 days"), "nor the report every document is made from");
     assert.ok(!JSON.stringify(input.scores).includes(stored[0]!.id), "no score counts it");
     const rules = JSON.parse(readFileSync(join(dir, "rules.json"), "utf8")) as { rulesRun: string[]; rulesKnown: string[] };
     assert.ok(!rules.rulesRun.includes("lead.fast-conversion") && !rules.rulesKnown.includes("lead.fast-conversion"));
@@ -85,6 +98,6 @@ describe("an automatic run with the lead journey on", () => {
     const { dir, checked } = await automatic(new Simulator({ records: journeyOrg(journeyRecords(fastWins())) }), false);
     const rules = readFileSync(join(dir, "rules.json"), "utf8") + readFileSync(join(dir, "findings.json"), "utf8") + readFileSync(join(dir, "metrics.json"), "utf8");
     for (const id of ["lead.source-win-rate", "lead.fast-conversion", "lead.days_to_won", "lead.won_lead_rate"]) assert.ok(!rules.includes(id), id);
-    released(checked, "off");
+    assert.equal(checked.held, null);
   });
 });
