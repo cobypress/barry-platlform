@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { ALL_MODULES } from "../../domains/index.ts";
+import { leadJourneyModule } from "../../domains/lead-funnel/index.ts";
 import { runHealthCheck } from "../../engine/run.ts";
 import { buildReport } from "../../narrative/sections.ts";
 import { applyOverrides } from "../../narrative/overrides.ts";
@@ -29,7 +30,8 @@ import { FIX_TABLE, NEVER_RAISES } from "../table.ts";
 // or a record, never asks the assistant to change records (principle A), and
 // never takes access away before its replacement is in place (principle B).
 
-const rules = ALL_MODULES.flatMap((m) => m.rules);
+// With the lead journey's rules (HC_LEAD_JOURNEY, DECISIONS.md 770), which the table declares though they run only with the switch on.
+const rules = [...ALL_MODULES.flatMap((m) => m.rules), ...leadJourneyModule.rules.filter((r) => !ALL_MODULES.some((m) => m.rules.some((x) => x.id === r.id)))];
 const generatedRecords = buildScaleOrg(scaled(FIVE_HUNDRED_USERS, 0.005));
 const readFindings = (dir: string): Finding[] => (JSON.parse(readFileSync(join(dir, "findings.json"), "utf8")) as unknown[]).map((f) => Finding.parse(f));
 const recordedRun = await runFromRecording({ answers: loadAnswers(), modules: ALL_MODULES });
@@ -133,7 +135,7 @@ const ANALYSIS_ONLY = [
   "cfg.stage-sprawl", "cfg.unassigned-layouts", "cfg.unused-custom-fields", "cpq.discount-leakage", "cpq.inactive-rules", "cpq.price-rule-conflicts",
   "cpq.twin-field-mismatch", "cur.account-concentration", "cur.coverage", "cur.rep-concentration", "dq.contact-completeness", "dq.duplicate-accounts",
   "dq.opps-inactive-owner", "dq.record-type-use", "dq.records-inactive-owner", "dq.stale-leads", "fct.manager-adjustments", "fct.quota-gaps",
-  "int.api-usage", "int.integration-user-licences", "lead.campaign-return", "lead.conversion-by-source", "lead.converted-no-opportunity", "lead.source-return",
+  "int.api-usage", "int.integration-user-licences", "lead.campaign-return", "lead.conversion-by-source", "lead.converted-no-opportunity", "lead.fast-conversion", "lead.source-return", "lead.source-win-rate",
   "mkt.scoring-grading", "mkt.unowned-prospects", "mkt.unworked-handovers", "pipe.calibration-contradicts-org", "pipe.going-backwards", "pipe.path-insights", "pipe.probability-vs-reality", "pipe.segment-divergence",
   "pipe.skipped-stages", "pipe.unmapped-stages", "rev.dormant-accounts", "rev.stalled-deals", "rev.win-backs", "sec.health-check-risks", "sec.health-check-score", "sec.peer-outlier-access",
   "sec.personal-integration-accounts", "sec.sharing-defaults", "sec.unused-access", "svc.agent-licences", "svc.backlog-growth", "svc.knowledge-current",

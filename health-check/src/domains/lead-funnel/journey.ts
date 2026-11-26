@@ -1,5 +1,6 @@
 import { pct, plural, notSized, type Rule, type RuleContext, type RuleResult } from "../../engine/rule.ts";
 import { org, said, type Said } from "../../engine/org-words.ts";
+import { andList } from "../../engine/said-forms.ts";
 import type { Evidence, Metric, MetricSegment, SegmentCheck, SeriesPoint } from "../../schemas/index.ts";
 import { meanStat } from "../average.ts";
 import { loadPipeline } from "../historic-pipeline/cohort.ts";
@@ -268,22 +269,33 @@ export const sourceWinRate: Rule = {
     const checked = segmentsOf(c.deals, { source: (d) => d.lead.source, team });
     if (sources.length < 2) return { outcome: "not_measurable", reason: said`Every lead made early enough to judge came from ${org(sources[0]![0])}, so there's no other source to compare with.`, evidence: c.evidence };
     const converted = (group: JourneyLead[]): number => pct(group.filter((l) => l.lead.IsConverted).length, group.length);
-    const tried = sources.flatMap(([source, group]) => {
-      const mine = c.deals.filter((d) => d.lead.source === source);
-      const others = c.deals.filter((d) => d.lead.source !== source);
-      const rest = c.leads.filter((l) => l.lead.source !== source);
-      const cmp = group.length >= ctx.calibration.minSample ? compare(ctx, c.from, mine, others, [team]) : null;
-      return cmp ? [{ source, leads: group.length, otherLeads: rest.length, conversion: converted(group), otherConversion: converted(rest), c: cmp }] : [];
-    });
+    // Each source against the deals of the sources not yet set aside. A source whose gap clears every bar is set aside,
+    // the widest first, and the rest are tried again without it: otherwise one source far from the rest makes every
+    // other source look far from the rest the other way.
+    const round = (aside: Set<string>) =>
+      sources.flatMap(([source, group]) => {
+        if (aside.has(source) || group.length < ctx.calibration.minSample) return [];
+        const pool = (s: string): boolean => s !== source && !aside.has(s);
+        const rest = c.leads.filter((l) => pool(l.lead.source));
+        const cmp = compare(ctx, c.from, c.deals.filter((d) => d.lead.source === source), c.deals.filter((d) => pool(d.lead.source)), [team]);
+        return cmp ? [{ source, leads: group.length, otherLeads: rest.length, conversion: converted(group), otherConversion: converted(rest), c: cmp, aside: [...aside].sort() }] : [];
+      });
+    const tried = round(new Set());
     if (tried.length === 0) {
       return { outcome: "not_measurable", reason: said`No lead source had ${ctx.calibration.minSample} or more leads and closed deals, with ${MIN_EACH_OUTCOME} won and ${MIN_EACH_OUTCOME} lost, to compare with the deals from other sources.`, evidence: c.evidence };
     }
+    // Bonferroni over every source the first round could test.
     const bar = zBar(tried.length);
+    const aside = new Set<string>();
+    const found: typeof tried = [];
+    for (let now = tried; ; now = round(aside)) {
+      const widest = now.filter((t) => clears(t.c, bar)).sort((a, b) => Math.abs(b.c.gap) - Math.abs(a.c.gap) || a.source.localeCompare(b.source))[0];
+      if (!widest) break;
+      aside.add(widest.source);
+      found.push(widest);
+    }
     // Only the two that say something new: converting at least as well and winning less, or converting less and winning more.
-    const raised = tried
-      .filter((t) => clears(t.c, bar) && (t.c.gap < 0 ? t.conversion >= t.otherConversion : t.conversion < t.otherConversion))
-      .sort((a, b) => Math.abs(b.c.gap) - Math.abs(a.c.gap) || a.source.localeCompare(b.source))
-      .slice(0, MOST_RAISED);
+    const raised = found.filter((t) => (t.c.gap < 0 ? t.conversion >= t.otherConversion : t.conversion < t.otherConversion)).slice(0, MOST_RAISED);
     if (raised.length === 0) {
       return {
         outcome: "pass",
@@ -293,7 +305,7 @@ export const sourceWinRate: Rule = {
         facts: { sources: tried.length, leads: c.leads.length, deals: c.deals.length },
       };
     }
-    return raised.map(({ source, leads, otherLeads, conversion, otherConversion, c: cmp }): RuleResult => {
+    return raised.map(({ source, leads, otherLeads, conversion, otherConversion, c: cmp, aside: apart }): RuleResult => {
       const winsLess = cmp.gap < 0;
       const within = cmp.compared
         ? said` The gap pointed the same way in ${cmp.held} of the ${cmp.compared} teams we could check it in.`
@@ -302,7 +314,7 @@ export const sourceWinRate: Rule = {
         outcome: "issue",
         key: `source:${source}`,
         title: winsLess ? said`Leads from ${org(source)} convert well, but their deals are won less often` : said`Leads from ${org(source)} convert less often, but their deals are won more often`,
-        summary: said`Of the leads created ${periodSaid(c)}, ${conversion}% of the ${leads} from ${org(source)} were converted, against ${otherConversion}% of the ${otherLeads} from other sources. Their ${cmp.group.n} closed deals were won ${cmp.group.rate}% of the time, against ${cmp.other.rate}% of the ${cmp.other.n} closed deals from other sources.${stillOpen(cmp.open)}${within}${NOT_A_CAUSE}`,
+        summary: said`Of the leads created ${periodSaid(c)}, ${conversion}% of the ${leads} from ${org(source)} were converted, against ${otherConversion}% of the ${otherLeads} from other sources${apart.length ? said`, leaving out ${andList(apart.map((x) => said`${org(x)}`))}` : said``}. Their ${cmp.group.n} closed deals were won ${cmp.group.rate}% of the time, against ${cmp.other.rate}% of the ${cmp.other.n} closed deals from other sources.${stillOpen(cmp.open)}${within}${NOT_A_CAUSE}`,
         recommendation: winsLess
           ? said`Check how leads from ${org(source)} are qualified before they're converted, and whether their deals are a good fit, before putting more into the source.`
           : said`Look at what makes deals from ${org(source)} win, and whether more of its leads are worth converting.`,
