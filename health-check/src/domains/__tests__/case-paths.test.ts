@@ -9,7 +9,7 @@ import { COUNTED_WHEN_MEASURED, INSIGHT_METRICS, INSIGHT_RULES, scoreDomains } f
 import { ALL_MODULES, SERVICE_CLOUD_MODULES } from "../index.ts";
 import { casePathsModule, withCasePaths } from "../service/index.ts";
 import { serviceOperationsModule } from "../service/operations.ts";
-import { LEAST_LAG_DAYS, lineSaid, snapshotAt, steadyShare, STUCK_BAR, type SnapCase } from "../service/paths.ts";
+import { LEAST_LAG_DAYS, lineSaid, snapshotAt, steadyMarginOf, steadyShare, STUCK_BAR, type SnapCase } from "../service/paths.ts";
 import { zBar } from "../historic-pipeline/paths/insights.ts";
 import type { AnalysisOutput } from "../../engine/evaluate.ts";
 import type { Finding, Metric } from "../../schemas/index.ts";
@@ -263,6 +263,12 @@ describe("open cases past their status's line, against earlier weeks (C1)", () =
     const snap = snapshotAt(withStays([[60, 2], [61, 2], [62, 2], [63, 200]], 0), NOW, 0, 3);
     assert.equal(snap.lines.get("Working"), 2);
     assert.ok(snap.expected.get("Working")! > 0.8, String(snap.expected.get("Working")));
+  });
+
+  test("the steady margin: 10 points, the z bar's points at today's count, or 30% of the steady share, whichever is most", () => {
+    assert.equal(steadyMarginOf(10, 1000), 10);
+    assert.equal(steadyMarginOf(20, 30), 22);
+    assert.equal(steadyMarginOf(55, 160), 17);
   });
 
   test("the steady share is the length-biased share past the line: E[max(0, X - line)] / E[X]", () => {

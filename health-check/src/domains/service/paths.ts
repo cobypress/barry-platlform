@@ -483,6 +483,9 @@ export function lineSaid(days: number): Said {
 export type Target = { id: string; status: Status; since: number; days: number; past: boolean; priority: string; origin: string };
 export type Snapshot = { at: number; lines: Map<string, number>; targets: Target[]; noLine: number; open: number; expected: Map<string, number> };
 
+/** The points today must be above the steady share by: our least, the z bar's at `n` open cases, or a share of it, whichever is most. */
+export const steadyMarginOf = (steady: number, n: number): number => Math.max(STUCK_BAR.points, Math.ceil(STUCK_BAR.z * Math.sqrt((steady * (100 - steady)) / n)), Math.ceil(STUCK_BAR.relative * steady));
+
 /**
  * The share of open cases a steady queue would have past a line, from the stays themselves: a case open on a given day
  * is in a stay with probability in proportion to its length, so the share past the line is E[max(0, X − line)] / E[X]
@@ -589,7 +592,7 @@ export const stuckInStatus: Rule = {
     // Its margin: our least points, the z bar's points at today's count, or a share of the steady share itself, whichever is
     // most: a status with long stays has its steady share read a little short from stays that began in the lookback, and the
     // probe's heavy-tailed orgs read 13 to 16 points over it with nothing wrong.
-    const steadyMargin = Math.max(STUCK_BAR.points, Math.ceil(STUCK_BAR.z * Math.sqrt((steady * (100 - steady)) / n)), Math.ceil(STUCK_BAR.relative * steady));
+    const steadyMargin = steadyMarginOf(steady, n);
     // The earlier weeks: the same weekday and time, back while a whole lookback and gap lie inside what we read.
     const earliest = Math.max(c.yearStart, c.historyFrom) + (LOOKBACK_DAYS + GAP_DAYS) * DAY;
     const weeks: Snapshot[] = [];
