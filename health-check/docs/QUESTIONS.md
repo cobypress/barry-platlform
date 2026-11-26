@@ -418,3 +418,13 @@ a) Does Salesforce charge a composite batch of five queries as five calls agains
 b) How many `COUNT(<field>)` expressions, and how long a query, does Salesforce accept in one SELECT sent as a composite subrequest (today 50, chosen, not a known limit)? What error comes back past the limit, and is it the same for every object?
 c) Does a Tooling (or REST) query of `EntityParticle` or `FieldDefinition`, ten objects a query, give for every field the describe lists exactly the same names, type, formula flag and whether it can be aggregated, and leave out the fields the connected user can't read, as the describe does? If not field for field, it can't replace the describe.
 d) Is a field the describe marks not nillable always counted as every record, on every object, including records made before the field was made required?
+
+## The lead journey (DECISIONS.md 770)
+
+Settle on a real org, Professional Edition among them, before `HC_LEAD_JOURNEY` goes on:
+
+a) Is `Lead.ConvertedDate` a date with no time, and in which time zone is its day: the org's, the converting user's, or UTC? The journey reads it as a day and allows no finer.
+b) Does converting a lead write a `LeadHistory` row with `Field = 'Status'` when Lead Status history is tracked, and none when it isn't? Both the "not kept" and the "kept from a later day" readings rest on it.
+c) Is Lead Status history kept only when field history tracking is switched on for Lead Status, and are LeadHistory rows returned by the API for 24 months without Field Audit Trail?
+d) Can a lead be converted into an existing opportunity, so a deal may be older than its lead, or come from several leads? The journey counts such a deal once, from its first lead, and leaves out one that closed before it.
+e) On Professional Edition: are Leads, lead conversion and LeadHistory there, and can Lead Status history be tracked?
