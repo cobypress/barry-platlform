@@ -281,9 +281,6 @@ export function passedUnder(f: { ruleId: string; ruleVersion: number; status: st
  * rule-where.json and the digest.
  */
 export function foundByStricter(ruleId: string, passVersion: number | undefined, issueVersion: number | undefined, under: readonly number[] | undefined): boolean {
-  // An issue under an older version than the pass's (a switch turned back off, DECISIONS.md 777): the check changed
-  // back, so nothing shows the org got worse. Open, never new. Any rule, declared or not.
-  if (wentBack(passVersion, issueVersion)) return true;
   const between = tightenings(ruleId).filter((t) => (passVersion === undefined || (t.version > passVersion && t.from.includes(passVersion))) && (issueVersion === undefined || t.version <= issueVersion));
   if (!between.length) return false;
   if (under === undefined) return true;

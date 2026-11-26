@@ -4,7 +4,7 @@ import type { OverallScore } from "../domains/scoring.ts";
 import type { ValueModel } from "../value/model.ts";
 import { apiLimitsExtractor } from "../extract/integrations.ts";
 import { UNSCORED_RULES } from "../domains/scoring.ts";
-import { foundByStricter, issueUnder, passedOnlyByChange, passedUnder } from "../engine/loosened.ts";
+import { foundByStricter, issueUnder, passedOnlyByChange, passedUnder, wentBack } from "../engine/loosened.ts";
 import { said, type Said } from "../engine/org-words.ts";
 
 // The re-check (roadmap Stage 5): what changed since the first health check.
@@ -55,6 +55,13 @@ export type Progress = {
    * score, the plan and the value, but never new; said once. Only when there are any.
    */
   stricter?: RuleChange[];
+  /**
+   * Rules with an issue now that the earlier run passed under a NEWER version: the older check came back (a worker
+   * switch turned off again, DECISIONS.md 777), so nothing shows the org got worse. Open (in the open count, the score,
+   * the plan and the value) and never new, with nothing said: no note, since no sentence has been approved for it and
+   * "stricter" would be untrue. Only when there are any.
+   */
+  changedBack?: RuleChange[];
   /**
    * By rule, the version of the issue each pass in ruleChanged stands apart from,
    * and for a rule this run didn't check that the baseline carried, the baseline's:
@@ -172,6 +179,15 @@ function foundByStricterCheck(then: Finding[], issues: Finding[], ruleId: string
   return then.length > 0 && then.every((p) => p.status === "passed" && issues.every((i) => foundByStricter(ruleId, p.ruleVersion, i.ruleVersion, passedUnder(i, ownCalls))));
 }
 
+/**
+ * Whether an issue kept apart under `version` was kept apart only because a later run went back to an older version,
+ * and this run reads the rule at the same version as its baseline: two runs alike, so nothing is carried.
+ */
+function sameOlderVersion(version: number, then: Finding[], nowFindings: Finding[]): boolean {
+  const pass = nowFindings.find((f) => f.status === "passed");
+  return pass !== undefined && wentBack(version, pass.ruleVersion) && then.length > 0 && then.every((f) => f.ruleVersion === pass.ruleVersion);
+}
+
 /** The run folder's file that keeps a comparison's `carried` for the next one (DECISIONS.md 732). */
 export const RULE_CHANGES_FILE = "rule-changes.json";
 
@@ -199,6 +215,7 @@ export function compareWithBaseline(baseline: ProgressSide, current: ProgressSid
   const newlyMeasured: RuleChange[] = [];
   const ruleChanged: RuleChange[] = [];
   const stricter: RuleChange[] = [];
+  const changedBack: RuleChange[] = [];
   const carried: Record<string, number> = {};
   const carriedThen = baseline.carried ?? {};
   // An issue standing apart in the baseline (DECISIONS.md 732): the baseline passed it only because we loosened the
@@ -210,6 +227,9 @@ export function compareWithBaseline(baseline: ProgressSide, current: ProgressSid
     const nowIssues = nowFindings.filter((f) => f.status === "issue");
     if (nowIssues.length) remaining.push(change(ruleId, nowIssues));
     else if (!nowFindings.some((f) => f.status === "passed")) carried[ruleId] = version;
+    // Apart because the check went back to an older version (DECISIONS.md 777): once this run and its baseline read
+    // the rule at the same version, the ordinary comparison applies, and a pass after a pass says nothing.
+    else if (sameOlderVersion(version, before.get(ruleId) ?? [], nowFindings)) continue;
     else if (passedOnlyByRuleChange([version], ruleId, nowFindings, current.ownCalls)) {
       ruleChanged.push(change(ruleId, nowFindings));
       carried[ruleId] = version;
@@ -246,6 +266,8 @@ export function compareWithBaseline(baseline: ProgressSide, current: ProgressSid
     if (!nowIssues.length) continue;
     // New only if the earlier run checked the rule, as the portal's alerts decide (DECISIONS.md 661, 673).
     if ((MEASURED_LATER.has(ruleId) && !then.some((f) => f.status === "passed")) || (current.checkedByCode === true && unsplitThen(then))) newlyMeasured.push(change(ruleId, nowIssues));
+    // Passed then under a newer version, raised now under an older one: the check came back, open, never new, nothing said (DECISIONS.md 777).
+    else if (then.length > 0 && then.every((p) => p.status === "passed" && nowIssues.every((i) => wentBack(p.ruleVersion, i.ruleVersion)))) changedBack.push(change(ruleId, nowIssues));
     // Passed then, raised now only because we tightened the rule since: open, never new (DECISIONS.md 754).
     else if (foundByStricterCheck(then, nowIssues, ruleId, current.ownCalls)) stricter.push(change(ruleId, nowIssues));
     else added.push(change(ruleId, nowIssues));
@@ -268,6 +290,7 @@ export function compareWithBaseline(baseline: ProgressSide, current: ProgressSid
     ...(newlyMeasured.length ? { newlyMeasured } : {}),
     ...(ruleChanged.length ? { ruleChanged } : {}),
     ...(stricter.length ? { stricter } : {}),
+    ...(changedBack.length ? { changedBack } : {}),
     ...(Object.keys(carried).length ? { carried } : {}),
     areas: domains.map((domain) => ({ domain, before: scoreOf(baseline.scores, domain), after: scoreOf(current.scores, domain) })).filter((a) => a.before !== null || a.after !== null),
     storage: compareStorage(baseline, current),

@@ -17,7 +17,7 @@ const RULE = "cur.stuck-in-stage";
 type Row = Record<string, unknown>;
 // The steady pipeline as the simulator serves Opportunity rows (record type and loss reason as Salesforce names them).
 const pipeline = (): OrgRecords["pipeline"] => {
-  const p = steadyPipeline("lognormal s=1.5", 300, 7, new Date(AS_OF));
+  const p = steadyPipeline("bimodal 80/20", 300, 7, new Date(AS_OF));
   return {
     opportunities: (p.opportunities as Row[]).map(({ RecordType, LossReason, CurrencyIsoCode, ...o }) => ({ ...o, RecordType: { DeveloperName: RecordType }, Loss_Reason__c: LossReason, AccountId: "001000000000002AAA", NextStep: null })),
     history: p.history,
@@ -62,7 +62,7 @@ describe("the switch on and off between runs, through the worker (decision 777)"
   test("on, off, on: version 3 passes, version 2 raises, version 3 passes; never new, never fixed", async () => {
     const s = await chain([true, false, true]);
     assert.deepEqual(s.map((x) => x.stuck), [["passed@3"], ["issue@2"], ["passed@3"]]);
-    assert.deepEqual(s[1]!.where, ["stricter"], "an issue only because the check changed back: open, never new");
+    assert.deepEqual(s[1]!.where, ["changedBack"], "an issue only because the check changed back: open, never new, nothing said");
     assert.deepEqual(s[2]!.where, ["ruleChanged"], "and its pass under 3 again is no fix");
     assert.equal(s[2]!.newCount, 0);
   });
