@@ -1,4 +1,5 @@
 import { fieldDescribeExtractor, missingFieldReason } from "../../extract/fields.ts";
+import { named } from "../../engine/named.ts";
 import { schemaExtractor } from "../../extract/configuration.ts";
 import { forecastExtractor, quotasExtractor, revenueForecastType, type ForecastItemRow } from "../../extract/forecast.ts";
 import { opportunitiesExtractor, stagesExtractor } from "../../extract/opportunities.ts";
@@ -119,7 +120,7 @@ const adjustmentsRule: Rule = {
     const adjusted = rows.filter((r) => r.HasAdjustment && r.ForecastAmount !== r.AmountWithoutAdjustments);
     const segments = [{ dimension: "forecast owner", segments: new Set(rows.map((r) => r.OwnerId)).size }];
     const facts = { share, adjustedOwners: new Set(adjusted.map((r) => r.OwnerId)).size, owners: new Set(rows.map((r) => r.OwnerId)).size };
-    if (share <= ADJUSTMENT_LIMIT) return { outcome: "pass", summary: said`Hand adjustments move the Commit forecast by ${share}%, at or under our working limit of ${ADJUSTMENT_LIMIT}%.`, evidence, segmentsChecked: segments, facts };
+    if (share <= ADJUSTMENT_LIMIT) return { outcome: "pass", summary: named(said`Hand adjustments move the Commit forecast by ${share}%, at or under our working limit of ${ADJUSTMENT_LIMIT}%.`, { limitPct: ADJUSTMENT_LIMIT }), evidence, segmentsChecked: segments, facts };
     return {
       outcome: "issue",
       title: said`Much of the Commit forecast comes from hand adjustments`,
@@ -250,7 +251,7 @@ const commitAtRisk = shareRule({
     return commitScope(ctx, open, (d) => d.CloseDate < today || d.LastActivityDate === null || d.LastActivityDate < quietDay || pushesOf(d, fiscal).length >= REPEAT_PUSHES);
   },
   issueTitle: said`Your Commit forecast includes deals showing warning signs`,
-  sentence: (hits, n, rate) => said`Deals in Commit that are past their close date, quiet for ${QUIET_DAYS} days, or pushed ${REPEAT_PUSHES} or more times: ${hits} of ${n} (${rate}%).`,
+  sentence: (hits, n, rate) => named(said`Deals in Commit that are past their close date, quiet for ${QUIET_DAYS} days, or pushed ${REPEAT_PUSHES} or more times: ${hits} of ${n} (${rate}%).`, { quietDays: QUIET_DAYS, repeatPushes: REPEAT_PUSHES }),
   recommendation: said`Review each one before the next forecast call, and move it out of Commit unless there's a dated reason to keep it.`,
   owner: "Head of sales",
   sized: true,

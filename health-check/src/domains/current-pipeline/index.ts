@@ -1,4 +1,5 @@
 import { schemaExtractor } from "../../extract/configuration.ts";
+import { named } from "../../engine/named.ts";
 import { quotasExtractor, revenueForecastType } from "../../extract/forecast.ts";
 import { nextStepsExtractor, opportunitiesExtractor, stagesExtractor } from "../../extract/opportunities.ts";
 import { daysBefore } from "../../extract/types.ts";
@@ -25,6 +26,8 @@ import { moneySaid } from "../../engine/said-forms.ts";
 const DOMAIN = "current_pipeline";
 const MIN_SEGMENT = 10;
 const STUCK_PERCENTILE = 0.75;
+/** The same line as a percentage, the value "three quarters" is named with (DECISIONS.md 768). */
+const STUCK_PCT = STUCK_PERCENTILE * 100;
 const QUIET_DAYS = 30;
 const REPEAT_PUSHES = 2;
 const NEXT_STEP_LIMIT = 30;
@@ -117,7 +120,7 @@ export function shareRule(options: ShareRule): Rule {
       }
       const worst = result.hotspots[0];
       // A segment's key is the org's: a stage, a record type, a team or a person's token.
-      const hidden = !overLimit ? said` The total looks acceptable, but by ${dimensionWords(worst!.dimension)}, ${org(worst!.key)} is at ${worst!.rate}% (${worst!.hits} of ${worst!.n}).` : worst ? said` Worst by ${dimensionWords(worst.dimension)}: ${org(worst.key)}, at ${worst.rate}%.` : said``;
+      const hidden = !overLimit ? named(said` The total looks acceptable, but by ${dimensionWords(worst!.dimension)}, ${org(worst!.key)} is at ${worst!.rate}% (${worst!.hits} of ${worst!.n}).`, { worstPct: worst!.rate, worstHits: worst!.hits, worstN: worst!.n }) : worst ? named(said` Worst by ${dimensionWords(worst.dimension)}: ${org(worst.key)}, at ${worst.rate}%.`, { worstPct: worst.rate }) : said``;
       return {
         outcome: "issue",
         // Made once when the rule is declared, so said again here, in the analysis, whose ledger vouches for it.
@@ -163,7 +166,7 @@ function stageLines(ctx: RuleContext, data: Ready): Map<string, number> {
 function leftOutSentence(noLine: number, noEntry: number): Said | undefined {
   const n = noLine + noEntry;
   if (n === 0) return undefined;
-  const lead = said`${n === 1 ? "One more open deal" : said`${n} more open deals`} couldn't be compared`;
+  const lead = named(said`${n === 1 ? "One more open deal" : said`${n} more open deals`} couldn't be compared`, { leftOut: n, noLine, noEntry });
   const line = (k: number) => said`${k === 1 ? "a stage" : "stages"} with too few won deals to set a line`;
   const entry = (k: number) => said`history that doesn't show when ${k === 1 ? "it" : "they"} entered ${k === 1 ? "its" : "their"} stage`;
   if (!noEntry) return said`${lead}, as ${n === 1 ? "it's" : "they're"} in ${line(n)}.`;
@@ -195,7 +198,7 @@ const stuckInStage = shareRule({
     };
   },
   issueTitle: said`Deals are sitting in stages for longer than your wins do`,
-  sentence: (hits, n, rate) => said`Open deals that have been in their stage longer than three quarters of your won deals took: ${hits} of ${n} (${rate}%).`,
+  sentence: (hits, n, rate) => named(said`Open deals that have been in their stage longer than three quarters of your won deals took: ${hits} of ${n} (${rate}%).`, { wonWithinPct: STUCK_PCT }),
   recommendation: said`Go through these in pipeline reviews, and either move each deal on with a dated next step or close it.`,
   owner: "Head of sales",
   sized: true,
@@ -224,8 +227,8 @@ const staleDeals = shareRule({
     };
   },
   // Titled by its test, as two other checks find quiet deals by theirs (night 3 reading pass, item 16).
-  issueTitle: said`Open deals with no stage change or activity in ${QUIET_DAYS} days`,
-  sentence: (hits, n, rate) => said`Open deals with no stage change and no logged activity in ${QUIET_DAYS} days: ${hits} of ${n} (${rate}%).`,
+  issueTitle: named(said`Open deals with no stage change or activity in ${QUIET_DAYS} days`, { quietDays: QUIET_DAYS }),
+  sentence: (hits, n, rate) => named(said`Open deals with no stage change and no logged activity in ${QUIET_DAYS} days: ${hits} of ${n} (${rate}%).`, { quietDays: QUIET_DAYS }),
   recommendation: said`Check that activity is being captured, then re-engage these deals or close them.`,
   owner: "Head of sales",
   sized: (_ctx, data) => SITUATIONS.inStageFor(QUIET_DAYS, data),
@@ -302,7 +305,7 @@ function concentrationRule(options: { id: string; title: string; limit: number; 
       const [top, amount] = [...byKey].sort(([ka, a], [kb, b]) => b - a || ka.localeCompare(kb))[0]!;
       const share = pct(amount, total);
       const segments = [{ dimension: options.subject, segments: byKey.size }];
-      if (share <= options.limit) return { outcome: "pass", summary: said`The largest ${options.subject} holds ${share}% of open pipeline, at or under our working limit of ${options.limit}%.`, evidence, segmentsChecked: segments, facts: { share } };
+      if (share <= options.limit) return { outcome: "pass", summary: named(said`The largest ${options.subject} holds ${share}% of open pipeline, at or under our working limit of ${options.limit}%.`, { limitPct: options.limit }), evidence, segmentsChecked: segments, facts: { share } };
       return {
         outcome: "issue",
         // Made once when the rule is declared, so said again here, in the analysis, whose ledger vouches for it.
@@ -313,7 +316,7 @@ function concentrationRule(options: { id: string; title: string; limit: number; 
         severity: "medium",
         confidence: "high",
         evidence,
-        value: { kind: "revenue", amount: Math.round(amount), unit: ctx.calibration.currency, period: "open pipeline today", assumptions: [said`The Amount on open deals for the largest ${options.subject}: exposure, not expected loss`, said`${options.limit}% is our working limit, not a Salesforce figure`] },
+        value: { kind: "revenue", amount: Math.round(amount), unit: ctx.calibration.currency, period: "open pipeline today", assumptions: [said`The Amount on open deals for the largest ${options.subject}: exposure, not expected loss`, named(said`${options.limit}% is our working limit, not a Salesforce figure`, { limit: [options.limit, "percent"] })] },
         effort: { size: "M" },
         owner: "Head of sales",
         segmentsChecked: segments,

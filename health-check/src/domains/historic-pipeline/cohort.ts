@@ -1,4 +1,5 @@
 import { opportunitiesExtractor, stagesExtractor, type HistoryRow, type OpportunityRow, type StageRow } from "../../extract/opportunities.ts";
+import { named } from "../../engine/named.ts";
 import { usersExtractor } from "../../extract/users.ts";
 import type { RuleContext } from "../../engine/rule.ts";
 import { localDay, zoneOf } from "../time-zone.ts";
@@ -227,7 +228,7 @@ export const ORDER_UNCONFIRMED = "We took the order of your open stages from Sal
 
 /** What every figure that read the deals says when they hold several record types nobody has told apart (DECISIONS.md 692). */
 export const blendedProcessesNote = (n: number): Said =>
-  said`Your deals use ${n} record types, which may be separate sales processes. We've read them together, so these figures blend them.`;
+  named(said`Your deals use ${n} record types, which may be separate sales processes. We've read them together, so these figures blend them.`, { recordTypes: n });
 
 /** The same stages, saying `note` whenever the order of the open stages is read. */
 function notingOrder(stages: StageMap, note: () => void): StageMap {

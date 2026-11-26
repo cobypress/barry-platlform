@@ -1,4 +1,5 @@
 import { activityExtractor } from "../../extract/activity.ts";
+import { named } from "../../engine/named.ts";
 import { schemaExtractor } from "../../extract/configuration.ts";
 import { opportunitiesExtractor, stagesExtractor } from "../../extract/opportunities.ts";
 import { daysBefore } from "../../extract/types.ts";
@@ -30,6 +31,8 @@ const STEADY_VOLUME = 0.25;
 const MIN_GROUP_EVENTS = 10;
 const RECENT_DAYS = 90;
 const REP_FLOOR_SHARE = 0.25;
+/** The same floor as a percentage, as the sentence says it and its named value is (DECISIONS.md 768). */
+const REP_FLOOR_PCT = REP_FLOOR_SHARE * 100;
 const MIN_REPS = 3;
 const UNLINKED_LIMIT = 30;
 const UNLINKED_SEGMENT_LIMIT = 60;
@@ -258,7 +261,7 @@ const repActivity: Rule = {
     return {
       outcome: "issue",
       title: said`Some reps are logging far less than their peers`,
-      summary: said`${plural(low.length, "rep")} logged under ${REP_FLOOR_SHARE * 100}% of the typical ${typical} activities per open deal in the last ${RECENT_DAYS} days. This may be a logging gap rather than a performance one.`,
+      summary: named(said`${plural(low.length, "rep")} logged under ${REP_FLOOR_PCT}% of the typical ${typical} activities per open deal in the last ${RECENT_DAYS} days. This may be a logging gap rather than a performance one.`, { floorPct: REP_FLOOR_PCT, recentDays: RECENT_DAYS }),
       recommendation: said`Check their email and calendar connections first, then look at how they're working these deals.`,
       recommendationType: "investigate",
       severity: "medium",
@@ -292,7 +295,7 @@ const unlinkedTasks: Rule = {
       outcome: "issue",
       title: said`Tasks are being logged against nothing`,
       // The dimension is one of our own two names; the rep's token or the task type is the org's.
-      summary: said`Tasks linked to no record: ${result.hits} of ${result.n} (${result.rate}%).${worst ? said` Worst by ${dimensionWords(worst.dimension)}: ${org(worst.key)}, at ${worst.rate}%.` : ""} This work won't show on any deal, contact or account.`,
+      summary: named(said`Tasks linked to no record: ${result.hits} of ${result.n} (${result.rate}%).${worst ? said` Worst by ${dimensionWords(worst.dimension)}: ${org(worst.key)}, at ${worst.rate}%.` : ""} This work won't show on any deal, contact or account.`, { worstPct: worst?.rate }),
       recommendation: said`Show these people how to log against the deal, and check any tool that's creating tasks automatically.`,
       recommendationType: "change",
       severity: "low",

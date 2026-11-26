@@ -1,4 +1,5 @@
 import { fieldDescribeExtractor } from "../../extract/fields.ts";
+import { each, named as valued } from "../../engine/named.ts";
 import { apexExtractor, metadataExtractor, scheduledJobsExtractor } from "../../extract/automation.ts";
 import { componentChangesExtractor } from "../../extract/component-changes.ts";
 import { orgExtractor, recordCountsExtractor, schemaExtractor } from "../../extract/configuration.ts";
@@ -102,7 +103,7 @@ function reclaimFindings(ctx: RuleContext, candidates: UserRow[], describe: Recl
       // An automatic run asks no one, so there's no person's reason to quote (DECISIONS.md 693).
       reason: manual.answer
         ? said`Whether ${plural(unanswered.length, "user")} can be released can't be measured, because the Default Workflow User step was skipped: ${org(String(manual.answer.skipReason))}`
-        : said`Whether ${plural(unanswered.length, "user")} can be released can't be measured, because the Default Workflow User can't be read by API, and on an automatic run nobody is asked for it.`,
+        : valued(said`Whether ${plural(unanswered.length, "user")} can be released can't be measured, because the Default Workflow User can't be read by API, and on an automatic run nobody is asked for it.`, { unanswered: unanswered.length }),
       evidence: [manual.evidence],
       manualStepIds,
     });
@@ -243,10 +244,12 @@ const unassignedSeats: Rule = {
             period: "per year",
             assumptions: spare.map((l) => said`${seatsSaid(l.TotalLicenses - l.UsedLicenses, l.Name)} at ${costs[l.Name]!} ${org(ctx.calibration.currency)} a year, from the calibration`).concat(said`Assumes seats can be reduced at renewal`),
           };
+    // Each licence's free seats, worked out once for its sentence and the value it's named with (DECISIONS.md 768).
+    const freeSeats = spare.map((l) => ({ l, free: l.TotalLicenses - l.UsedLicenses }));
     return {
       outcome: "issue",
       title: said`You're paying for seats nobody holds`,
-      summary: said`Unassigned seats: ${seats}. ${joinSaid(spare.map((l) => said`${l.TotalLicenses - l.UsedLicenses} of ${l.TotalLicenses} ${org(l.Name)}`), "; ")}.`,
+      summary: valued(said`Unassigned seats: ${seats}. ${joinSaid(freeSeats.map(({ l, free }) => said`${free} of ${l.TotalLicenses} ${org(l.Name)}`), "; ")}.`, each(freeSeats, (r) => ({ spare: r.free, of: r.l.TotalLicenses }))),
       recommendation: said`Reduce these seats at your next renewal, keeping whatever headroom your hiring plan needs.`,
       recommendationType: "change",
       severity: "medium",
@@ -307,9 +310,10 @@ const packageSeats: Rule = {
           period: "per year",
           assumptions: flagged.map((p) => said`${idle(p)} ${named(p)} ${idle(p) === 1 ? "seat" : "seats"} at ${price(p)} ${org(ctx.calibration.currency)} a year, from the calibration`).concat(said`Assumes seats can be reduced, or the app cancelled, at renewal`),
         };
+    const idleSeats = spare.map((p) => ({ p, n: idle(p) }));
     const parts = [
       unused.length ? said`${joinSaid(unused.map((p) => said`${named(p)} (${plural(p.AllowedLicenses, "seat")})`), ", ")} ${unused.length === 1 ? "has" : "have"} nobody assigned at all` : null,
-      spare.length ? said`${joinSaid(spare.map((p) => said`${named(p)} has ${idle(p)} of ${p.AllowedLicenses} seats unassigned`), "; ")}` : null,
+      spare.length ? valued(said`${joinSaid(idleSeats.map(({ p, n }) => said`${named(p)} has ${n} of ${p.AllowedLicenses} seats unassigned`), "; ")}`, each(idleSeats, (r) => ({ idle: r.n, of: r.p.AllowedLicenses }))) : null,
     ].filter((part): part is Said => part !== null);
     return {
       outcome: "issue",
@@ -382,7 +386,7 @@ const dormantUsers = dormantRule(
   "Licensed users who've stopped logging in",
   "dormant",
   said`dormant users`,
-  (days) => said`haven't logged in for ${days} days`,
+  (days) => valued(said`haven't logged in for ${days} days`, { dormantDays: days }),
   (n, days) => said`${n === 1 ? "One more user's" : said`${n} more users'`} last-login date is over ${days} days old, but the login log shows ${n === 1 ? "them" : "each of them"} logging in since, so they aren't counted.`,
 );
 
@@ -421,7 +425,7 @@ const unusedReports: Rule = {
     return {
       outcome: "issue",
       title: said`Most reports aren't being used`,
-      summary: said`${unused.length} of ${settled.length} reports (${share}%) haven't been run in ${REPORT_RECENT_DAYS} days, so people will struggle to find the ones that matter.`,
+      summary: valued(said`${unused.length} of ${settled.length} reports (${share}%) haven't been run in ${REPORT_RECENT_DAYS} days, so people will struggle to find the ones that matter.`, { reportRecentDays: REPORT_RECENT_DAYS }),
       recommendation: said`Agree a core report set by team and archive the rest to a clearly labelled folder.`,
       recommendationType: "investigate",
       severity: "low",

@@ -11,6 +11,8 @@ import type { Inventory } from "../schemas/inventory.ts";
 import { buildDigest, READINESS_CODE_PATHS } from "./build.ts";
 import { PATHS_CODE_PATHS } from "./paths.ts";
 import { spansIfCurrent, type MarkedSentence } from "../engine/org-words.ts";
+import type { NamedValues } from "../engine/named.ts";
+import { strictShadow, type StrictShadow } from "./strict.ts";
 
 // An automatic run's digest, checked before the run is released (DECISIONS.md
 // 693). The portal shows the digest and nothing else of an automatic run, and
@@ -50,6 +52,14 @@ export type CheckedDigest = {
    * on a digest made with a `paths` block.
    */
   pathsWithheld?: number;
+  /**
+   * What the strict per-finding check would have masked (DECISIONS.md 768), counted
+   * on the digest as first made and never applied: no mask, count or hold reads it.
+   * For the worker to log as counts and keep in the run folder's strict-shadow.json,
+   * never in the digest or a stored row. `failed` with the error's name when the
+   * shadow couldn't be worked out, which costs the run nothing. Absent with no digest.
+   */
+  strictShadow?: { ok: true; shadow: StrictShadow } | { ok: false; failed: string };
 };
 
 export type CheckedDigestFor = {
@@ -60,6 +70,10 @@ export type CheckedDigestFor = {
   madeAt: string;
   /** How a report is built from the data. buildReport unless a test says otherwise. */
   build?: (input: ReportInput) => BuiltReport;
+  /** The run folder's named values (named-values.json), for the strict shadow alone. */
+  named?: NamedValues;
+  /** How the strict shadow is worked out. strictShadow unless a test says otherwise. */
+  strict?: typeof strictShadow;
 };
 
 /**
@@ -392,7 +406,18 @@ export function settlePaths(digest: RunDigest, set: FigureSet): { digest: RunDig
   return { digest: rest as RunDigest, withheld: withheld + 1 };
 }
 
-export function checkedDigest({ input, pseudonyms, inventory, madeAt, build = buildReport }: CheckedDigestFor): CheckedDigest {
+/** The strict shadow, caught whole: whatever goes wrong in it, the run goes on as it would without it (DECISIONS.md 768). */
+function shadowOf(strict: typeof strictShadow, digest: RunDigest, report: BuiltReport, set: FigureSet, named: NamedValues): NonNullable<CheckedDigest["strictShadow"]> {
+  try {
+    // Copies of all it reads, so nothing the shadow does can reach the digest, report or set the run goes on with.
+    return { ok: true, shadow: strict(structuredClone(digest), structuredClone(report), structuredClone(set), structuredClone(named)) };
+  } catch (err) {
+    // The error's name alone: a message can quote a text.
+    return { ok: false, failed: err instanceof Error ? err.name : typeof err };
+  }
+}
+
+export function checkedDigest({ input, pseudonyms, inventory, madeAt, build = buildReport, named = {}, strict = strictShadow }: CheckedDigestFor): CheckedDigest {
   const none: CheckedDigest = { digest: null, masks: 0, unmatched: 0, unmarked: 0, held: "no_digest", readinessWithheld: 0 };
   let report: BuiltReport;
   let digest: RunDigest;
@@ -404,6 +429,8 @@ export function checkedDigest({ input, pseudonyms, inventory, madeAt, build = bu
   }
   // The set the data as stored gives, so a mask never makes another figure untraceable (682).
   const set = digestDataset(report, pseudonyms);
+  // Counted on the digest as first made, before any mask, and read by nothing below (DECISIONS.md 768).
+  const shadow = shadowOf(strict, digest, report, set, named);
   // Every count reads the digest without AI readiness, so the block can never change one, nor what is masked (742).
   const raws = untraced(counted(digest), set);
   if (raws.length > 0) {
@@ -427,5 +454,5 @@ export function checkedDigest({ input, pseudonyms, inventory, madeAt, build = bu
   const masks = masksIn(counted(digest)) + enforced.dropped;
   const unmarked = enforced.unmarked;
   const held = unmatched > 0 || masks > HELD_FOR_US_MASKS || unmarked > 0 ? "digest_held" : null;
-  return { digest, masks, unmatched, unmarked, held, readinessWithheld: settled.withheld, ...(hadPaths ? { pathsWithheld: paths.withheld } : {}) };
+  return { digest, masks, unmatched, unmarked, held, readinessWithheld: settled.withheld, ...(hadPaths ? { pathsWithheld: paths.withheld } : {}), strictShadow: shadow };
 }

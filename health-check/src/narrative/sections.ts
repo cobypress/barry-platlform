@@ -198,6 +198,8 @@ const INTAKE = "intake";
 const CALIBRATION = "calibration";
 const OVERRIDES = "overrides";
 const COVER = "cover";
+/** The sources read only from words, ours or the customer's: never a computed value, so the strict check never reads them (DECISIONS.md 768). */
+export const PROSE_SOURCES: readonly string[] = [INTAKE, CALIBRATION, OVERRIDES, COVER];
 const PLAN = "plan";
 export const OVERALL = "score:overall";
 export const VALUE_TOTAL = "value:total";

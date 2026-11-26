@@ -1,4 +1,5 @@
 import { metadataExtractor, apexExtractor } from "../../extract/automation.ts";
+import { each, named as valued } from "../../engine/named.ts";
 import { componentChangesExtractor } from "../../extract/component-changes.ts";
 import {
   CORE_OBJECTS,
@@ -71,7 +72,7 @@ const customFieldSprawl: Rule = {
         outcome: "issue",
         title: said`Core objects carry a heavy custom field load`,
         // The objects are our own fixed four, named by API name.
-        summary: said`${joinSaid(over.map(([o, n]) => said`${o} has ${n} custom fields`), "; ")}. We use ${FIELD_SPRAWL_LIMIT} as a working limit: past it, page layouts and reports get harder to keep clean and users stop filling fields in.`,
+        summary: valued(said`${joinSaid(over.map(([o, n]) => said`${o} has ${n} custom fields`), "; ")}. We use ${FIELD_SPRAWL_LIMIT} as a working limit: past it, page layouts and reports get harder to keep clean and users stop filling fields in.`, { fieldLimit: FIELD_SPRAWL_LIMIT }),
         recommendation: said`Review these objects with the field usage findings and agree which fields still earn their place.`,
         recommendationType: "investigate",
         severity: "medium",
@@ -128,7 +129,7 @@ const unusedCustomFields: Rule = {
       const unused = scan.data.fields.filter((f) => pct(f.filled, f.total) < UNUSED_FILL_LIMIT && pct(f.recentFilled, f.recentTotal) < UNUSED_FILL_LIMIT);
       const segments = [{ dimension: "all records", segments: scan.data.fields.length }, { dimension: "records created in the last 12 months", segments: scan.data.fields.length }];
       if (unused.length === 0) {
-        results.push({ outcome: "pass", key: object, summary: said`Every scanned custom field on ${org(named)} is filled on at least ${UNUSED_FILL_LIMIT}% of records.`, evidence: [ctx.ev(scan.source, { count: scan.data.fields.length, exclusions })], segmentsChecked: segments });
+        results.push({ outcome: "pass", key: object, summary: valued(said`Every scanned custom field on ${org(named)} is filled on at least ${UNUSED_FILL_LIMIT}% of records.`, { fillPct: UNUSED_FILL_LIMIT }), evidence: [ctx.ev(scan.source, { count: scan.data.fields.length, exclusions })], segmentsChecked: segments });
         continue;
       }
       const fields = unused.flatMap((u) => summary?.fields.find((f) => f.name === u.field) ?? []);
@@ -136,7 +137,7 @@ const unusedCustomFields: Rule = {
         outcome: "issue",
         key: object,
         title: said`Custom fields on ${org(named)} are almost never filled in`,
-        summary: said`Of ${plural(scan.data.fields.length, "scanned custom field")} on ${org(named)}, ${unused.length} ${unused.length === 1 ? "is" : "are"} filled on under ${UNUSED_FILL_LIMIT}% of records, both overall and on records from the last 12 months.`,
+        summary: valued(said`Of ${plural(scan.data.fields.length, "scanned custom field")} on ${org(named)}, ${unused.length} ${unused.length === 1 ? "is" : "are"} filled on under ${UNUSED_FILL_LIMIT}% of records, both overall and on records from the last 12 months.`, { fillPct: UNUSED_FILL_LIMIT }),
         recommendation: said`Remove ${plural(unused.length, "field")} from ${org(named)} once the data is archived.`,
         blockedRecommendation: said`Review ${plural(unused.length, "field")} with the people who own ${org(named)}. We aren't recommending removal, because not every dependency check could pass.`,
         recommendationType: "remove",
@@ -219,7 +220,7 @@ const undocumentedFields: Rule = {
     return {
       outcome: "issue",
       title: said`Most custom fields don't say what they're for`,
-      summary: said`Custom fields with neither help text nor a description: ${bare.length} of ${fields.length} (${rate}%), most on ${joinSaid(byObject.slice(0, 3).map((x) => said`${org(labels.object(x.o))} (${x.n})`), ", ")}. Users see no explanation when they fill these in, and whoever maintains the org can't tell what each one is for.`,
+      summary: valued(said`Custom fields with neither help text nor a description: ${bare.length} of ${fields.length} (${rate}%), most on ${joinSaid(byObject.slice(0, 3).map((x) => said`${org(labels.object(x.o))} (${x.n})`), ", ")}. Users see no explanation when they fill these in, and whoever maintains the org can't tell what each one is for.`, each(byObject.slice(0, 3), (x) => ({ bare: x.n }))),
       recommendation: said`Add help text to the fields people fill in and a description to every field you keep, and retire the ones nobody can explain.`,
       recommendationType: "change",
       severity: "low",
@@ -254,7 +255,7 @@ const stageSprawl: Rule = {
     if (active.length <= STAGE_LIMIT && unused.length === 0) {
       return { outcome: "pass", summary: said`${active.length} active stages, all used in the analysis window.`, evidence, segmentsChecked: segments, facts: { activeStages: active.length } };
     }
-    const tooMany = active.length > STAGE_LIMIT ? said`${plural(active.length, "active stage")}, against our working limit of ${STAGE_LIMIT}` : null;
+    const tooMany = active.length > STAGE_LIMIT ? valued(said`${plural(active.length, "active stage")}, against our working limit of ${STAGE_LIMIT}`, { activeStages: active.length, stageLimit: STAGE_LIMIT }) : null;
     const idle = unused.length > 0 ? said`${plural(unused.length, "active stage")} with no deals in the analysis window` : null;
     // The one or two parts, joined with ", and" as before.
     const parts = tooMany && idle ? said`${tooMany}, and ${idle}` : (tooMany ?? idle ?? said``);
