@@ -1,4 +1,5 @@
 import { CONSULTANT_NEXT_STEPS, nextStepsWords } from "./exec-pages.ts";
+import { readFromNameNote } from "../connect/stage-outcomes.ts";
 import { scoreCaveatLine, withAmountNotes, withEditionNote } from "./amount-notes.ts";
 import { yearlyByFinding } from "../value/model.ts";
 import { orderFromOrg } from "../connect/auto-calibration.ts";
@@ -1045,7 +1046,7 @@ function buildSlides(report: BuiltReport, r: Render, density: Density | null, mo
     ...(dense ? [{ title: "How we worked", detail: currentBody(built, "appendix").replace(/\n+/g, " ") }] : []),
     { title: "Analysis window", detail: `${longDate(run.analysisWindow.from)} to ${longDate(run.analysisWindow.to)}` },
     // Stages and deal samples only matter where deals are read.
-    ...(setupReview ? [] : [{ title: "Stage meanings", detail: calibration.stages.map((s) => `${s.name} (${s.category.replace("_", " ")})`).join(", ") }]),
+    ...(setupReview ? [] : [{ title: "Stage meanings", detail: calibration.stages.map((s) => `${s.name} (${s.category.replace("_", " ")}${readFromNameNote(calibration, s)})`).join(", ") }]),
     { title: "Dormant users", detail: `No login for ${calibration.dormantDays} days` },
     ...(setupReview ? [] : [{ title: "Smallest sample", detail: `At least ${calibration.minSample} deals behind a figure` }]),
     // What an automatic run knows of its currency, said for what it is (DECISIONS.md 700).

@@ -17,6 +17,11 @@ export type NarrativeRequest = {
   schema: Record<string, unknown>;
   effort: "low" | "medium" | "high" | "xhigh" | "max";
   maxTokens: number;
+  /**
+   * A short call's own limit, in milliseconds: the SDK gives up after it and
+   * tries no more (DECISIONS.md 766). Absent: the SDK's defaults, as before.
+   */
+  timeoutMs?: number;
 };
 
 export type NarrativeReply = {
@@ -32,7 +37,7 @@ export interface NarrativeClient {
 
 /** The part of the SDK we use, so a test can stand in for it. */
 export type MessagesApi = {
-  messages: { stream(params: Anthropic.MessageStreamParams): { finalMessage(): Promise<Anthropic.Message> } };
+  messages: { stream(params: Anthropic.MessageStreamParams, options?: { timeout?: number; maxRetries?: number }): { finalMessage(): Promise<Anthropic.Message> } };
 };
 
 export function buildMessageParams(request: NarrativeRequest): Anthropic.MessageStreamParams {
@@ -90,7 +95,8 @@ export function anthropicClient(sdk: MessagesApi = new Anthropic(), observe?: Cl
     async complete(request) {
       let message: Anthropic.Message;
       try {
-        message = await sdk.messages.stream(buildMessageParams(request)).finalMessage();
+        // Only a call that sets its own limit passes options, so every other call is sent exactly as before.
+        message = await (request.timeoutMs === undefined ? sdk.messages.stream(buildMessageParams(request)) : sdk.messages.stream(buildMessageParams(request), { timeout: request.timeoutMs, maxRetries: 0 })).finalMessage();
       } catch (error) {
         tell(observe, { ok: false, error });
         throw error;

@@ -10,6 +10,8 @@ export const MODELS = {
   notesAndScreenshots: "claude-sonnet-5-5",
   // The cheapest model, one call per class or trigger, at most 200 a run (DECISIONS.md 490).
   handbookSummaries: "claude-haiku-5-5",
+  // One small call per calibration, for the closed stages the name rule leaves undecided (DECISIONS.md 766).
+  stageNames: "claude-opus-5-5",
 } as const;
 
 export const QUEUE_NAME = "health-check-jobs";

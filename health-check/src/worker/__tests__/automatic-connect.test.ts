@@ -20,6 +20,7 @@ import { CALIBRATION_WRITE, calibrationFromRow, calibrationRow, HOLD_RUN_SQL, Po
 import { ORG_SETTINGS_ON_CONSULTANT_RUN } from "../run-job.ts";
 import { ORG_AWAITING_CONNECT } from "../types.ts";
 import { createJobHandler } from "../worker.ts";
+import { answerAll, fakeStageModel, reply } from "../../testing/stage-model-fake.ts";
 import { baseDeps, consoleRun, INTAKE, oauthClient, RUN_ID, runInput, syntheticConnection } from "./helpers.ts";
 
 // An automatic full check is calibrated from the org's own stages and currency
@@ -874,5 +875,60 @@ describe("the customer's closed stages, and the name rule, at connect (DECISIONS
     await g.handle(g.job, once);
     assert.deepEqual(g.queued, [RUN_ID]);
     assert.ok(g.deps.lines.includes(`Automatic run ${RUN_ID}'s customer's answer about its closed stages isn't in a shape we read, so it was ignored.`));
+  });
+});
+
+describe("a model reading what the word list can't, at connect (DECISIONS.md 766)", () => {
+  // "Quokka Lost label" holds a word off the vocabulary, so it never goes; "Parked Pending Review" is undecided by the word list and every word is on it.
+  test("all three on: only the undecided closed stage whose words are all on the vocabulary goes, read as the model says, marked so, and queued", async () => {
+    const f = await flow();
+    f.org.stages = [...STAGES, { ...stage("Parked_Pending", 6, { IsClosed: true }), MasterLabel: "Parked Pending Review" }];
+    const model = fakeStageModel(answerAll("no_decision"));
+    Object.assign(f.deps, { stageNames: true, stageNamesModel: true, stageNamesModelConsole: true, narrative: model });
+    const outcome = await f.handle(f.job, once);
+    assert.equal(model.requests.length, 1);
+    assert.deepEqual(model.sent(), [{ label: "Parked Pending Review", apiName: "Parked_Pending" }]);
+    const c = f.deps.store.runs.get(RUN_ID)!.calibration!;
+    assert.deepEqual(c.stages.filter((s) => s.from).map(({ labelKey: _k, ...s }) => s), [{ name: "Parked_Pending", category: "no_decision", from: "model" }]);
+    assert.deepEqual(f.queued, [RUN_ID]);
+    noStageNames(f, outcome.detail);
+    for (const line of f.deps.lines) assert.ok(!line.includes("Parked"), line);
+  });
+
+  test("the model's switch off, HC_STAGE_NAMES off, or a consultant-led run: no call, calibrated as before", async () => {
+    const parked = [...STAGES, { ...stage("Parked_Pending", 6, { IsClosed: true }), MasterLabel: "Parked Pending Review" }];
+    const before = await flow();
+    before.org.stages = parked;
+    before.deps.stageNames = true;
+    await before.handle(before.job, once);
+    const asBefore = before.deps.store.runs.get(RUN_ID)!.calibration!;
+    for (const [why, set, options] of [
+      ["the model's switch off", { stageNames: true, stageNamesModel: false, stageNamesModelConsole: true }, {}],
+      ["the console not ready", { stageNames: true, stageNamesModel: true, stageNamesModelConsole: false }, {}],
+      ["HC_STAGE_NAMES off", { stageNames: false, stageNamesModel: true, stageNamesModelConsole: true }, {}],
+      ["a consultant-led run", { stageNames: true, stageNamesModel: true, stageNamesModelConsole: true }, { reviewMode: "consultant" }],
+    ] as const) {
+      const f = await flow(options as { reviewMode?: Run["reviewMode"] });
+      f.org.stages = parked;
+      const model = fakeStageModel(answerAll("lost"));
+      Object.assign(f.deps, set, { narrative: model });
+      await f.handle(f.job, once);
+      assert.equal(model.requests.length, 0, why);
+      if (why === "the model's switch off" || why === "the console not ready") assert.deepEqual(f.deps.store.runs.get(RUN_ID)!.calibration, asBefore, why);
+    }
+  });
+
+  test("a model that throws, refuses or answers nonsense: calibrated and queued as without it, the stage undecided", async () => {
+    for (const model of [fakeStageModel(() => { throw new Error("Quokka Lost"); }), fakeStageModel(() => reply("", "refusal")), fakeStageModel(() => reply("{"))]) {
+      const f = await flow();
+      f.org.stages = [...STAGES, { ...stage("Parked_Pending", 6, { IsClosed: true }), MasterLabel: "Parked Pending Review" }];
+      Object.assign(f.deps, { stageNames: true, stageNamesModel: true, stageNamesModelConsole: true, narrative: model });
+      const outcome = await f.handle(f.job, once);
+      assert.equal(outcome.outcome, "connected");
+      assert.ok(f.deps.store.runs.get(RUN_ID)!.calibration!.stages.every((s) => s.name !== "Quokka Lost" && s.name !== "Parked_Pending"));
+      assert.equal(model.requests.length, 1);
+      assert.deepEqual(f.queued, [RUN_ID]);
+      noStageNames(f, outcome.detail);
+    }
   });
 });

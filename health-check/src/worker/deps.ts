@@ -53,6 +53,17 @@ export type WorkerDeps = {
    * said as an assumption. Off when absent: no name is read, and one read before is dropped at the run's next fresh start.
    */
   stageNames?: boolean;
+  /**
+   * HC_STAGE_NAMES_MODEL=on, exactly, read once at start in env.ts (DECISIONS.md 766): with stageNames also on, a model
+   * reads the closed, not-won stages the name rule leaves undecided, from their label and API name only, said as an
+   * assumption. Off when absent: no model is asked, and a reading made before is dropped at the run's next fresh start.
+   */
+  stageNamesModel?: boolean;
+  /**
+   * HC_STAGE_NAMES_MODEL_CONSOLE=ready, exactly (DECISIONS.md 766): the console's copy of the calibration carries a
+   * model's readings. Until it does, its strict schema throws on one, so stageNamesModel is ignored without it.
+   */
+  stageNamesModelConsole?: boolean;
   /** The worker's switch for automatic runs, read once at start in env.ts (DECISIONS.md 688). Absent: off. */
   automatic?: AutomaticSwitch;
   /**

@@ -16,8 +16,12 @@ export const CalibratedStage = z.object({
   // Where a closed stage's lost or no decision came from on an automatic calibration (DECISIONS.md 756): "customer",
   // they said so in the portal; "name", our rule read it from the stage's name, said as an assumption. Absent: a
   // person's or Salesforce's word. Never checked here, so a stored row always parses: the engine reads it only on a
-  // lost or no decision stage of a calibration read from the org's settings.
-  from: z.enum(["customer", "name"]).optional(),
+  // lost or no decision stage of a calibration read from the org's settings. "model": a model read it from the stage's
+  // name where our rule couldn't, behind HC_STAGE_NAMES_MODEL, said as an assumption (DECISIONS.md 766).
+  from: z.enum(["customer", "name", "model"]).optional(),
+  // A model's reading only: a short hash of the stage's API name and label when it was read, so the reading is reused
+  // run after run and asked again only when the label changes (DECISIONS.md 766). Never the label itself.
+  labelKey: z.string().max(64).optional(),
 });
 export type CalibratedStage = z.infer<typeof CalibratedStage>;
 
@@ -95,6 +99,9 @@ export const Calibration = z
     // The currency the org's default locale suggests, for the question the
     // portal asks. Never printed as the currency and never formats an amount.
     currencySuggested: z.string().regex(/^[A-Z]{3}$/).optional(),
+    // The stages a model answered "unsure" for, by labelKey (DECISIONS.md 766): not asked again until the label
+    // changes. Hashes only, never a name. Rides in the "fields" JSON column, as the currency's standing does.
+    modelUnsure: z.array(z.string().max(64)).max(2_000).optional(),
     // Annual cost per seat by Salesforce licence name. No entry means no sizing, never a guess.
     licenceCosts: z.record(z.string(), z.number().nonnegative()).default({}),
     // Minutes a year per item, by key, as agreed with the customer. Salesforce has

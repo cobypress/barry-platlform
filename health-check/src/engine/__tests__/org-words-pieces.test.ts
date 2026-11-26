@@ -463,6 +463,9 @@ const SIGNED_OFF: string[] = [
   // The name rule's assumption, one form each for one stage and several (DECISIONS.md 756).
   "src/domains/historic-pipeline/cohort.ts: andList(items)",
   "src/domains/historic-pipeline/cohort.ts: andList(items)",
+  // The model's assumption the same way (DECISIONS.md 766): items made by said, each stage the org's words.
+  "src/domains/historic-pipeline/cohort.ts: andList(items)",
+  "src/domains/historic-pipeline/cohort.ts: andList(items)",
   "src/domains/historic-pipeline/cohort.ts: stageList(stages)",
   "src/domains/historic-pipeline/cohort.ts: stageList(stages)",
   "src/domains/historic-pipeline/cohort.ts: stageList(stages)",

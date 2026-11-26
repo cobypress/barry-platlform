@@ -501,7 +501,7 @@ export interface WorkerStore {
    * it; "unchanged" when the row no longer matched (another delivery wrote it,
    * or a person confirmed one). Throws StoreError by SQLSTATE alone.
    */
-  answerCalibrationStages(runId: string, was: CalibratedStage[], stages: CalibratedStage[]): Promise<"updated" | "unchanged">;
+  answerCalibrationStages(runId: string, was: CalibratedStage[], stages: CalibratedStage[], modelUnsure?: string[]): Promise<"updated" | "unchanged">;
   /**
    * Why an automatic run waits for a person, in the console's "heldReason"
    * (migration 20261211). Only an automatic run's, and only where none is set,
