@@ -113,7 +113,7 @@ describe("who is counted", () => {
     const f = one(on(specs), "svc.stuck-in-status");
     const open = f.evidence.at(-1)!;
     assert.equal(open.count! + open.exclusions.reduce((t, e) => t + leading(e), 0), caseRecords(specs).cases.filter((c) => !c.IsClosed).length, open.exclusions.join(" | "));
-    assert.ok(open.exclusions.includes("2 open cases whose status we couldn't place: not in your case status settings, a closed status, or not where its recorded changes end"), open.exclusions.join(" | "));
+    assert.ok(open.exclusions.includes("2 open cases whose status we couldn't place: not in your case status settings, a closed status, or not where their recorded changes end"), open.exclusions.join(" | "));
   });
 
   test("the censoring rule: cases too recent for the lag are left out and said, never counted as cases that failed", () => {
@@ -191,7 +191,18 @@ describe("open cases stuck in a status (C1)", () => {
     const calm = richCases().filter((s) => s.made > 12);
     const f = one(on([...calm, { made: 2, steps: [["Working", 0.5]] }]), "svc.stuck-in-status");
     assert.equal(f.status, "passed");
-    assert.match(textOf(f), /\. 0 of 1 open cases \(0%\) have been in .* Days are calendar days\. No segment is above 60%\.$/);
+    assert.match(textOf(f), /\. 0 of 1 open case \(0%\) have been in .* Days are calendar days\. No segment is above 60%\.$/);
+  });
+});
+
+describe("one of a thing, said in the singular", () => {
+  test("one open case past the line, one closed straight, one status compared", () => {
+    const stuck = one(on([...quickClosed(300), ANCHOR, { made: 3, steps: [["Working", 0.25]], at: "00:00" }]), "svc.stuck-in-status");
+    assert.match(textOf(stuck), /\. 1 of 1 open case \(100%\) has been in their current status/);
+    const straight = one(on([...quick(300), { made: 80, steps: [["Closed", 0.2]] }]), "svc.closed-straight");
+    assert.match(textOf(straight), /, 1 \(0.3%\) was closed straight from the status they started in/);
+    const compared = one(on(sentBackOrg(15, 20)), "svc.sent-back-cases");
+    assert.match(textOf(compared), /^We compared 1 status that cases were sent back from with the cases that reached it without being sent back\./);
   });
 });
 

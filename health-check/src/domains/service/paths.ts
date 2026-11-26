@@ -316,8 +316,8 @@ export function caseCohortOf(ctx: Ctx): CaseCohort {
           ? named(said`${plural(counts.recent, "case")} made after ${daySaid(to)}, too recent to have had ${lagDays} days, the least time we allow for a case to close`, { recent: counts.recent, to: [to, "date"], lagDays: [lagDays, "day"] })
           : named(said`${plural(counts.recent, "case")} made after ${daySaid(to)}, too recent to have had the ${lagDays} days that ${LAG_SHARE}% of closed cases took`, { recent: counts.recent, to: [to, "date"], lagDays: [lagDays, "day"], lagShare: [LAG_SHARE, "percent"] })]
       : []),
-    ...(both.size ? [named(said`${plural(both.size, "case")} read as both open and closed, as it changed while we read`, { both: both.size })] : []),
-    ...(counts.noChange ? [named(said`${plural(counts.noChange, "closed case")} with no recorded status change, so we can't tell which statuses it went through`, { noChange: counts.noChange })] : []),
+    ...(both.size ? [named(said`${plural(both.size, "case")} read as both open and closed, as ${both.size === 1 ? said`it` : said`they`} changed while we read`, { both: both.size })] : []),
+    ...(counts.noChange ? [named(said`${plural(counts.noChange, "closed case")} with no recorded status change, so we can't tell which statuses ${counts.noChange === 1 ? said`it` : said`they`} went through`, { noChange: counts.noChange })] : []),
     ...(counts.unknown ? [named(said`${plural(counts.unknown, "case")} with a status we couldn't find in your case status settings, or with none`, { unknown: counts.unknown })] : []),
     ...(counts.mismatch ? [named(said`${plural(counts.mismatch, "case")} whose recorded status changes don't end where the case stands now`, { mismatch: counts.mismatch })] : []),
   ];
@@ -433,7 +433,7 @@ export const stuckInStatus: Rule = {
       targets.push({ row: o.row, status: o.status, since, days: daysOf(now - since), priority: casePriority(o.row), origin: caseOrigin(o.row), label: o.status.label });
     }
     const exclusions = [
-      ...(noStatus ? [named(said`${plural(noStatus, "open case")} whose status we couldn't place: not in your case status settings, a closed status, or not where its recorded changes end`, { noStatus })] : []),
+      ...(noStatus ? [named(said`${plural(noStatus, "open case")} whose status we couldn't place: not in your case status settings, a closed status, or not where ${noStatus === 1 ? said`its` : said`their`} recorded changes end`, { noStatus })] : []),
       ...(noLine ? [named(said`${plural(noLine, "open case")} in a status too few cases made ${periodSaid(c)} spent time in, or left, to set a line`, { noLine, minSample })] : []),
     ];
     const evidence = [...c.evidence, ctx.ev(c.openSource, { count: targets.length, note: "Open cases now, in a status with a line to compare", exclusions })];
@@ -441,7 +441,7 @@ export const stuckInStatus: Rule = {
     const dims: Record<string, (t: Target) => string> = { status: (t) => t.label, priority: (t) => t.priority, ...(c.hasOrigin ? { origin: (t: Target) => t.origin } : {}) };
     const result = segmentRate(targets, (t) => t.days > lines.get(t.status.key)!, dims, { segmentLimit: STUCK_SEGMENT_LIMIT, minSegment: MIN_SEGMENT });
     const { hits, n, rate } = result;
-    const lead = named(said`We set each open case beside the cases made ${periodSaid(c)}. ${hits} of ${n} open cases (${rate}%) have been in their current status longer than ${STAY_SHARE}% of those cases' stays in it lasted. Days are calendar days.`, { stayShare: [STAY_SHARE, "percent"], hits, n, rate: [rate, "percent"] });
+    const lead = named(said`We set each open case beside the cases made ${periodSaid(c)}. ${hits} of ${n} ${n === 1 ? said`open case` : said`open cases`} (${rate}%) ${hits === 1 ? said`has` : said`have`} been in their current status longer than ${STAY_SHARE}% of those cases' stays in it lasted. Days are calendar days.`, { stayShare: [STAY_SHARE, "percent"], hits, n, rate: [rate, "percent"] });
     const facts = { hits, n, rate, statusesWithLine: lines.size, stayShare: STAY_SHARE, segmentLimit: STUCK_SEGMENT_LIMIT };
     const over = rate > STUCK_LIMIT;
     if (!over && result.hotspots.length === 0) {
@@ -456,7 +456,7 @@ export const stuckInStatus: Rule = {
       ? said``
       : top === worst
         ? named(said` ${STAY_SHARE}% of the stays in ${org(top.key)} ended within ${within}.`, { stayShare: [STAY_SHARE, "percent"] })
-        : named(said` In ${org(top.key)}, ${top.hits} of ${top.n} open cases (${top.rate}%) are past the line: ${STAY_SHARE}% of the stays there ended within ${within}.`, { topHits: top.hits, topN: top.n, topRate: [top.rate, "percent"], stayShare: [STAY_SHARE, "percent"] });
+        : named(said` In ${org(top.key)}, ${top.hits} of ${top.n} open cases (${top.rate}%) ${top.hits === 1 ? said`is` : said`are`} past the line: ${STAY_SHARE}% of the stays there ended within ${within}.`, { topHits: top.hits, topN: top.n, topRate: [top.rate, "percent"], stayShare: [STAY_SHARE, "percent"] });
     const hidden = !worst
       ? said``
       : !over
@@ -571,7 +571,7 @@ export const closedStraight: Rule = {
     const result = segmentRate(c.cases, straight, dims, { segmentLimit: STRAIGHT_SEGMENT_LIMIT, minSegment: MIN_SEGMENT });
     const { hits, n, rate } = result;
     const open = c.cases.filter((x) => x.firstCloseAt === null).length;
-    const lead = named(said`Of the ${n} cases made ${periodSaid(c)}, ${hits} (${rate}%) were closed straight from the status they started in, with no other status between.`, { n, hits, rate: [rate, "percent"] });
+    const lead = named(said`Of the ${n} cases made ${periodSaid(c)}, ${hits} (${rate}%) ${hits === 1 ? said`was` : said`were`} closed straight from the status they started in, with no other status between.`, { n, hits, rate: [rate, "percent"] });
     const openSaid = open === 0 ? said`` : open === 1 ? said` 1 case has never been closed, and isn't counted as closed straight.` : named(said` ${open} cases have never been closed, and aren't counted as closed straight.`, { open });
     const facts = { hits, n, rate, open, segmentLimit: STRAIGHT_SEGMENT_LIMIT };
     const over = rate > STRAIGHT_LIMIT;
@@ -706,7 +706,7 @@ export const sentBackCases: Rule = {
     const segmentsChecked: SegmentCheck[] = Object.entries(dimensionsOf(c)).map(([dimension, keyOf]) => ({ dimension, segments: new Set(c.cases.map(keyOf)).size }));
     if (raised.length === 0) {
       const tests = tried.length;
-      return { outcome: "pass", summary: named(said`We compared ${plural(tests, "status", "statuses")} that cases were sent back from with the cases that reached them without being sent back. We couldn't tell whether those sent back were closed within ${lagDays} days of being made more or less often.`, { tests, lagDays: [lagDays, "day"] }), evidence: c.evidence, segmentsChecked, facts: { tested: tests, bar } };
+      return { outcome: "pass", summary: named(said`We compared ${plural(tests, "status", "statuses")} that cases were sent back from with the cases that reached ${tests === 1 ? said`it` : said`them`} without being sent back. We couldn't tell whether those sent back were closed within ${lagDays} days of being made more or less often.`, { tests, lagDays: [lagDays, "day"] }), evidence: c.evidence, segmentsChecked, facts: { tested: tests, bar } };
     }
     const labels = new Map(c.cases.flatMap((x) => x.visits.map((v) => [v.status.key, v.status.label] as const)));
     return raised.map(({ from, to, cmp }): RuleResult => {
