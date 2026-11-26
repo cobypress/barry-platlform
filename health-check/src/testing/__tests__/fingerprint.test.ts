@@ -25,9 +25,12 @@ import { DURATION_MEDIANS } from "../../domains/average.ts";
 // Decision 726 moved both runs' findings.json and raw-notes.md: int.api-usage, version 3, raises a daily allowance only
 // from 95% used, and the async Apex trap moved from 88% to 96% so it still fires, medium as before. metrics.json and
 // scores.json didn't move. Each earlier decision's findings.json hash below was taken again from this run.
+// Decision 775 moved both runs' metrics.json and raw-notes.md, and only those: three metric texts no longer end in a
+// pointer to our own notes ("(QUESTIONS.md 3)", "(QUESTIONS.md)"). Each earlier decision's metrics.json hash below was
+// taken again from this run; no findings.json, scores.json or other hash moved.
 const GOLDEN: Record<string, Record<string, string>> = {
-  recorded: { "findings.json": "5030e28f0b262677", "metrics.json": "2a25c522746883d7", "scores.json": "17cdb1708449d000", "manual-steps.json": "c4daf1ca86584a33", "action-lists.json": "7018f033c3c80e0a", "raw-notes.md": "7de1b0095cde85c2", "handbook.json": "64dcafcf493eef42" },
-  generated: { "findings.json": "269e760d438adb2e", "metrics.json": "cb39d3fda2a6435e", "scores.json": "616e42570f940402", "manual-steps.json": "15ae87c4fd76d7b6", "action-lists.json": "8eeb97766d119778", "raw-notes.md": "afae0c5294cbc1be", "handbook.json": "23c075e2337e23a8" },
+  recorded: { "findings.json": "5030e28f0b262677", "metrics.json": "5f0c52583efbd22e", "scores.json": "17cdb1708449d000", "manual-steps.json": "c4daf1ca86584a33", "action-lists.json": "7018f033c3c80e0a", "raw-notes.md": "88ee0f6e233712b2", "handbook.json": "64dcafcf493eef42" },
+  generated: { "findings.json": "269e760d438adb2e", "metrics.json": "716b945b04143af4", "scores.json": "616e42570f940402", "manual-steps.json": "15ae87c4fd76d7b6", "action-lists.json": "8eeb97766d119778", "raw-notes.md": "bdca47c97dc7de42", "handbook.json": "23c075e2337e23a8" },
 };
 
 // findings.json before decision 714 put a difficulty on each issue: that key is all that moved it, and nothing else moved.
@@ -36,23 +39,23 @@ const BEFORE_714: Record<string, string> = { recorded: "27b379b80e5b3a77", gener
 // Before decision 709 kept each duration's average beside its median: with the stat taken out, metrics.json hashes as
 // it did. findings.json and scores.json never moved; raw-notes.md gains the stat in each measure's detail line.
 const BEFORE_709: Record<string, { "metrics.json": string }> = {
-  recorded: { "metrics.json": "7ee832631c25d130" },
-  generated: { "metrics.json": "3d451573d17ac8ca" },
+  recorded: { "metrics.json": "d0225ed74639798c" },
+  generated: { "metrics.json": "5f118e9255247669" },
 };
 
 // Before decision 706 added the stage probabilities' finding and metric, and its stage read named the probability field:
 // with those taken out, and the stage read's evidence naming the query as it was, findings.json and metrics.json hash
 // as they did. raw-notes.md gains their sections and the counts they add to. Nothing else moved.
 const BEFORE_706: Record<string, { "findings.json": string; "metrics.json": string }> = {
-  recorded: { "findings.json": "8f182601bd09585d", "metrics.json": "db261fadeba13015" },
-  generated: { "findings.json": "7219673a53b25b6f", "metrics.json": "110987cf0075336e" },
+  recorded: { "findings.json": "8f182601bd09585d", "metrics.json": "cef6544ddee4cd3a" },
+  generated: { "findings.json": "7219673a53b25b6f", "metrics.json": "919787c4457d1fb5" },
 };
 
 // Before decision 703 added the path insights' findings and the variant table's metric: with those taken out,
 // findings.json and metrics.json hash as they did. raw-notes.md gains their sections and the two counts they add to.
 const BEFORE_703: Record<string, { "findings.json": string; "metrics.json": string }> = {
-  recorded: { "findings.json": "8bda59fad6800f42", "metrics.json": "10d5f5733555b541" },
-  generated: { "findings.json": "459bd0053c635176", "metrics.json": "2233e1f04464f5ae" },
+  recorded: { "findings.json": "8bda59fad6800f42", "metrics.json": "efde7f43d8f03003" },
+  generated: { "findings.json": "459bd0053c635176", "metrics.json": "8ae17fb3a2a8b452" },
 };
 
 // findings.json before decisions 628 and 636 added each issue's hours to fix, time band, fix complexity and fix prompt.

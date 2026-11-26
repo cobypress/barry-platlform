@@ -1,7 +1,7 @@
 import { createHash } from "node:crypto";
 import { namedFor, namedIn, notFiguresIn, withNamedValues, type NotFigures } from "./named.ts";
 import { stagesExtractor } from "../extract/opportunities.ts";
-import { guardPassedOn, marksOfMetric, orgValuesOf, rewordFinding, rewordMetric } from "./automatic-words.ts";
+import { guardPassedOn, marksOfMetric, orgValuesOf, rewordFinding, rewordMetric, rewrittenNotFigures } from "./automatic-words.ts";
 import type { DomainModule } from "../domains/types.ts";
 import type { Extractor } from "../extract/types.ts";
 import { Pseudonymiser, UNKNOWN_USER } from "../privacy/pseudonymiser.ts";
@@ -588,6 +588,11 @@ function analyseWithin(input: AnalysisInput): AnalysisOutput {
     const stageRows = extracts.get(stagesExtractor.id) as { status: string; data?: Array<{ ApiName: string; MasterLabel: string }> } | undefined;
     const orgValues = orgValuesOf({ metrics, findings, stages: [...calibration.stages.map((s) => s.name), ...(stageRows?.data ?? []).flatMap((s) => [s.ApiName, s.MasterLabel])] });
     const reworded = findings.map((f) => Finding.parse(rewordFinding(guardPassedOn(f, orgValues))));
+    // And where the rewrites' own words claim nothing, beside each finding's own marks (DECISIONS.md 775).
+    for (const f of reworded) {
+      const rewritten = rewrittenNotFigures([f.title, f.summary, f.recommendation, f.notMeasurableReason, ...(f.value.kind === "not_sized" ? [f.value.reason] : [f.value.period, ...f.value.assumptions])]);
+      if (rewritten) notFigures[f.id] = [...(notFigures[f.id] ?? []), ...rewritten];
+    }
     return {
       findings: reworded.filter((f) => !INSIGHT_RULES.has(f.ruleId)),
       insights: reworded.filter((f) => INSIGHT_RULES.has(f.ruleId)),

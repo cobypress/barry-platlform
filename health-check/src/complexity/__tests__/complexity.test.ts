@@ -188,8 +188,8 @@ describe("the synthetic org", () => {
     // files, then 712's period start in 706's sentence and closing-out count in 703's table, then 726's daily allowance
     // rule and its trap at 96%, which the fingerprint test holds.
     assert.equal(print["findings.json"], "5030e28f0b262677");
-    assert.equal(print["metrics.json"], "2a25c522746883d7");
-    assert.equal(print["raw-notes.md"], "7de1b0095cde85c2");
+    assert.equal(print["metrics.json"], "5f0c52583efbd22e");
+    assert.equal(print["raw-notes.md"], "88ee0f6e233712b2");
     const scores = JSON.parse(readFileSync(join(dir, "scores.json"), "utf8")) as Score[];
     const findings = JSON.parse(readFileSync(join(dir, "findings.json"), "utf8")) as Finding[];
     const overall = overallScore(scores, findings);

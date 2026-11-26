@@ -276,7 +276,7 @@ function reportsMetric(ctx: Ctx): Metric {
     pct(recent(reports.data), reports.data.length),
     reports.data.length,
     [...folders].sort(([a], [b]) => a.localeCompare(b)).map(([key, list]) => ({ dimension: "folder", key, n: list.length, value: pct(recent(list), list.length), notMeasurableReason: null })),
-    { exclusions: ["Other people's private reports, which can't be read"], assumptions: ["Last run is Salesforce's own record of when each report was last run (QUESTIONS.md 3)"] },
+    { exclusions: ["Other people's private reports, which can't be read"], assumptions: ["Last run is Salesforce's own record of when each report was last run"] },
   );
 }
 

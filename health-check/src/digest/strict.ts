@@ -11,6 +11,7 @@ import type { Finding, Metric } from "../schemas/index.ts";
 import type { RunDigest } from "../schemas/digest.ts";
 import type { OrgSpan } from "../engine/org-words.ts";
 import { digestTextsAt, marksOf, type DigestText } from "./checked.ts";
+import { HELD_FOR_US_MASKS } from "../render/render-released.ts";
 
 // The strict check, in shadow (DECISIONS.md 768, KAN-102). The digest's check
 // reads a finding's sentences against a set that holds those same sentences, so
@@ -373,8 +374,27 @@ export function strictShadow(digest: RunDigest, report: BuiltReport, set: Figure
   return shadow;
 }
 
-/** The shadow as one log line: counts only, by kind. */
-export function shadowLine(runId: string, s: StrictShadow): string {
+/** The kinds of text that count toward a hold: readiness and the path insights settle apart (742, 758). */
+const SETTLED_APART: ReadonlySet<StrictKind> = new Set(["readiness", "paths"]);
+
+/** A rule id, metric id or block owner as the shadow records it: ours, and never a figure or a word of the org's. */
+const OWNER = /^[a-z]+(?:[.:#][a-z0-9_-]+)+$/;
+
+/**
+ * The shadow as the worker logs it (DECISIONS.md 775), for reading production
+ * runs: what the strict check would mask, by kind; what the current check
+ * masks; whether the run would be held were strict enforced (its masks added to
+ * the current check's, against the same ceiling); and a second line of counts
+ * by rule id. Ids and counts only: never a figure, a word of the org's or a name.
+ */
+export function shadowLines(runId: string, s: StrictShadow, current?: { masks: number; held: string | null }): string[] {
   const kinds = STRICT_KINDS.filter((k) => s.byKind[k]?.untraced).map((k) => `${k} ${s.byKind[k]!.untraced}`);
-  return `Run ${runId}: the strict check (shadow) would mask ${s.untraced} of ${s.checked} figures${kinds.length ? ` (${kinds.join(", ")})` : ""}.`;
+  const counted = STRICT_KINDS.filter((k) => !SETTLED_APART.has(k)).reduce((n, k) => n + (s.byKind[k]?.untraced ?? 0), 0);
+  const tail = current ? `; current check masks ${current.masks}; would hold: ${current.held !== null || current.masks + counted > HELD_FOR_US_MASKS ? "yes" : "no"}` : "";
+  const lines = [`Run ${runId}: strict trace would mask ${s.untraced} of ${s.checked} figures${kinds.length ? ` (${kinds.join(", ")})` : ""}${tail}.`];
+  const byRule = new Map<string, number>();
+  // An owner that doesn't look like one of our ids is counted, never named.
+  for (const f of s.figures) byRule.set(OWNER.test(f.ruleId) ? f.ruleId : "other", (byRule.get(OWNER.test(f.ruleId) ? f.ruleId : "other") ?? 0) + 1);
+  if (byRule.size > 0) lines.push(`Run ${runId}: strict trace untraced by rule: ${[...byRule].sort(([a, x], [b, y]) => y - x || a.localeCompare(b)).map(([id, n]) => `${id} ${n}`).join(", ")}.`);
+  return lines;
 }

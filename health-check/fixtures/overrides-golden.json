@@ -23137,10 +23137,10 @@
      }
     ],
     "exclusions": [
-     "Sharing rules, which can't be counted through a read-only connection (QUESTIONS.md)"
+     "Sharing rules, which can't be counted through a read-only connection"
     ],
     "assumptions": [
-     "Salesforce reports a private default as None, which we show as Private (QUESTIONS.md)"
+     "Salesforce reports a private default as None, which we show as Private"
     ],
     "value": 7,
     "n": 7,
@@ -24497,7 +24497,7 @@
      "Other people's private reports, which can't be read"
     ],
     "assumptions": [
-     "Last run is Salesforce's own record of when each report was last run (QUESTIONS.md 3)"
+     "Last run is Salesforce's own record of when each report was last run"
     ],
     "value": 25,
     "n": 80,
