@@ -77,6 +77,8 @@ export type WorkerDeps = {
   leadJourney?: boolean;
   /** HC_STUCK_EXPECTED=on, exactly, read once at start in env.ts (DECISIONS.md 777): cur.stuck-in-stage at version 3. Off when absent. */
   stuckExpected?: boolean;
+  /** HC_STUCK_UNSCORED=on, exactly (DECISIONS.md 778): cur.stuck-in-stage at version 4, unless stuckExpected. Off when absent. */
+  stuckUnscored?: boolean;
   /**
    * HC_CASE_PATHS=on, exactly, read once at start in env.ts (DECISIONS.md 776): every analysis the worker makes of a
    * run with Service Cloud adds the case status paths to service operations. Off when absent.

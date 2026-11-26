@@ -1,4 +1,5 @@
 import { CONSULTANT_NEXT_STEPS, nextStepsWords } from "./exec-pages.ts";
+import { passedOnMerit } from "../domains/scoring.ts";
 import { readFromNameNote } from "../connect/stage-outcomes.ts";
 import { scoreCaveatLine, withAmountNotes, withEditionNote } from "./amount-notes.ts";
 import { yearlyByFinding } from "../value/model.ts";
@@ -794,7 +795,7 @@ function buildSlides(report: BuiltReport, r: Render, density: Density | null, mo
   // the deck spends its pages on what needs doing.
   const withIssues = assessed.filter((d) => issuesOf(team.filter((f) => f.domain === d)).length > 0);
   const quiet = assessed.filter((d) => !withIssues.includes(d));
-  const working = quiet.filter((d) => team.some((f) => f.domain === d && f.status === "passed"));
+  const working = quiet.filter((d) => team.some((f) => f.domain === d && passedOnMerit(f)));
   const nothingMeasured = [...quiet.filter((d) => !working.includes(d)), ...unassessed];
   // With the areas' own reasons on, every area the score leaves out is listed, its reason whole (DECISIONS.md 769).
   const unclear = [...nothingMeasured, ...unscoredBeyond(report, domains, nothingMeasured)];
@@ -931,7 +932,7 @@ function buildSlides(report: BuiltReport, r: Render, density: Density | null, mo
     slides.push(...threeColumnList(r, "Areas", "Each area at a glance", [
       ...assessed.map((domain) => {
         const own = team.filter((f) => f.domain === domain);
-        return { title: `${domainLabel(domain)}: ${issuesOf(own).length} issues, ${own.filter((f) => f.status === "passed").length} passed`, detail: currentBody(built, `domain_${domain}`) };
+        return { title: `${domainLabel(domain)}: ${issuesOf(own).length} issues, ${own.filter(passedOnMerit).length} passed`, detail: currentBody(built, `domain_${domain}`) };
       }),
       ...pipelineGlance,
     ]));
@@ -970,7 +971,7 @@ function buildSlides(report: BuiltReport, r: Render, density: Density | null, mo
     mark("What's working well");
     slides.push(...listSlides(r, "Areas", "What's working well", working.map((d) => {
       const own = team.filter((f) => f.domain === d);
-      const passed = own.filter((f) => f.status === "passed").length;
+      const passed = own.filter(passedOnMerit).length;
       const open = own.filter((f) => f.status === "not_measurable").length;
       const kinds = noteCounts(own);
       return { title: domainLabel(d), detail: `No issues ${passed === 1 ? "in the one check" : `across the ${passed} checks`} we could make here.${open && !thin ? ` ${open} more couldn't be measured${kinds ? `: ${kinds}` : ""}, and the appendix lists them.` : ""}` };
@@ -1068,7 +1069,7 @@ function buildSlides(report: BuiltReport, r: Render, density: Density | null, mo
   const kinded = hasKinds(open);
   const unmeasuredItem = (f: Finding): ListItem => ({ title: f.title, detail: f.notMeasurableReason ?? f.summary });
   const unmeasured = (kinded ? byKind(open).flatMap((g) => g.findings) : open).map(unmeasuredItem);
-  const passing = team.filter((f) => f.status === "passed").map((f) => ({ title: f.title, detail: f.summary }));
+  const passing = team.filter(passedOnMerit).map((f) => ({ title: f.title, detail: f.summary }));
   // At the three-column step the two lists share three columns, each item saying which it is (DECISIONS.md 244).
   if (density?.threeColumnLists && unmeasured.length && passing.length) {
     const labelled = kinded ? byKind(open).flatMap((g) => g.findings.map((f) => ({ ...unmeasuredItem(f), title: `${KIND_HEADINGS[kindOf(f)]}: ${f.title}` }))) : unmeasured.map((x) => ({ ...x, title: `Not measurable: ${x.title}` }));

@@ -206,6 +206,16 @@
     },
     "tightenedOn": {
       "3": "2026-11-27"
+    },
+    "changedFrom": {
+      "4": [
+        1,
+        2,
+        3
+      ]
+    },
+    "changedOn": {
+      "4": "2026-11-27"
     }
   },
   "dq.contact-completeness": {
@@ -302,10 +312,27 @@
     "version": 1
   },
   "lead.no-first-response": {
-    "version": 2
+    "version": 2,
+    "changedFrom": {
+      "3": [
+        1,
+        2
+      ]
+    },
+    "changedOn": {
+      "3": "2026-11-26"
+    }
   },
   "lead.response-time": {
-    "version": 1
+    "version": 1,
+    "changedFrom": {
+      "2": [
+        1
+      ]
+    },
+    "changedOn": {
+      "2": "2026-11-26"
+    }
   },
   "lead.source-return": {
     "version": 1

@@ -32,6 +32,7 @@ export const WORKER_SWITCHES = [
   { key: "leadJourney", variable: "HC_LEAD_JOURNEY", on: (c: WorkerConfig): boolean => c.leadJourney },
   { key: "casePaths", variable: "HC_CASE_PATHS", on: (c: WorkerConfig): boolean => c.casePaths },
   { key: "stuckExpected", variable: "HC_STUCK_EXPECTED", on: (c: WorkerConfig): boolean => c.stuckExpected },
+  { key: "stuckUnscored", variable: "HC_STUCK_UNSCORED", on: (c: WorkerConfig): boolean => c.stuckUnscored },
 ] as const;
 export type SwitchKey = (typeof WORKER_SWITCHES)[number]["key"];
 

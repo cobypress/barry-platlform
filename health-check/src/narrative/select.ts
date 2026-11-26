@@ -1,6 +1,6 @@
 import { SALES_CLOUD_DOMAINS, type Finding, type NotMeasurableKind, type Run, type Score } from "../schemas/index.ts";
 import { NOT_MONEY_RULES } from "../value/model.ts";
-import { UNSCORED_RULES } from "../domains/scoring.ts";
+import { UNSCORED_RULES, unscoredVersion } from "../domains/scoring.ts";
 import { tokenSource } from "../privacy/pseudonymiser.ts";
 import { hasKinds, kindCounts } from "./unmeasured.ts";
 import { spansIfCurrent, textSha256 } from "../engine/org-words.ts";
@@ -263,7 +263,7 @@ export type Verdict = { headline: string; critical: number; high: number; issues
 
 export function verdictOf(findings: Finding[]): Verdict {
   // Shown and not scored (DECISIONS.md 673): the code checker's groups don't move the headline yet.
-  const issues = issuesOf(findings).filter((f) => !UNSCORED_RULES.has(f.ruleId));
+  const issues = issuesOf(findings).filter((f) => !UNSCORED_RULES.has(f.ruleId) && !unscoredVersion(f));
   const critical = issues.filter((f) => f.severity === "critical").length;
   const high = issues.filter((f) => f.severity === "high").length;
   const headline = critical > 0 ? "Urgent action needed" : high > 0 ? "Significant issues to fix" : issues.length > 0 ? "Sound, with issues to fix" : "No material issues found";

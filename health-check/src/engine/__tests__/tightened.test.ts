@@ -76,6 +76,8 @@ const consultant = (await runFromRecording({ answers: loadAnswers() })).dir;
 
 describe("the declarations (decision 754)", () => {
   test("one is declared, cur.stuck-in-stage 3 behind HC_STUCK_EXPECTED (decision 777): rule-where.json carries only it, and with the switch off no digest finding carries passedUnder", () => {
+    // The lead journey's versions are declared as changed, never as tightened (DECISIONS.md 778): the stricter note
+    // is reachable only through cur.stuck-in-stage 3, behind HC_STUCK_EXPECTED, which is not for switch-on.
     assert.deepEqual(Object.keys(TIGHTENED), ["cur.stuck-in-stage"]);
     assert.deepEqual(tightenedProblems(TIGHTENED, versions), []);
     assert.deepEqual(Object.entries(ruleWhere()).filter(([, e]) => "tightenedFrom" in e || "tightenedOn" in e).map(([id]) => id), ["cur.stuck-in-stage"]);

@@ -748,3 +748,53 @@ export const currentPipelineExpectedModule: DomainModule = {
 
 /** The modules a run analyses with the switch on: current pipeline swapped for its version 3's, and nothing else touched. */
 export const withStuckExpected = (modules: DomainModule[]): DomainModule[] => modules.map((m) => (m === currentPipelineModule ? currentPipelineExpectedModule : m));
+
+/**
+ * cur.stuck-in-stage version 4, behind HC_STUCK_UNSCORED (DECISIONS.md 778): version 2's line, count and deal list,
+ * shown and never scored. A snapshot of open deals over-samples long stays (777), so the share past the line says
+ * nothing on its own about a problem. Always a pass the score leaves out (UNSCORED_VERSIONS in scoring.ts): never an
+ * issue, never scored, never counted in an area's coverage nor as a pass that reflects well; its figure and its own
+ * words only, with no deal list (option (a); a list for review is the owner's to decide, FOR-REVIEW-LIST.md).
+ */
+const stuckInStageUnscored: Rule = {
+  id: "cur.stuck-in-stage",
+  version: 4,
+  domain: DOMAIN,
+  title: "Open deals that have waited longest in their stage",
+  evaluate(ctx): RuleResult | RuleResult[] {
+    const loaded = openDeals(ctx);
+    if ("outcome" in loaded) return loaded;
+    const { data, deals: open } = loaded;
+    const base = { ...data.evidence[0]!, dateRange: { from: ctx.window.to, to: ctx.window.to } };
+    const lines = stageLines(ctx, data);
+    if (lines.size === 0) return { outcome: "not_measurable", reason: named(said`No open stage has ${ctx.calibration.minSample} won deals to compare with.`, { minSample: ctx.calibration.minSample }), evidence: [{ ...base, count: null }] };
+    const deals = open.filter((d) => lines.has(d.StageName) && enteredCurrentStage(d));
+    const noLine = open.filter((d) => !lines.has(d.StageName)).length;
+    const noEntry = open.filter((d) => lines.has(d.StageName) && !enteredCurrentStage(d)).length;
+    const exclusions = [...(noLine ? [named(said`${plural(noLine, "deal")} in stages with too few won deals to compare`, { noLine })] : []), ...(noEntry ? [named(said`${plural(noEntry, "deal")} whose history doesn't show when they entered this stage`, { noEntry })] : [])];
+    const evidence: Evidence[] = [{ ...base, count: deals.length, exclusions: [...data.exclusions, ...exclusions], note: said`open deals with a stage to compare` }];
+    const left = leftOutSentence(noLine, noEntry);
+    const leftOut = left ? said` ${left}` : said``;
+    if (deals.length === 0) return { outcome: "pass", summary: said`There are no open deals with a stage to compare to check.`, evidence, segmentExemptReason: "There are no deals to segment." };
+    const days = (d: Deal): number => daysSince(enteredCurrentStage(d)!, ctx.now);
+    const isPast = (d: Deal): boolean => days(d) > lines.get(d.StageName)!;
+    // Version 2's own reading, every segment of ten or more, for the judges between runs (loosened.ts, stuckBefore3).
+    const read = segmentRate(deals, isPast, dimensions(ctx), { segmentLimit: -Infinity, minSegment: MIN_SEGMENT });
+    const facts = { hits: read.hits, n: read.n, rate: read.rate, wonLineRate: read.rate, ...(read.hotspots[0] ? { wonLineWorstSegmentRate: read.hotspots[0].rate } : {}) };
+    // "About": the line is a percentile of won deals' stays, read between two of them.
+    const lead = named(said`Open deals that have been in their stage longer than about three quarters of won deals stayed there: ${read.hits} of ${read.n} (${read.rate}%).`, { wonWithinPct: STUCK_PCT, hits: read.hits, n: read.n, rate: [read.rate, "percent"] });
+    // Always a pass (DECISIONS.md 778, option (a)): it never asserts a fault, so it is no issue in any count, list, plan,
+    // ticket file, alert or comparison, and carries no deal list. Its own words say what the figure can't show.
+    const note = read.hits > 0 ? said` Some open deals are usually past this point, because the deals still open at any moment tend to be the slower ones. Whether this share is a problem depends on what is normal for these stages, which we can't tell from it.` : said``;
+    return { outcome: "pass", summary: said`${lead}${leftOut}${note}`, evidence, segmentsChecked: read.segmentsChecked, facts };
+  },
+};
+
+/** Current pipeline with HC_STUCK_UNSCORED on (DECISIONS.md 778): cur.stuck-in-stage at version 4, in version 2's place. */
+export const currentPipelineUnscoredModule: DomainModule = {
+  ...currentPipelineModule,
+  rules: currentPipelineModule.rules.map((r) => (r === stuckInStage ? stuckInStageUnscored : r)),
+};
+
+/** The modules a run analyses with HC_STUCK_UNSCORED on and HC_STUCK_EXPECTED off: current pipeline swapped for version 4's. */
+export const withStuckUnscored = (modules: DomainModule[]): DomainModule[] => modules.map((m) => (m === currentPipelineModule ? currentPipelineUnscoredModule : m));

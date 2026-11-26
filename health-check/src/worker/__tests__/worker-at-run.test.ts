@@ -51,6 +51,7 @@ describe("what is stored: the boolean switches, by name, and nothing else (DECIS
         ["leadJourney", "HC_LEAD_JOURNEY"],
         ["casePaths", "HC_CASE_PATHS"],
         ["stuckExpected", "HC_STUCK_EXPECTED"],
+        ["stuckUnscored", "HC_STUCK_UNSCORED"],
       ],
     );
     const stored = atRunRow(atRunOf({}), "2026-11-26T10:00:00.000Z");

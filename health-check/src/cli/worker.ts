@@ -11,7 +11,7 @@ import { GoogleDrive } from "../worker/drive.ts";
 import { areaReasonsStartLine, readWorkerEnv, WORKER_ENV } from "../worker/env.ts";
 import { automaticStartLine } from "../worker/automatic.ts";
 import { stageModelStartLine, stageNamesStartLine } from "../worker/stage-answer.ts";
-import { casePathsStartLine, leadJourneyStartLine, stuckExpectedStartLine } from "../worker/env.ts";
+import { casePathsStartLine, leadJourneyStartLine, stuckExpectedStartLine, stuckUnscoredStartLine } from "../worker/env.ts";
 import { atRunStartLine, workerAtRun } from "../worker/at-run.ts";
 import { PostgresWorkerStore, type SqlPool } from "../worker/postgres-store.ts";
 import { retentionSweep, SWEEP_INTERVAL_MS } from "../worker/retention.ts";
@@ -134,6 +134,7 @@ export async function workerCommand(
     leadJourney: config.leadJourney,
     casePaths: config.casePaths,
     stuckExpected: config.stuckExpected,
+    stuckUnscored: config.stuckUnscored,
     atRun,
     codeLint: "found" in pmd ? { pmd: pmd.found } : { pmd: null, pmdMissing: pmd.missing },
     queueRun: runQueuer(queue),
@@ -185,6 +186,8 @@ export async function workerCommand(
   log(casePathsStartLine(config.casePaths));
   // And stuck-in-stage's version 3 (DECISIONS.md 777).
   log(stuckExpectedStartLine(config.stuckExpected));
+  // And stuck-in-stage shown unscored, with which wins (DECISIONS.md 778).
+  log(stuckUnscoredStartLine(config.stuckUnscored, config.stuckExpected));
   // And what each run records of this worker (DECISIONS.md 774).
   log(atRunStartLine(atRun));
   // Said at every start, so a deploy that installs it shows in the log.

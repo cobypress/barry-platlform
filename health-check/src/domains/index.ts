@@ -3,12 +3,12 @@ import { adoptionModule } from "./adoption/index.ts";
 import { automationModule } from "./automation/index.ts";
 import { bestPracticeModule } from "./best-practice/index.ts";
 import { configurationModule } from "./configuration/index.ts";
-import { currentPipelineExpectedModule, currentPipelineModule } from "./current-pipeline/index.ts";
+import { currentPipelineExpectedModule, currentPipelineModule, currentPipelineUnscoredModule } from "./current-pipeline/index.ts";
+import { leadFunnelModule, leadJourneyModule } from "./lead-funnel/index.ts";
 import { dataQualityModule } from "./data-quality/index.ts";
 import { forecastModule } from "./forecast/index.ts";
 import { historicPipelineModule } from "./historic-pipeline/index.ts";
 import { integrationsModule } from "./integrations/index.ts";
-import { leadFunnelModule } from "./lead-funnel/index.ts";
 import { revenueOpportunitiesModule } from "./revenue-opportunities/index.ts";
 import { securityModule } from "./security/index.ts";
 import { SERVICE_CLOUD_MODULES } from "./service/index.ts";
@@ -33,7 +33,7 @@ export const ALL_MODULES: DomainModule[] = [...SALES_CLOUD_MODULES, ...SERVICE_C
  * the loosenings and tightenings declared in src/engine/loosened.ts: a version behind a switch is one the rule has had.
  */
 export const LATEST_RULE_VERSIONS: ReadonlyMap<string, number> = new Map(
-  [...ALL_MODULES, currentPipelineExpectedModule].flatMap((m) => m.rules).reduce((out, r) => out.set(r.id, Math.max(out.get(r.id) ?? 0, r.version)), new Map<string, number>()),
+  [...ALL_MODULES, currentPipelineExpectedModule, currentPipelineUnscoredModule, leadJourneyModule].flatMap((m) => m.rules).reduce((out, r) => out.set(r.id, Math.max(out.get(r.id) ?? 0, r.version)), new Map<string, number>()),
 );
 
 /** The console's module for both Service Cloud areas (DECISIONS.md 156). */

@@ -11,7 +11,7 @@ import { writeFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { ALL_MODULES } from "../src/domains/index.ts";
 import type { Rule } from "../src/engine/rule.ts";
-import { loosenedFrom, loosenedOn, tightenedFrom, tightenedOn } from "../src/engine/loosened.ts";
+import { changedFrom, changedOn, loosenedFrom, loosenedOn, tightenedFrom, tightenedOn } from "../src/engine/loosened.ts";
 
 export const RULE_WHERE_FILE = fileURLToPath(new URL("../fixtures/rule-where.json", import.meta.url));
 /** How the file is made again, from the health-check folder. */
@@ -24,7 +24,7 @@ export const REMAKE = "npm run rule-where";
  * `tightenedOn` (DECISIONS.md 754) the same for a rule we have tightened: the earlier
  * versions under which some of its issues would have passed. A version can be in both.
  */
-export type RuleWhere = Record<string, { version: number; where?: string[]; loosenedFrom?: Record<string, number[]>; loosenedOn?: Record<string, string>; tightenedFrom?: Record<string, number[]>; tightenedOn?: Record<string, string> }>;
+export type RuleWhere = Record<string, { version: number; where?: string[]; loosenedFrom?: Record<string, number[]>; loosenedOn?: Record<string, string>; tightenedFrom?: Record<string, number[]>; tightenedOn?: Record<string, string>; changedFrom?: Record<string, number[]>; changedOn?: Record<string, string> }>;
 
 /** Each rule once, by id in code-point order, so the file is the same bytes wherever it's made. */
 export function ruleWhere(rules: readonly Rule[] = ALL_MODULES.flatMap((m) => m.rules)): RuleWhere {
@@ -33,11 +33,14 @@ export function ruleWhere(rules: readonly Rule[] = ALL_MODULES.flatMap((m) => m.
     if (Object.hasOwn(out, rule.id)) throw new Error(`Two rules have the id ${rule.id}`);
     const loosened = loosenedFrom(rule.id);
     const tightened = tightenedFrom(rule.id);
+    const changed = changedFrom(rule.id);
     out[rule.id] = {
       version: rule.version,
       ...(rule.where ? { where: [...rule.where] } : {}),
       ...(loosened ? { loosenedFrom: loosened, loosenedOn: loosenedOn(rule.id)! } : {}),
       ...(tightened ? { tightenedFrom: tightened, tightenedOn: tightenedOn(rule.id)! } : {}),
+      // A version declared as changed, neither looser nor stricter (DECISIONS.md 778).
+      ...(changed ? { changedFrom: changed, changedOn: changedOn(rule.id)! } : {}),
     };
   }
   return out;

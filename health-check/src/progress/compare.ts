@@ -4,7 +4,7 @@ import type { OverallScore } from "../domains/scoring.ts";
 import type { ValueModel } from "../value/model.ts";
 import { apiLimitsExtractor } from "../extract/integrations.ts";
 import { UNSCORED_RULES } from "../domains/scoring.ts";
-import { foundByStricter, issueUnder, passedOnlyByChange, passedUnder, wentBack } from "../engine/loosened.ts";
+import { changedAcross, foundByStricter, issueUnder, passedOnlyByChange, passedUnder, wentBack } from "../engine/loosened.ts";
 import { said, type Said } from "../engine/org-words.ts";
 
 // The re-check (roadmap Stage 5): what changed since the first health check.
@@ -243,6 +243,13 @@ export function compareWithBaseline(baseline: ProgressSide, current: ProgressSid
     // without it, says nothing of them, never "can't tell" (DECISIONS.md 673).
     if (MEASURED_LATER.has(ruleId) && nowFindings.length === 0) continue;
     const nowIssues = nowFindings.filter((f) => f.status === "issue");
+    // Passed now across a version declared as changed (CHANGED, DECISIONS.md 778): "we changed how we check", this once,
+    // and nothing carried, so the next run at the same version compares as any.
+    const passNow = nowFindings.find((f) => f.status === "passed");
+    if (!nowIssues.length && passNow && thenIssues.every((f) => changedAcross(ruleId, f.ruleVersion, passNow.ruleVersion))) {
+      ruleChanged.push(change(ruleId, thenIssues));
+      continue;
+    }
     if (!nowIssues.length && passedOnlyByRuleChange(thenIssues.map((f) => f.ruleVersion), ruleId, nowFindings, current.ownCalls)) {
       ruleChanged.push(change(ruleId, thenIssues));
       carried[ruleId] = Math.min(...thenIssues.map((f) => f.ruleVersion));
@@ -266,6 +273,8 @@ export function compareWithBaseline(baseline: ProgressSide, current: ProgressSid
     if (!nowIssues.length) continue;
     // New only if the earlier run checked the rule, as the portal's alerts decide (DECISIONS.md 661, 673).
     if ((MEASURED_LATER.has(ruleId) && !then.some((f) => f.status === "passed")) || (current.checkedByCode === true && unsplitThen(then))) newlyMeasured.push(change(ruleId, nowIssues));
+    // Passed or unmeasured then, raised now across a version declared as changed (778): open, never new, nothing said.
+    else if (then.length > 0 && then.every((p) => (p.status === "passed" || p.status === "not_measurable") && nowIssues.every((i) => changedAcross(ruleId, p.ruleVersion, i.ruleVersion)))) changedBack.push(change(ruleId, nowIssues));
     // Passed then under a newer version, raised now under an older one: the check came back, open, never new, nothing said (DECISIONS.md 777).
     else if (then.length > 0 && then.every((p) => p.status === "passed" && nowIssues.every((i) => wentBack(p.ruleVersion, i.ruleVersion)))) changedBack.push(change(ruleId, nowIssues));
     // Passed then, raised now only because we tightened the rule since: open, never new (DECISIONS.md 754).

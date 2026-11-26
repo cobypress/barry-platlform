@@ -6,6 +6,7 @@ import { dirname, join, resolve } from "node:path";
 import { z } from "zod";
 import { loadPipeline } from "../domains/historic-pipeline/cohort.ts";
 import { closedInWindow } from "../domains/historic-pipeline/metrics.ts";
+import { unscoredVersion } from "../domains/scoring.ts";
 import { assertOutsideGit } from "../engine/run.ts";
 import { Intake } from "../narrative/intake.ts";
 import { applyOverrides, refusalSummary } from "../narrative/overrides.ts";
@@ -137,6 +138,9 @@ function figureOf(input: Read, unit: Unit, source: Source): { value: number } | 
     const score = input.scores.find((s) => s.domain === source.domain);
     if (!score) return { reason: "This domain wasn't in the run." };
     if (score.status !== "measured") return { reason: score.reason };
+    // An area scored without one of its checks (a rule version shown and not scored, DECISIONS.md 778) isn't the
+    // rule set's score for it, so it never joins the same key: left out, said, until the rule set says otherwise.
+    if (input.findings.some((f) => f.domain === source.domain && unscoredVersion(f))) return { reason: "This run scored the area with one of its checks shown and not scored, so its score isn't comparable with the rule set's." };
     return { value: score.score };
   }
   if (source.from === "metric") {
