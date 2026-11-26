@@ -79,12 +79,7 @@ export const LOOSENED: Readonly<Record<string, readonly Loosening[]>> = {
     { version: 3, on: STUCK_3_ON, from: [1, 2], raisedBefore: (facts) => stuckBefore3(facts) !== "passed" },
     { version: 4, on: STUCK_4_ON, from: [1, 2], raisedBefore: (facts) => stuckBefore3(facts) !== "passed" },
   ],
-  // The lead journey's versions (HC_LEAD_JOURNEY, DECISIONS.md 770, declared in 778): reading whether the leads'
-  // Status history was kept can make either check not measurable where it was raised, count a status change as a
-  // response (a pass where 1 raised it) and leave out leads made before the history starts (either way). No fact
-  // either version carries says which, so no judge: a pass across them is never called fixed.
-  "lead.response-time": [{ version: 2, on: JOURNEY_ON, from: [1] }],
-  "lead.no-first-response": [{ version: 3, on: JOURNEY_ON, from: [1, 2] }],
+
   // Version 3 raised the line from 80% to 95% (DECISIONS.md 726). Versions 1 and 2
   // read the same shares, used over max (726 only caps the printed share at 99.9 with
   // some left, which doesn't move it across 80). But version 3 reads the allowance
@@ -158,6 +153,49 @@ export function passedOnlyByChange(ruleId: string, issueVersion: number | undefi
   return issueVersion === undefined ? under.length > 0 : under.includes(issueVersion);
 }
 
+// Rule versions that changed a rule with no direction claimed (DECISIONS.md 778): neither looser nor stricter, for a
+// version that can move a reading either way with no fact to tell which. Across one, an issue then a pass is
+// "we changed how we check" once, on the first run at the new version, and is not kept apart after; a pass (or a
+// reading it couldn't make) then an issue is open, never new, with nothing said; once two runs in a row read the rule
+// at the same version, the ordinary comparison applies.
+
+export type Change = { version: number; on: string; from: readonly number[] };
+
+/**
+ * The lead journey's versions, behind HC_LEAD_JOURNEY (DECISIONS.md 770, declared in 778): reading whether the
+ * leads' Status history was kept can make either check not measurable where it was raised, count a status change as
+ * a response (a pass where it was raised), and leave out leads made before that history starts (either way).
+ */
+export const CHANGED: Readonly<Record<string, readonly Change[]>> = {
+  "lead.response-time": [{ version: 2, on: JOURNEY_ON, from: [1] }],
+  "lead.no-first-response": [{ version: 3, on: JOURNEY_ON, from: [1, 2] }],
+};
+
+const changes = (ruleId: string): readonly Change[] => (Object.hasOwn(CHANGED, ruleId) ? CHANGED[ruleId]! : []);
+
+/** Whether a declared change lies between an earlier and a later version of a rule. Unknown versions: no. */
+export function changedAcross(ruleId: string, earlier: number | undefined, later: number | undefined): boolean {
+  if (earlier === undefined || later === undefined || later <= earlier) return false;
+  return changes(ruleId).some((c) => c.version > earlier && c.version <= later && c.from.includes(earlier));
+}
+
+/** By version, the earlier versions each changed the rule from, for rule-where.json; undefined for a rule never changed so. */
+export function changedFrom(ruleId: string): Record<string, number[]> | undefined {
+  const all = changes(ruleId);
+  return all.length ? Object.fromEntries([...all].sort((a, b) => a.version - b.version).map((c) => [String(c.version), [...c.from]])) : undefined;
+}
+
+/** By version, the day each was first committed, for rule-where.json. */
+export function changedOn(ruleId: string): Record<string, string> | undefined {
+  const all = changes(ruleId);
+  return all.length ? Object.fromEntries([...all].sort((a, b) => a.version - b.version).map((c) => [String(c.version), c.on])) : undefined;
+}
+
+/** The same problems check as loosenings' and tightenings', for the changed table. */
+export function changedProblems(table: Readonly<Record<string, readonly Change[]>>, versions: ReadonlyMap<string, number>): string[] {
+  return changeProblems(table, versions, "changed");
+}
+
 /**
  * Whether a later run read a rule at an older version than an earlier run did (DECISIONS.md 777): a version behind a
  * worker switch, with the switch turned off again. Only when both versions are known.
@@ -178,7 +216,7 @@ export function tightenedProblems(table: Readonly<Record<string, readonly Tighte
   return changeProblems(table, versions, "tightened");
 }
 
-function changeProblems(table: Readonly<Record<string, readonly { version: number; on: string; from: readonly number[] }[]>>, versions: ReadonlyMap<string, number>, done: "loosened" | "tightened"): string[] {
+function changeProblems(table: Readonly<Record<string, readonly { version: number; on: string; from: readonly number[] }[]>>, versions: ReadonlyMap<string, number>, done: "loosened" | "tightened" | "changed"): string[] {
   const out: string[] = [];
   for (const [ruleId, all] of Object.entries(table)) {
     const current = versions.get(ruleId);
@@ -247,10 +285,6 @@ export const TIGHTENED: Readonly<Record<string, readonly Tightening[]>> = {
   // so a share under 40% can be well above it. Judged on the issue's own reading as LOOSENED's is; unknown is
   // never "new".
   "cur.stuck-in-stage": [{ version: 3, on: STUCK_3_ON, from: [1, 2], passedBefore: (facts) => stuckBefore3(facts) !== "raised" }],
-  // The lead journey's versions can raise where the earlier ones passed (leads made before the Status history left
-  // out), with no fact to tell: an issue across them is never called new (DECISIONS.md 778).
-  "lead.response-time": [{ version: 2, on: JOURNEY_ON, from: [1] }],
-  "lead.no-first-response": [{ version: 3, on: JOURNEY_ON, from: [1, 2] }],
 };
 
 const tightenings = (ruleId: string): readonly Tightening[] => (Object.hasOwn(TIGHTENED, ruleId) ? TIGHTENED[ruleId]! : []);

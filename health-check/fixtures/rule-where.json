@@ -308,41 +308,24 @@
   },
   "lead.no-first-response": {
     "version": 2,
-    "loosenedFrom": {
+    "changedFrom": {
       "3": [
         1,
         2
       ]
     },
-    "loosenedOn": {
-      "3": "2026-11-26"
-    },
-    "tightenedFrom": {
-      "3": [
-        1,
-        2
-      ]
-    },
-    "tightenedOn": {
+    "changedOn": {
       "3": "2026-11-26"
     }
   },
   "lead.response-time": {
     "version": 1,
-    "loosenedFrom": {
+    "changedFrom": {
       "2": [
         1
       ]
     },
-    "loosenedOn": {
-      "2": "2026-11-26"
-    },
-    "tightenedFrom": {
-      "2": [
-        1
-      ]
-    },
-    "tightenedOn": {
+    "changedOn": {
       "2": "2026-11-26"
     }
   },

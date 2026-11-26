@@ -27,7 +27,7 @@ describe("the rules' Setup labels exported for the console (decision 626)", () =
       const entry = committed[rule.id]!;
       assert.equal(entry.version, rule.version, rule.id);
       assert.deepEqual(entry.where, rule.where ? [...rule.where] : undefined, rule.id);
-      assert.deepEqual(Object.keys(entry), ["version", ...(rule.where ? ["where"] : []), ...(entry.loosenedFrom ? ["loosenedFrom", "loosenedOn"] : []), ...(entry.tightenedFrom ? ["tightenedFrom", "tightenedOn"] : [])], rule.id);
+      assert.deepEqual(Object.keys(entry), ["version", ...(rule.where ? ["where"] : []), ...(entry.loosenedFrom ? ["loosenedFrom", "loosenedOn"] : []), ...(entry.tightenedFrom ? ["tightenedFrom", "tightenedOn"] : []), ...(entry.changedFrom ? ["changedFrom", "changedOn"] : [])], rule.id);
     }
     assert.ok(Object.values(committed).filter((e) => e.where).length >= 29, "623's 29 scan rules keep their labels");
   });
