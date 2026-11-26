@@ -1,4 +1,5 @@
 import { opportunitiesExtractor, stagesExtractor } from "../../extract/opportunities.ts";
+import { named } from "../../engine/named.ts";
 import { usersExtractor } from "../../extract/users.ts";
 import { orgExtractor, schemaExtractor } from "../../extract/configuration.ts";
 import { notSized, type Rule, type RuleContext, type RuleResult } from "../../engine/rule.ts";
@@ -141,7 +142,7 @@ function divergenceValue(ctx: RuleContext, metric: Extract<Metric, { status: "me
     amount: Math.round((amount * points) / 100),
     unit: ctx.calibration.currency,
     period: said`in wins the gap may have cost, ${eng(ctx.window.from)} to ${eng(ctx.window.to)}`,
-    assumptions: [said`${deals.length} won and lost deals in this segment, with a total Amount of ${moneySaid(amount, ctx.calibration.currency)}`, said`The gap of ${Math.round(points * 10) / 10} points to your overall win rate of ${metric.value}%`, said`Assumes these deals could win as often as the rest. Deal mix or territory may explain part of the gap, so treat this as a ceiling`],
+    assumptions: [named(said`${deals.length} won and lost deals in this segment, with a total Amount of ${moneySaid(amount, ctx.calibration.currency)}`, { deals: deals.length, amountMoney: amount }), said`The gap of ${Math.round(points * 10) / 10} points to your overall win rate of ${metric.value}%`, said`Assumes these deals could win as often as the rest. Deal mix or territory may explain part of the gap, so treat this as a ceiling`],
   };
 }
 
@@ -197,7 +198,7 @@ const segmentDivergence: Rule = {
     const segmentsChecked = [...dimensions].sort().map((dimension) => ({ dimension, segments: new Set(measured.flatMap((m) => m.segments.filter((s) => s.dimension === dimension).map((s) => s.key))).size }));
     const evidence = measured[0]!.evidence;
     if (outliers.length === 0) {
-      return { outcome: "pass", summary: said`No segment is ${DIVERGENCE_POINTS} points worse than the overall figure.`, evidence, segmentsChecked };
+      return { outcome: "pass", summary: named(said`No segment is ${DIVERGENCE_POINTS} points worse than the overall figure.`, { divergencePoints: DIVERGENCE_POINTS }), evidence, segmentsChecked };
     }
     outliers.sort((a, b) => b.gap - a.gap);
     const teamsListed = (metricId: string): string[] => outliers.filter((o) => o.metric.id === metricId && o.segment.dimension === "team").map((o) => o.segment.key);

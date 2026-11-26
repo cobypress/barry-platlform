@@ -1,4 +1,5 @@
 import type { RuleContext } from "../../engine/rule.ts";
+import { named } from "../../engine/named.ts";
 import { org, said } from "../../engine/org-words.ts";
 import { stagesExtractor } from "../../extract/opportunities.ts";
 import type { Evidence, Metric, MetricSegment, SeriesPoint } from "../../schemas/index.ts";
@@ -61,7 +62,7 @@ export function openStageMetrics(ctx: Ctx, data: Ready, deals: Deal[], evidence:
   const definitions = {
     noAmount: { id: "current.open_no_amount", label: "Open deals with no amount", unit: "count" as const, definition: "Open deals today with no Amount, or zero. We never impute one." },
     pastClose: { id: "current.open_past_close", label: "Open deals past their close date", unit: "count" as const, definition: "Open deals today whose close date has passed." },
-    age: { id: "current.open_median_age", label: "Age of open deals", unit: "days" as const, definition: `Median days since open deals were created. A stage needs ${MIN_STAGE_DEALS} open deals for its own median.` },
+    age: { id: "current.open_median_age", label: "Age of open deals", unit: "days" as const, definition: named(`Median days since open deals were created. A stage needs ${MIN_STAGE_DEALS} open deals for its own median.`, { minStageDeals: MIN_STAGE_DEALS }) },
     weighted: {
       id: "current.weighted_pipeline",
       label: "Weighted open pipeline",
@@ -168,7 +169,7 @@ export function deliveryOutlook(ctx: Ctx, data: Ready, deals: Deal[], evidence: 
   const noAmount = weighted.length - priced.length;
   const metrics: Metric[] = [];
   if (data.multiCurrency) metrics.push({ ...definitions.value, ...shared, exclusions, status: "not_measurable", reason: MULTI_CURRENCY });
-  else metrics.push({ ...definitions.value, ...shared, exclusions: [...exclusions, ...(noAmount ? [said`${noAmount} weighted open deals with no amount add nothing to value`] : [])], assumptions: [...assumptions, ...(currency === "XXX" ? [] : [said`Amounts in ${org(currency)}`])], status: "measured", ...build(valueOf) });
+  else metrics.push({ ...definitions.value, ...shared, exclusions: [...exclusions, ...(noAmount ? [named(said`${noAmount} weighted open deals with no amount add nothing to value`, { noAmount })] : [])], assumptions: [...assumptions, ...(currency === "XXX" ? [] : [said`Amounts in ${org(currency)}`])], status: "measured", ...build(valueOf) });
   metrics.push({ ...definitions.deals, ...shared, exclusions, assumptions, status: "measured", ...build(dealsOf) });
   return metrics;
 }

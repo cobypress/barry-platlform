@@ -1,4 +1,5 @@
 import { schemaExtractor } from "../../extract/configuration.ts";
+import { named } from "../../engine/named.ts";
 import { opportunitiesExtractor, stagesExtractor, wonAccountsExtractor } from "../../extract/opportunities.ts";
 import { daysBefore, monthsBefore } from "../../extract/types.ts";
 import { usersExtractor } from "../../extract/users.ts";
@@ -56,15 +57,16 @@ const stalledDeals: Rule = {
     const evidence: Evidence[] = [{ ...data.evidence[0]!, count: stalled.length, dateRange: { from: ctx.window.to, to: ctx.window.to }, exclusions: data.exclusions, note: `Open deals with no stage change and no activity in ${STALLED_DAYS} days` }];
     if (open.length === 0) return { outcome: "pass", summary: said`There are no open deals to check.`, evidence, segmentExemptReason: "There are no deals to segment." };
     const segmentsChecked = dealSegments(ctx, open);
-    if (stalled.length < MIN_DEALS) return { outcome: "pass", summary: said`${plural(stalled.length, "open deal")} of ${open.length} ${stalled.length === 1 ? "has" : "have"} stalled for ${STALLED_DAYS} days, under the ${MIN_DEALS} we'd call a pattern.`, evidence, segmentsChecked, facts: { stalled: stalled.length, open: open.length } };
+    if (stalled.length < MIN_DEALS) return { outcome: "pass", summary: named(said`${plural(stalled.length, "open deal")} of ${open.length} ${stalled.length === 1 ? "has" : "have"} stalled for ${STALLED_DAYS} days, under the ${MIN_DEALS} we'd call a pattern.`, { stalledDays: STALLED_DAYS, minDeals: MIN_DEALS }), evidence, segmentsChecked, facts: { stalled: stalled.length, open: open.length } };
     const amount = total(stalled);
+    const stalledPct = pct(stalled.length, open.length);
     const situation = SITUATIONS.inStageFor(STALLED_DAYS, data);
     const value = potentialRevenue(ctx, data, stalled, () => situation);
     return {
       outcome: "issue",
       // Titled by its test, as two other checks find quiet deals by theirs (night 3 reading pass, item 16).
-      title: said`Open deals with no stage change or activity in ${STALLED_DAYS} days`,
-      summary: said`${plural(stalled.length, "open deal")} of ${open.length} (${pct(stalled.length, open.length)}%) haven't changed stage or had activity in ${STALLED_DAYS} days.`,
+      title: named(said`Open deals with no stage change or activity in ${STALLED_DAYS} days`, { stalledDays: STALLED_DAYS }),
+      summary: named(said`${plural(stalled.length, "open deal")} of ${open.length} (${stalledPct}%) haven't changed stage or had activity in ${STALLED_DAYS} days.`, { stalledPct, stalledDays: STALLED_DAYS }),
       recommendation: said`Give each owner a date to re-engage or close these. The ones that come back are the cheapest revenue you have.`,
       recommendationType: "change",
       severity: "medium",
@@ -113,7 +115,7 @@ const winBacks: Rule = {
     return {
       outcome: "issue",
       title: said`You have past deals worth going back to`,
-      summary: said`${plural(candidates.length, "deal")} lost or left undecided ${WIN_BACK_MIN_MONTHS} to ${WIN_BACK_MAX_MONTHS} months ago sit on accounts with nothing open and no win since. ${noDecision} of them never reached a decision.`,
+      summary: named(said`${plural(candidates.length, "deal")} lost or left undecided ${WIN_BACK_MIN_MONTHS} to ${WIN_BACK_MAX_MONTHS} months ago sit on accounts with nothing open and no win since. ${noDecision} of them never reached a decision.`, { fromMonths: WIN_BACK_MIN_MONTHS, toMonths: WIN_BACK_MAX_MONTHS }),
       recommendation: said`Start with the no decision deals, where nothing was lost to a competitor, and check why each one stopped.`,
       recommendationType: "investigate",
       severity: "medium",
@@ -153,20 +155,21 @@ const dormantAccounts: Rule = {
     if (dormant.length < MIN_DEALS) return { outcome: "pass", summary: said`${plural(dormant.length, "past customer")} of ${accounts.data.length} ${dormant.length === 1 ? "has" : "have"} gone quiet, under the ${MIN_DEALS} we'd call a pattern.`, evidence, segmentsChecked, facts: { dormant: dormant.length, accounts: accounts.data.length } };
     const wonAmounts = wonDeals.flatMap((d) => (d.Amount === null ? [] : [d.Amount]));
     const typical = wonAmounts.length >= ctx.calibration.minSample ? median(wonAmounts) : null;
+    const typicalWon = typical === null ? null : Math.round(typical);
     const value: Value =
       typical === null
-        ? notSized(said`${wonAmounts.length} won deals with amounts is below the calibrated minimum of ${ctx.calibration.minSample}, so there's no typical deal to size this from.`)
+        ? notSized(named(said`${wonAmounts.length} won deals with amounts is below the calibrated minimum of ${ctx.calibration.minSample}, so there's no typical deal to size this from.`, { wonWithAmounts: wonAmounts.length, minSample: ctx.calibration.minSample }))
         : atOwnWinRate(ctx, typical * dormant.length, {
             multiCurrency: data.multiCurrency,
             period: "one-off, if each account buys once more",
-            basis: said`${plural(dormant.length, "dormant account")} at your median won deal of ${moneySaid(Math.round(typical), ctx.calibration.currency)}`,
+            basis: named(said`${plural(dormant.length, "dormant account")} at your median won deal of ${moneySaid(typicalWon!, ctx.calibration.currency)}`, { medianWonMoney: typicalWon }),
             caveat: said`Assumes each account has one more deal in it, and buys as often as an average deal wins. Some will have closed or moved on, so treat this as a ceiling`,
           });
     const stranded = dormant.filter((a) => inactive.has(a.OwnerId)).length;
     return {
       outcome: "issue",
       title: said`Past customers have gone quiet`,
-      summary: said`${plural(dormant.length, "account")} of ${accounts.data.length} that have bought from you have nothing open and no activity in ${dormantDays} days.${stranded ? said` ${stranded} of them belong to inactive users, so nobody owns the relationship.` : ""}`,
+      summary: named(said`${plural(dormant.length, "account")} of ${accounts.data.length} that have bought from you have nothing open and no activity in ${dormantDays} days.${stranded ? said` ${stranded} of them belong to inactive users, so nobody owns the relationship.` : ""}`, { dormantDays }),
       recommendation: said`Agree who owns these accounts, and start with a light check-in rather than a pitch.`,
       recommendationType: "investigate",
       severity: "medium",

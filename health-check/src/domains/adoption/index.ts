@@ -1,4 +1,5 @@
 import { loginActivityExtractor, type LoginActivity, type LoginChannel } from "../../extract/adoption.ts";
+import { each, named } from "../../engine/named.ts";
 import { userKinds } from "../user-kinds.ts";
 import { daysBefore } from "../../extract/types.ts";
 import { reportsExtractor, usersExtractor, type UserRow } from "../../extract/users.ts";
@@ -118,15 +119,19 @@ const knowsLightning = (u: UserRow): boolean => typeof u.UserPreferencesLightnin
 
 // ─── Metrics ─────────────────────────────────────────────────────────────────
 
+/** The weekly figure's weeks: the last four runs of seven days (its assumption says so, and names these). */
+const WEEKS = 4;
+const WEEK_DAYS = 7;
+
 type Definition = Pick<Metric, "id" | "label" | "unit" | "definition">;
 const DEF = {
-  daily: { id: "adoption.daily_active_users", label: "Daily active users", unit: "count", definition: `People who logged in on an average working day, over the last ${RECENT_DAYS} days. API sessions don't count.` },
-  weekly: { id: "adoption.weekly_active_users", label: "Weekly active users", unit: "count", definition: `People who logged in in an average week, over the last ${RECENT_DAYS} days.` },
+  daily: { id: "adoption.daily_active_users", label: "Daily active users", unit: "count", definition: named(`People who logged in on an average working day, over the last ${RECENT_DAYS} days. API sessions don't count.`, { recentDays: RECENT_DAYS }) },
+  weekly: { id: "adoption.weekly_active_users", label: "Weekly active users", unit: "count", definition: named(`People who logged in in an average week, over the last ${RECENT_DAYS} days.`, { recentDays: RECENT_DAYS }) },
   monthly: { id: "adoption.monthly_active_users", label: "Monthly active users", unit: "count", definition: "People who logged in during the last full month, with each month the login history covers." },
   share: { id: "adoption.monthly_active_share", label: "Users active last month", unit: "percent", definition: "People who logged in during the last full month, as a share of active users." },
   channels: { id: "adoption.mobile_login_share", label: "Logins through the mobile app", unit: "percent", definition: "Successful logins through the Salesforce mobile app, as a share of all successful logins in the window, with every channel's share." },
   lightning: { id: "adoption.lightning_share", label: "Users on Lightning", unit: "percent", definition: "Active users set to use Lightning Experience, as a share of active users." },
-  reports: { id: "adoption.reports_run_recently", label: "Reports run recently", unit: "percent", definition: `Reports run in the last ${REPORT_RECENT_DAYS} days, as a share of all reports we can see.` },
+  reports: { id: "adoption.reports_run_recently", label: "Reports run recently", unit: "percent", definition: named(`Reports run in the last ${REPORT_RECENT_DAYS} days, as a share of all reports we can see.`, { reportRecentDays: REPORT_RECENT_DAYS }) },
 } satisfies Record<string, Definition>;
 
 /** Segments of the monthly metric holding the group that fell most, one per month, filed under this and the group's name. */
@@ -172,13 +177,13 @@ function activeMetrics(ctx: Ctx, data: Extract<Loaded, { status: "ok" }>): Metri
   const groups = groupsOf(users);
   const days = recentDays(ctx.now);
   const working = days.filter((d) => ![0, 6].includes(new Date(`${d}T00:00:00Z`).getUTCDay()));
-  const weeks = [0, 1, 2, 3].map((w) => new Set(days.slice(w * 7, w * 7 + 7)));
+  const weeks = Array.from({ length: WEEKS }, (_, w) => new Set(days.slice(w * WEEK_DAYS, w * WEEK_DAYS + WEEK_DAYS)));
   const daily = (who: UserRow[]): number => round1(working.reduce((sum, day) => sum + activeOn(activity, who, (d) => d === day), 0) / working.length);
   const weekly = (who: UserRow[]): number => round1(weeks.reduce((sum, week) => sum + activeOn(activity, who, (d) => week.has(d)), 0) / weeks.length);
   const assumptions = ["Days are in UTC", `Working days are Monday to Friday`];
   const out: Metric[] = [
     measured(DEF.daily, evidence, daily(users), users.length, groups.map((g) => groupSegment(g, daily(g.users))), { assumptions, stats: { workingDays: working.length } }),
-    measured(DEF.weekly, evidence, weekly(users), users.length, groups.map((g) => groupSegment(g, weekly(g.users))), { assumptions: ["Days are in UTC", "Weeks are the last four runs of 7 days before the run"] }),
+    measured(DEF.weekly, evidence, weekly(users), users.length, groups.map((g) => groupSegment(g, weekly(g.users))), { assumptions: ["Days are in UTC", named("Weeks are the last four runs of 7 days before the run", { weeks: WEEKS, weekDays: WEEK_DAYS })] }),
   ];
 
   const months = coveredMonths(activity, ctx.now);
@@ -191,7 +196,7 @@ function activeMetrics(ctx: Ctx, data: Extract<Loaded, { status: "ok" }>): Metri
   const series: SeriesPoint[] = months.map((month) => ({ date: `${month}-01`, value: activeOn(activity, users, inMonth(month)), n: users.length, notMeasurableReason: null }));
   const mau = activeOn(activity, users, inMonth(last));
   // Said, so it is marked as ours (DECISIONS.md 693); the month is a date the engine worked out.
-  const coverage = [activity.truncated ? said`The login history covers ${plural(months.length, "whole month")}, from ${org(months[0] + "-01")}. The read reached its cap, so older months were left out` : said`The login history covers ${plural(months.length, "whole month")}, from ${org(months[0] + "-01")}`];
+  const coverage = [activity.truncated ? named(said`The login history covers ${plural(months.length, "whole month")}, from ${org(months[0] + "-01")}. The read reached its cap, so older months were left out`, { months: months.length }) : named(said`The login history covers ${plural(months.length, "whole month")}, from ${org(months[0] + "-01")}`, { months: months.length })];
   // The group that fell furthest from its peak, month by month, so a chart can set it beside the org's line.
   const steepest = groups
     .filter((g) => g.users.length >= MIN_GROUP && months.length > 1)
@@ -324,12 +329,12 @@ const fallingAdoption: Rule = {
     if (!whole && falls.length === 0) {
       return { outcome: "pass", summary: said`Monthly active users haven't fallen ${FALL_SHARE}% or more from an earlier peak ${window}, in the org or in any profile or role of ${MIN_GROUP} people or more.`, evidence, segmentsChecked: segments, facts: { months: months.length } };
     }
-    const line = (f: Fall): Said => said`${f.words}, from ${f.peak} in ${org(f.peakMonth)} to ${f.now} in ${org(last)} (down ${f.drop}%)`;
+    const line = (f: Fall): Said => named(said`${f.words}, from ${f.peak} in ${org(f.peakMonth)} to ${f.now} in ${org(last)} (down ${f.drop}%)`, { peak: f.peak, now: f.now, dropPct: f.drop });
     const all = [...(whole ? [whole] : []), ...falls];
     return {
       outcome: "issue",
       title: whole ? said`Fewer people are using Salesforce` : said`Fewer people are using Salesforce in some teams`,
-      summary: said`Monthly active users have fallen ${FALL_SHARE}% or more from their peak: ${joinSaid(all.map(line), "; ")}.`,
+      summary: named(said`Monthly active users have fallen ${FALL_SHARE}% or more from their peak: ${joinSaid(all.map(line), "; ")}.`, { fallPct: FALL_SHARE }),
       recommendation: said`Ask the people who've stopped why. Fix what gets in their way, and make Salesforce the place the team's meetings and figures come from.`,
       recommendationType: "investigate",
       severity: whole ? "high" : "medium",
@@ -368,7 +373,7 @@ const lowEngagement: Rule = {
     return {
       outcome: "issue",
       title: said`Some teams barely use Salesforce`,
-      summary: said`In these groups, most people logged in on fewer than ${BARELY_DAYS} of the last ${RECENT_DAYS} days: ${joinSaid(low.map((x) => said`${x.g.dimension} ${org(x.g.key)}, ${x.barely} of ${x.g.users.length}`), "; ")}.`,
+      summary: named(said`In these groups, most people logged in on fewer than ${BARELY_DAYS} of the last ${RECENT_DAYS} days: ${joinSaid(low.map((x) => said`${x.g.dimension} ${org(x.g.key)}, ${x.barely} of ${x.g.users.length}`), "; ")}.`, { barelyDays: BARELY_DAYS, recentDays: RECENT_DAYS, ...each(low, (x) => ({ barely: x.barely, of: x.g.users.length })) }),
       recommendation: said`Find out what these teams use instead of Salesforce, and bring that work into it: their pipeline, their reports, and their next steps.`,
       recommendationType: "investigate",
       severity: "medium",
@@ -403,11 +408,14 @@ const classicUsers: Rule = {
     const unread = everyone.length - who.length;
     if (classic.length === 0) return { outcome: "pass", summary: said`All ${plural(who.length, "active user")}${unread ? said` whose setting we could read` : ""} are set to use Lightning Experience.${unread ? said` The setting couldn't be read for ${plural(unread, "user")}.` : ""}`, evidence, segmentsChecked: segments };
     const share = pct(classic.length, who.length);
-    const byProfile = [...new Set(classic.map(profileOf))].sort().map((p) => said`${org(p)} (${classic.filter((u) => profileOf(u) === p).length})`);
+    const byProfile = [...new Set(classic.map(profileOf))].sort().map((p) => {
+      const users = classic.filter((u) => profileOf(u) === p).length;
+      return named(said`${org(p)} (${users})`, { users });
+    });
     return {
       outcome: "issue",
       title: said`Some people still use Salesforce Classic`,
-      summary: said`${classic.length} of ${who.length} active users (${share}%) aren't set to use Lightning Experience: ${joinSaid(byProfile, ", ")}.`,
+      summary: named(said`${classic.length} of ${who.length} active users (${share}%) aren't set to use Lightning Experience: ${joinSaid(byProfile, ", ")}.`, { classic: classic.length, of: who.length, sharePct: share }),
       recommendation: said`Move these users to Lightning Experience, and find out first what keeps them on Classic, such as a page, button or tool that only works there.`,
       recommendationType: "change",
       severity: share > 25 ? "medium" : "low",

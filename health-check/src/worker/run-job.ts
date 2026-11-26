@@ -27,7 +27,9 @@ import { automaticRefusal } from "./automatic.ts";
 import { recalibrateForRunAgain, type Recalibrated } from "./connect-job.ts";
 import { CalibrationUnsettled, nameCurrencyBeforeRun } from "./name-currency.ts";
 import { setStagesBeforeRun } from "./stage-answer.ts";
-import { checkedDigest } from "../digest/checked.ts";
+import { checkedDigest, type CheckedDigest } from "../digest/checked.ts";
+import { shadowLine, STRICT_SHADOW_FILE } from "../digest/strict.ts";
+import { NAMED_VALUES_FILE, type NamedValues } from "../engine/named.ts";
 import { checkSections, decidePulse, decideRelease, lossesOf, SHOWABLE_PULSE_HOLDS, type PulseDecision, sameAsLast, SERVER_FAULT_CODES, type ReleaseDecision, type RunLosses, type SameAsLast } from "./release.ts";
 import { letGoAfterRun, type SeenRun } from "./scan-release.ts";
 import { progressOf, RunClosedError, runOverall, DELIVERY_OUTCOMES, type RunJobInput } from "./types.ts";
@@ -684,9 +686,12 @@ async function runLocked(runId: string, deps: WorkerDeps, attempt: Attempt, seen
     const complexity = complexityOf(dir, log);
     // A pulse's digest, from the report its result is made from, with its results (DECISIONS.md 632). A check's waits for its documents.
     // An automatic run's, checked, masked or held, written with its release (DECISIONS.md 693): its portal has nothing else to show.
-    const checkedOne = automatic ? checkedDigest({ input: reportInput, pseudonyms, inventory, madeAt: now().toISOString() }) : null;
+    const named = automatic || gatedPulse ? namedValuesOf(dir) : {};
+    const checkedOne = automatic ? checkedDigest({ input: reportInput, pseudonyms, inventory, madeAt: now().toISOString(), named }) : null;
     // An automatic customer's pulse: its digest checked, marked and masked as an automatic check's, and released or held by the same checks (746).
-    const checkedPulse = gatedPulse ? checkedDigest({ input: reportInput, pseudonyms, inventory, madeAt: now().toISOString() }) : null;
+    const checkedPulse = gatedPulse ? checkedDigest({ input: reportInput, pseudonyms, inventory, madeAt: now().toISOString(), named }) : null;
+    // What the strict check would have masked, in shadow (DECISIONS.md 768): counts in the log, the figures in the run folder, nothing else.
+    keepStrictShadow(dir, runId, (checkedOne ?? checkedPulse)?.strictShadow, log);
     const digest = input.run.product === "pulse" ? (checkedPulse ? checkedPulse.digest : digestOf(runId, () => buildDigest({ report, pseudonyms, inventory, madeAt: now().toISOString() }), log)) : (checkedOne?.digest ?? null);
     const sections = outputs.flatMap((o) => o.sections);
     // The engine's own, without any survey metric: those go apart, in a savepoint of their own.
@@ -755,6 +760,44 @@ async function runLocked(runId: string, deps: WorkerDeps, attempt: Attempt, seen
   if (pulseDecision?.kind === "hold") return { outcome: "done", detail: `Pulse ${runId} is held: ${pulseDecision.reason}` };
   if (decision) return { outcome: "done", detail: decision.kind === "release" ? `Run ${runId} is released` : `Run ${runId} is held: ${decision.reason}` };
   return { outcome: "done", detail: `Run ${runId} is ${result.run.status.replace("_", " ")}` };
+}
+
+/** The run folder's named values (DECISIONS.md 768), or none: a missing or unreadable file only makes the shadow count more. */
+export function namedValuesOf(dir: string): NamedValues {
+  try {
+    const path = join(dir, NAMED_VALUES_FILE);
+    if (!existsSync(path)) return {};
+    const parsed = z.record(z.string(), z.record(z.string(), z.number())).safeParse(JSON.parse(readFileSync(path, "utf8")));
+    return parsed.success ? parsed.data : {};
+  } catch {
+    return {};
+  }
+}
+
+/**
+ * The strict shadow's counts as one log line, and its figures in the run folder's
+ * strict-shadow.json (DECISIONS.md 768): never the digest, never the store, never
+ * shown. A shadow that failed is logged once, by the error's name; nothing here
+ * can cost the run anything.
+ */
+export function keepStrictShadow(dir: string, runId: string, shadow: CheckedDigest["strictShadow"], log: (line: string) => void): void {
+  if (!shadow) return;
+  try {
+    if (!shadow.ok) {
+      rmSync(join(dir, STRICT_SHADOW_FILE), { force: true });
+      return log(`Run ${runId}: the strict check (shadow) couldn't be worked out (${shadow.failed}), and the run went on without it.`);
+    }
+    log(shadowLine(runId, shadow.shadow));
+    writeFileSync(join(dir, STRICT_SHADOW_FILE), `${JSON.stringify(shadow.shadow, null, 2)}\n`, { mode: 0o600 });
+  } catch (err) {
+    // An earlier delivery's file never stands in for this one's.
+    try {
+      rmSync(join(dir, STRICT_SHADOW_FILE), { force: true });
+    } catch {
+      // Nothing more to do: the log says it wasn't kept.
+    }
+    log(`Run ${runId}: the strict check (shadow) couldn't be kept (${err instanceof Error ? err.name : typeof err}), and the run went on without it.`);
+  }
 }
 
 /**

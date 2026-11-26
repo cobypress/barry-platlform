@@ -1,4 +1,5 @@
 import { notSized, plural, type RuleContext } from "../../engine/rule.ts";
+import { named } from "../../engine/named.ts";
 import { eng, joinSaid, org, said, type Said } from "../../engine/org-words.ts";
 import { moneySaid } from "../../engine/said-forms.ts";
 import type { Value } from "../../schemas/index.ts";
@@ -35,8 +36,8 @@ export const SITUATIONS = {
     const zone = zoneOf(ctx);
     return { key: "past-close", phrase: said`open past their close date`, matches: (d) => wasPastClose(d, data.stages, zone), ceiling: true };
   },
-  inStageFor: (days: number, data: Ready): Situation => ({ key: `in-stage-${days}`, phrase: said`in one stage for ${days} days or more`, matches: (d) => longestInStage(d, data.stages) >= days, ceiling: true }),
-  unchangedFor: (days: number, data: Ready): Situation => ({ key: `unchanged-${days}`, phrase: said`open for ${days} days or more with no change to stage, amount or close date`, matches: (d) => longestUnchanged(d, data.stages) >= days, ceiling: true }),
+  inStageFor: (days: number, data: Ready): Situation => ({ key: `in-stage-${days}`, phrase: named(said`in one stage for ${days} days or more`, { inStageDays: days }), matches: (d) => longestInStage(d, data.stages) >= days, ceiling: true }),
+  unchangedFor: (days: number, data: Ready): Situation => ({ key: `unchanged-${days}`, phrase: named(said`open for ${days} days or more with no change to stage, amount or close date`, { unchangedDays: days }), matches: (d) => longestUnchanged(d, data.stages) >= days, ceiling: true }),
   inStage: (stage: string): Situation => ({ key: `stage-${stage}`, phrase: said`in the ${org(stage)} stage`, matches: (d) => wasInStage(d, stage), ceiling: false }),
 };
 
@@ -52,7 +53,7 @@ export function potentialRevenue(ctx: Pick<RuleContext, "calibration" | "window"
   if (affected.length === 0) return notSized(said`There are no deals to size.`);
   const priced = affected.filter((d) => (d.Amount ?? 0) > 0);
   const unpriced = affected.length - priced.length;
-  if (priced.length === 0) return notSized(said`None of these ${plural(affected.length, "deal")} has an amount, and we don't impute one.`);
+  if (priced.length === 0) return notSized(named(said`None of these ${plural(affected.length, "deal")} has an amount, and we don't impute one.`, { affected: affected.length }));
 
   const { currency, minSample } = ctx.calibration;
   // The analysis window's two dates, which the engine works out from the run's date: digits and dashes only.
@@ -76,9 +77,10 @@ export function potentialRevenue(ctx: Pick<RuleContext, "calibration" | "window"
       fallback.push({ situation, deals, n: cohort.n });
       continue;
     }
-    amount += (sum(deals) * cohort.rate) / 100;
+    const dealsAmount = sum(deals);
+    amount += (dealsAmount * cohort.rate) / 100;
     sized += deals.length;
-    lines.push(said`${plural(deals.length, "deal")} with ${moneySaid(sum(deals), currency)} weighted at ${cohort.rate}%: of ${cohort.n} deals closed ${period} that were ${situation.phrase} at some point, ${cohort.won} went on to win`);
+    lines.push(named(said`${plural(deals.length, "deal")} with ${moneySaid(dealsAmount, currency)} weighted at ${cohort.rate}%: of ${cohort.n} deals closed ${period} that were ${situation.phrase} at some point, ${cohort.won} went on to win`, { deals: deals.length, dealsMoney: dealsAmount, winPct: cohort.rate, closed: cohort.n, won: cohort.won }));
   }
 
   // Read, and leaned on, only where a group falls back to it (DECISIONS.md 756): a figure that never uses the overall
@@ -87,26 +89,28 @@ export function potentialRevenue(ctx: Pick<RuleContext, "calibration" | "window"
   const overallRate = () => (read ??= measuredRate(ctx, "historic.win_rate"));
   const unsizedNotes: Said[] = [];
   for (const { situation, deals, n } of fallback) {
-    const thin = said`only ${n} deals closed ${period} that were ${situation.phrase}, under the calibrated minimum of ${minSample}`;
+    const dealsAmount = sum(deals);
+    const thin = named(said`only ${n} deals closed ${period} that were ${situation.phrase}, under the calibrated minimum of ${minSample}`, { closed: n, minSample });
     const overall = situation.ceiling ? overallRate() : null;
     if (overall && !("reason" in overall)) {
-      amount += (sum(deals) * overall.value) / 100;
+      amount += (dealsAmount * overall.value) / 100;
       sized += deals.length;
-      lines.push(said`${plural(deals.length, "deal")} with ${moneySaid(sum(deals), currency)} weighted at your overall win rate of ${overall.value}% on ${overall.n} closed deals, because ${thin}. Deals in this situation usually win less often, so treat this part as a ceiling`);
+      lines.push(named(said`${plural(deals.length, "deal")} with ${moneySaid(dealsAmount, currency)} weighted at your overall win rate of ${overall.value}% on ${overall.n} closed deals, because ${thin}. Deals in this situation usually win less often, so treat this part as a ceiling`, { deals: deals.length, dealsMoney: dealsAmount, winPct: overall.value, closedOverall: overall.n }));
     } else {
-      unsizedNotes.push(said`${plural(deals.length, "deal")} with ${moneySaid(sum(deals), currency)} aren't counted, because ${thin}${situation.ceiling ? ", and your overall win rate isn't measurable" : ""}`);
+      unsizedNotes.push(named(said`${plural(deals.length, "deal")} with ${moneySaid(dealsAmount, currency)} aren't counted, because ${thin}${situation.ceiling ? ", and your overall win rate isn't measurable" : ""}`, { deals: deals.length, dealsMoney: dealsAmount }));
     }
   }
   if (sized === 0) return notSized(said`Too few comparable deals have closed to size this: ${joinSaid(unsizedNotes, "; ")}.`);
 
+  const exposure = sum(priced);
   return {
     kind: "revenue",
     amount: Math.round(amount),
     unit: currency,
     period: "potential revenue in deals open today",
     assumptions: [
-      said`Raw exposure: ${moneySaid(sum(priced), currency)}, the total Amount on ${plural(priced.length, "affected deal")} with an amount`,
-      ...(unpriced ? [said`${unpriced} of the ${affected.length} affected deals have no amount, so they add nothing here. We don't impute one`] : []),
+      named(said`Raw exposure: ${moneySaid(exposure, currency)}, the total Amount on ${plural(priced.length, "affected deal")} with an amount`, { exposureMoney: exposure, priced: priced.length }),
+      ...(unpriced ? [named(said`${unpriced} of the ${affected.length} affected deals have no amount, so they add nothing here. We don't impute one`, { unpriced, affected: affected.length })] : []),
       ...lines,
       ...unsizedNotes,
       said`Lost and no decision deals both count as not won`,

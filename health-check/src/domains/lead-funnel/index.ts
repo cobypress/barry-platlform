@@ -1,4 +1,5 @@
 import { fieldDescribeExtractor, missingFieldReason } from "../../extract/fields.ts";
+import { named } from "../../engine/named.ts";
 import { activityExtractor } from "../../extract/activity.ts";
 import { schemaExtractor } from "../../extract/configuration.ts";
 import { leadsExtractor } from "../../extract/leads.ts";
@@ -77,7 +78,7 @@ const conversionBySource: Rule = {
     return {
       outcome: "issue",
       title: said`Some lead sources barely convert`,
-      summary: said`${overall}% of leads convert overall, but ${org(name)} converts ${rate(group)}% of ${group.length} leads.`,
+      summary: named(said`${overall}% of leads convert overall, but ${org(name)} converts ${rate(group)}% of ${group.length} leads.`, { overall: [overall, "percent"] }),
       recommendation: said`Find out whether these leads are poor or just poorly handled before changing what you spend on the source.`,
       recommendationType: "investigate",
       severity: "medium",
@@ -128,7 +129,7 @@ const responseTime: Rule = {
     return {
       outcome: "issue",
       title: said`Some leads wait days for a first response`,
-      summary: said`The median first response is ${overall} hours.${worst ? said` ${worst.dimension === "source" ? said`${org(worst.key)} leads wait` : said`For ${dimensionWord(worst.dimension)} ${org(worst.key)} the wait is`} ${worst.hours} hours.` : ""} Our working targets are ${RESPONSE_TARGET_HOURS} hours overall and ${RESPONSE_SEGMENT_HOURS} for any segment.`,
+      summary: named(said`The median first response is ${overall} hours.${worst ? said` ${worst.dimension === "source" ? said`${org(worst.key)} leads wait` : said`For ${dimensionWord(worst.dimension)} ${org(worst.key)} the wait is`} ${worst.hours} hours.` : ""} Our working targets are ${RESPONSE_TARGET_HOURS} hours overall and ${RESPONSE_SEGMENT_HOURS} for any segment.`, { targetHours: RESPONSE_TARGET_HOURS, segmentTargetHours: RESPONSE_SEGMENT_HOURS }),
       recommendation: said`Set a response rule by source, and route the slow ones to someone who can meet it.`,
       recommendationType: "change",
       severity: "medium",
@@ -164,7 +165,7 @@ const noResponse: Rule = {
     return {
       outcome: "issue",
       title: said`Leads are going unanswered`,
-      summary: said`Leads with no logged response after ${RESPONSE_GRACE_DAYS} days: ${result.hits} of ${result.n} (${result.rate}%).${worst ? said` Worst by ${dimensionWord(worst.dimension)}: ${org(worst.key)}, at ${worst.rate}%.` : ""}`,
+      summary: named(said`Leads with no logged response after ${RESPONSE_GRACE_DAYS} days: ${result.hits} of ${result.n} (${result.rate}%).${worst ? said` Worst by ${dimensionWord(worst.dimension)}: ${org(worst.key)}, at ${worst.rate}%.` : ""}`, { graceDays: RESPONSE_GRACE_DAYS, worstPct: worst?.rate }),
       recommendation: said`Check routing first: unassigned or queue-held leads are the usual cause.`,
       recommendationType: "change",
       severity: "medium",
@@ -198,7 +199,7 @@ const convertedWithoutOpportunity: Rule = {
     return {
       outcome: "issue",
       title: said`Converted leads aren't becoming opportunities`,
-      summary: said`Converted with no opportunity: ${result.hits} of ${result.n} (${result.rate}%).${worst ? said` Worst by ${dimensionWord(worst.dimension)}: ${org(worst.key)}, at ${worst.rate}%.` : ""} Conversion looks better than the pipeline it produced.`,
+      summary: named(said`Converted with no opportunity: ${result.hits} of ${result.n} (${result.rate}%).${worst ? said` Worst by ${dimensionWord(worst.dimension)}: ${org(worst.key)}, at ${worst.rate}%.` : ""} Conversion looks better than the pipeline it produced.`, { worstPct: worst?.rate }),
       recommendation: said`Agree when a lead should be converted. If it's only to tidy up, take these out of your conversion figures.`,
       recommendationType: "investigate",
       severity: "low",
@@ -251,7 +252,7 @@ const sourceReturn: Rule = {
     return {
       outcome: "issue",
       title: said`Some lead sources have produced no wins`,
-      summary: said`${joinSaid(dry.map((r) => said`${org(r.source)}`), ", ")} brought in ${leads} leads and no won deals, against ${moneySaid(total, ctx.calibration.currency)} won from other sources.`,
+      summary: named(said`${joinSaid(dry.map((r) => said`${org(r.source)}`), ", ")} brought in ${leads} leads and no won deals, against ${moneySaid(total, ctx.calibration.currency)} won from other sources.`, { wonFromLeads: [total, "money"] }),
       recommendation: said`Check how these leads are handled, then decide whether the source is worth keeping.`,
       recommendationType: "investigate",
       severity: "medium",
@@ -304,10 +305,11 @@ const campaignReturn: Rule = {
     const segments = [{ dimension: "campaign type", segments: rows.length }];
     if (under.length === 0) return { outcome: "pass", summary: said`Every campaign type with a recorded cost returned more than it cost, across ${moneySaid(spend, ctx.calibration.currency)} of spend.`, evidence, segmentsChecked: segments, facts: { spend, types: rows.length } };
     const gap = Math.round(under.reduce((sum, r) => sum + r.cost - r.returned, 0));
+    const [cost, returned] = [under.reduce((sum, r) => sum + r.cost, 0), under.reduce((sum, r) => sum + r.returned, 0)];
     return {
       outcome: "issue",
       title: said`Some campaign spend isn't coming back`,
-      summary: said`${joinSaid(under.map((r) => said`${org(r.type)}`), ", ")} cost ${moneySaid(under.reduce((sum, r) => sum + r.cost, 0), ctx.calibration.currency)} and returned ${moneySaid(under.reduce((sum, r) => sum + r.returned, 0), ctx.calibration.currency)} in won deals from its leads.`,
+      summary: named(said`${joinSaid(under.map((r) => said`${org(r.type)}`), ", ")} cost ${moneySaid(cost, ctx.calibration.currency)} and returned ${moneySaid(returned, ctx.calibration.currency)} in won deals from its leads.`, { costMoney: cost, returnedMoney: returned }),
       recommendation: said`Check the attribution first, because deals with contacts on a campaign aren't counted here. Then decide whether to keep this spend.`,
       recommendationType: "investigate",
       severity: "medium",
@@ -332,7 +334,7 @@ function groupByType<C extends { Type: string | null }>(campaigns: C[]): Array<[
 function funnelMetrics(ctx: Ctx): Metric[] {
   const shared = { domain: DOMAIN, exclusions: [] as string[], assumptions: [zoneNote(ctx)] };
   const definitions = {
-    conversion: { ...shared, id: "lead.conversion_rate", label: "Lead conversion", unit: "percent" as const, definition: `Leads converted, as a share of leads at least ${CONVERSION_AGE_DAYS} days old.` },
+    conversion: { ...shared, id: "lead.conversion_rate", label: "Lead conversion", unit: "percent" as const, definition: named(`Leads converted, as a share of leads at least ${CONVERSION_AGE_DAYS} days old.`, { conversionAgeDays: CONVERSION_AGE_DAYS }) },
     response: { ...shared, id: "lead.median_response_hours", label: "First response time", unit: "count" as const, definition: "Median hours from a lead's creation to its first task, event or status change. The unit is hours." },
     wonPerLead: { ...shared, id: "lead.won_per_lead", label: "Won per lead", unit: "currency" as const, definition: "Amount of won deals converted from leads, divided by leads." },
   };
