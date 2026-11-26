@@ -121,6 +121,8 @@ export type OrgRecords = {
   ownership: typeof org.OWNERSHIP;
   forecastItems: typeof org.FORECAST_ITEMS;
   forecastFacts: typeof org.FORECAST_FACTS;
+  /** The org's case statuses, for a constructed case org (DECISIONS.md 776); absent, the synthetic org's own. */
+  caseStatuses?: Array<{ ApiName: string; MasterLabel: string | null; IsClosed: boolean }>;
 };
 
 export const SYNTHETIC_RECORDS: OrgRecords = {
@@ -841,7 +843,7 @@ export class Simulator implements Transport {
       case "CaseMilestone":
         return page(this.#d.supportCases.milestones.filter((m) => within(m.StartDate, soql, "StartDate")));
       case "CaseStatus":
-        return page(org.CASE_STATUSES);
+        return page(this.#d.caseStatuses ?? org.CASE_STATUSES);
       case "CaseArticle": {
         const closed = new Set(this.#d.supportCases.cases.filter((c) => c.IsClosed && within(c.ClosedDate, soql, "ClosedDate")).map((c) => c.Id));
         // The link's own date ends the read too, as an article can be attached after its case closed (DECISIONS.md 481).

@@ -4,6 +4,7 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { ALL_MODULES } from "../../domains/index.ts";
 import { leadJourneyModule } from "../../domains/lead-funnel/index.ts";
+import { casePathsModule } from "../../domains/service/index.ts";
 import { buildDigest, quickFixesOf } from "../../digest/build.ts";
 import { runHealthCheck } from "../../engine/run.ts";
 import { buildReport, type BuiltReport } from "../../narrative/sections.ts";
@@ -30,7 +31,8 @@ import { Pseudonymiser } from "../../privacy/pseudonymiser.ts";
 // nothing at all where there are no hours.
 
 // With the lead journey's rules (HC_LEAD_JOURNEY, DECISIONS.md 770), which the table declares though they run only with the switch on.
-const rules = [...ALL_MODULES.flatMap((m) => m.rules), ...leadJourneyModule.rules.filter((r) => !ALL_MODULES.some((m) => m.rules.some((x) => x.id === r.id)))];
+// And the case status paths' (HC_CASE_PATHS, DECISIONS.md 776), on the same terms.
+const rules = [...ALL_MODULES.flatMap((m) => m.rules), ...[...leadJourneyModule.rules, ...casePathsModule.rules].filter((r) => !ALL_MODULES.some((m) => m.rules.some((x) => x.id === r.id)))];
 const readFindings = (dir: string): Finding[] => (JSON.parse(readFileSync(join(dir, "findings.json"), "utf8")) as unknown[]).map((f) => Finding.parse(f));
 const { dir } = await runFromRecording({ answers: loadAnswers(), modules: ALL_MODULES });
 const loaded = loadRun(dir);

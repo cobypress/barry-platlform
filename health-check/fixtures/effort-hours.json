@@ -797,6 +797,12 @@
       "high": 5,
       "basis": "Checking how incoming cases are matched to contacts and building the matching that's missing"
     },
+    "svc.closed-straight": {
+      "fixComplexity": "simple",
+      "low": 2,
+      "high": 4,
+      "basis": "Preparing the analysis and the options for the people who decide; their time deciding, and making the change, isn't counted"
+    },
     "svc.escalation-rules": {
       "fixComplexity": "moderate",
       "low": 2,
@@ -883,6 +889,24 @@
       "low": 2,
       "high": 5,
       "basis": "Finding which case types reopen and preparing a confirmation step for the service leaders"
+    },
+    "svc.reopened-time": {
+      "fixComplexity": "simple",
+      "low": 2,
+      "high": 4,
+      "basis": "Preparing the analysis and the options for the people who decide; their time deciding, and making the change, isn't counted"
+    },
+    "svc.sent-back-cases": {
+      "fixComplexity": "simple",
+      "low": 2,
+      "high": 4,
+      "basis": "Preparing the analysis and the options for the people who decide; their time deciding, and making the change, isn't counted"
+    },
+    "svc.stuck-in-status": {
+      "fixComplexity": "simple",
+      "low": 2,
+      "high": 4,
+      "basis": "Preparing the analysis and the options for the people who decide; their time deciding, and making the change, isn't counted"
     },
     "svc.unassigned-cases": {
       "fixComplexity": "moderate",

@@ -16,6 +16,8 @@ import { runFromRecording } from "../../testing/harness.ts";
 import { Simulator } from "../../testing/simulator.ts";
 import { deals, open, orgWith, REWORK, SKIPS, USUAL } from "./paths-orgs.ts";
 import { journeyOrg, journeyRecords, richSpecs } from "../../testing/lead-journey-org.ts";
+import { caseOrg, caseRecords, richCases, straightCases, stuckCases } from "../../testing/case-paths-org.ts";
+import { ALL_MODULES } from "../../domains/index.ts";
 
 // Step 1 of the strict check, held from here on (DECISIONS.md 768, KAN-102):
 // every rule's figures on the synthetic org's runs and the constructed
@@ -67,13 +69,22 @@ async function runs(): Promise<Record<string, StrictShadow>> {
       leadJourney: true,
     },
     "leadJourney/quick": { calibration: auto, answers: [], reviewMode: "automatic", transport: new Simulator({ records: journeyOrg(journeyRecords(richSpecs().map((x) => (x.outcome ? { ...x, convertedAfter: 1, closedAfter: 5 } : x)))) }), leadJourney: true },
+    // The case status paths on (HC_CASE_PATHS, DECISIONS.md 776): consultant-led runs with Service Cloud, the only runs it reaches.
+    "casePaths/synthetic": { modules: ALL_MODULES, casePaths: true },
+    "casePaths/rich": { modules: ALL_MODULES, transport: new Simulator({ records: caseOrg(caseRecords(richCases())) }), casePaths: true },
+    "casePaths/straight": { modules: ALL_MODULES, transport: new Simulator({ records: caseOrg(caseRecords(straightCases())) }), casePaths: true },
+    "casePaths/stuck": { modules: ALL_MODULES, transport: new Simulator({ records: caseOrg(caseRecords(stuckCases({ backlog: true, waiting: true }))) }), casePaths: true },
+    "casePaths/steady": { modules: ALL_MODULES, transport: new Simulator({ records: caseOrg(caseRecords(stuckCases())) }), casePaths: true },
+    "casePaths/untracked": { modules: ALL_MODULES, transport: new Simulator({ records: caseOrg(caseRecords(richCases().map((x) => ({ ...x, noHistory: true })))) }), casePaths: true },
   };
+  // The case status paths' runs count its own rules only, on the same terms (DECISIONS.md 776).
+  const CASES = new Set(["svc.reopened-time", "svc.closed-straight"]);
   // The lead journey's runs count the journey's own rules only: on constructed lead orgs the base rules reach sentences the
   // synthetic org doesn't, with or without the switch, and those aren't this switch's to hold (DECISIONS.md 770).
   const JOURNEY = new Set(["lead.days_to_won", "lead.won_lead_rate", "lead.source-win-rate"]);
   for (const [name, options] of Object.entries(synthetic)) {
     const shadow = await shadowOf((await runFromRecording(options)).dir);
-    out[name] = name.startsWith("leadJourney/") ? { ...shadow, figures: shadow.figures.filter((f) => JOURNEY.has(f.ruleId)) } : shadow;
+    out[name] = name.startsWith("leadJourney/") ? { ...shadow, figures: shadow.figures.filter((f) => JOURNEY.has(f.ruleId)) } : name.startsWith("casePaths/") ? { ...shadow, figures: shadow.figures.filter((f) => CASES.has(f.ruleId)) } : shadow;
   }
   const first = await runFromRecording();
   const stages = stagesOf(first.dir);

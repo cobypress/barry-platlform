@@ -34,7 +34,7 @@ export const UNSCORED_RULES: ReadonlySet<string> = new Set(["tech.lint-data-acce
  * twice, and a path that is won more often is no fault. Kept apart from
  * UNSCORED_RULES, which a re-check reads as the code checker's groups.
  */
-export const INSIGHT_RULES: ReadonlySet<string> = new Set(["pipe.path-insights", "pipe.probability-vs-reality", "lead.fast-conversion"]);
+export const INSIGHT_RULES: ReadonlySet<string> = new Set(["pipe.path-insights", "pipe.probability-vs-reality", "lead.fast-conversion", "svc.sent-back-cases", "svc.stuck-in-status"]);
 /** The path insights' rule (DECISIONS.md 703): the only insight the digest serves, in its own `paths` block (758). */
 export const PATH_INSIGHTS_RULE = "pipe.path-insights";
 /**
@@ -47,13 +47,13 @@ export const PATH_RELATED_RULES: ReadonlySet<string> = new Set(["pipe.skipped-st
  * 703). The stage probabilities against what happens (706) join them: a setting
  * held against closed deals, which is no fault to score, kept and not yet shown.
  */
-export const INSIGHT_METRICS: ReadonlySet<string> = new Set(["historic.path_variants", "historic.stage_probability_vs_won"]);
+export const INSIGHT_METRICS: ReadonlySet<string> = new Set(["historic.path_variants", "historic.stage_probability_vs_won", "service.status_paths"]);
 /**
  * Checks added to an area that count toward its score only when they measure something (DECISIONS.md 770): not
  * measurable, they are left out of both sides of the coverage rule below and of the area's reason, so adding one can
  * never take away a score, or change the reason, an area has without it. Measured, each counts as any other check.
  */
-export const COUNTED_WHEN_MEASURED: ReadonlySet<string> = new Set(["lead.source-win-rate"]);
+export const COUNTED_WHEN_MEASURED: ReadonlySet<string> = new Set(["lead.source-win-rate", "svc.reopened-time", "svc.closed-straight"]);
 /** The rules of COUNTED_WHEN_MEASURED among these findings with no result at all. */
 const idleAdditions = (findings: Finding[]): Set<string> => {
   const idle = new Set([...COUNTED_WHEN_MEASURED].filter((id) => findings.some((f) => f.ruleId === id)));
