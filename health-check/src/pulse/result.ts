@@ -1,7 +1,7 @@
 import type { BuiltReport } from "../narrative/sections.ts";
 import { areasOf, bySeverity, domainLabel, issuesOf, scorecard } from "../narrative/select.ts";
 import type { Finding, NotMeasurableKind } from "../schemas/index.ts";
-import type { RuleChange } from "../progress/compare.ts";
+import type { Progress, RuleChange } from "../progress/compare.ts";
 
 // The monthly pulse (roadmap Stage 5, Barometer Ongoing): a lighter re-check
 // that nobody reviews. Its result is what changed since the baseline the
@@ -21,8 +21,13 @@ export type PulseResult = {
   score: { now: number | null; before: number | null };
   worth: { currency: string; now: number; before: number | null };
   /** Rules with an issue now, whatever the baseline. The rest are against the baseline, null without one. */
-  /** `cantTellByKind`: of `cantTell`, how many of each kind, where this run gave one (DECISIONS.md 627). Optional, as is an area's kind. */
-  counts: { openNow: number; fixed: number | null; stillOpen: number | null; new: number | null; cantTell: number | null; cantTellByKind?: Partial<Record<NotMeasurableKind, number>> };
+  /**
+   * `cantTellByKind`: of `cantTell`, how many of each kind, where this run gave one (DECISIONS.md 627). Optional, as is an area's kind.
+   * `firstChecked`, `changed` and `stricter`: the rules open now that are neither still open nor new, each only when
+   * there are some (DECISIONS.md 779): checked for the first time, open again because the check changed or went back
+   * (`changedBack`), and found by a stricter check. With a baseline, openNow is stillOpen + new + these three.
+   */
+  counts: { openNow: number; fixed: number | null; stillOpen: number | null; new: number | null; cantTell: number | null; cantTellByKind?: Partial<Record<NotMeasurableKind, number>>; firstChecked?: number; changed?: number; stricter?: number };
   areas: Array<{ domain: string; label: string; now: number | null; before: number | null; notMeasurableKind?: NotMeasurableKind }>;
   newIssues: Array<{ title: string; severity: Finding["severity"]; area: string }>;
   fixed: Array<{ title: string; area: string }>;
@@ -36,6 +41,21 @@ function cantTellByKind(unknown: RuleChange[]): { cantTellByKind?: Partial<Recor
   const out: Partial<Record<NotMeasurableKind, number>> = {};
   for (const c of unknown) if (c.notMeasurableKind) out[c.notMeasurableKind] = (out[c.notMeasurableKind] ?? 0) + 1;
   return Object.keys(out).length ? { cantTellByKind: out } : {};
+}
+
+/**
+ * The open rules a comparison lists apart from still open and new (DECISIONS.md 779), by rule, each once: a rule can
+ * be checked for the first time on one segment and still open or new on another, and is counted where it is open.
+ */
+function openApart(p: Progress): { firstChecked?: number; changed?: number; stricter?: number } {
+  const counted = new Set([...p.remaining, ...p.added].map((c) => c.ruleId));
+  const count = (list: RuleChange[] | undefined): number => {
+    const ids = new Set((list ?? []).map((c) => c.ruleId).filter((id) => !counted.has(id)));
+    for (const id of ids) counted.add(id);
+    return ids.size;
+  };
+  const [stricter, changed, firstChecked] = [count(p.stricter), count(p.changedBack), count(p.newlyMeasured)];
+  return { ...(firstChecked ? { firstChecked } : {}), ...(changed ? { changed } : {}), ...(stricter ? { stricter } : {}) };
 }
 
 /**
@@ -83,7 +103,7 @@ export function buildPulseResult(report: BuiltReport, titleOf: PulseTitle = asRe
     baselineAsOf: p?.baselineAsOf ?? null,
     score: { now: report.overall.status === "measured" ? report.overall.score : null, before: p?.score.before ?? null },
     worth: { currency: report.value.currency, now: report.value.total.expected, before: p?.worth ? p.worth.before : null },
-    counts: { openNow, fixed: p ? p.fixed.length : null, stillOpen: p ? p.remaining.length : null, new: p ? p.added.length : null, cantTell: p ? p.unknown.length : null, ...cantTellByKind(p?.unknown ?? []) },
+    counts: { openNow, fixed: p ? p.fixed.length : null, stillOpen: p ? p.remaining.length : null, new: p ? p.added.length : null, cantTell: p ? p.unknown.length : null, ...cantTellByKind(p?.unknown ?? []), ...(p ? openApart(p) : {}) },
     areas: rows.map((r) => ({ domain: r.domain, label: r.label, now: r.score, before: before.get(r.domain) ?? null, ...(r.notMeasurableKind ? { notMeasurableKind: r.notMeasurableKind } : {}) })),
     newIssues,
     fixed,
