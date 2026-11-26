@@ -18,7 +18,7 @@ import { deliveryOutlook, openStageMetrics, OUTLOOK_LABELS, retiredStages } from
 import { eng, joinSaid, org, said, type Said, word } from "../../engine/org-words.ts";
 import { moneySaid } from "../../engine/said-forms.ts";
 import { STUCK_LIMITS_BEFORE_3 } from "../../engine/loosened.ts";
-import { judge, pastLine, stageModel, TAIL_LIMIT, type StageModel, type Stay } from "./stuck-expected.ts";
+import { judge, pastLine, stageModel, type StageModel, type Stay } from "./stuck-expected.ts";
 
 // Every title, summary, recommendation and reason is written with `said`, and
 // every name the org chose (a stage, a record type, a team, a person's token)
@@ -285,6 +285,8 @@ const STUCK_SCOPE = said`open deals with a stage to compare`;
 export const MIN_COMPARED_SHARE = 0.75;
 /** A stage no deal has entered for this many days, a quarter, longer than the gaps a quarterly sales calendar leaves. */
 export const NO_INTAKE_DAYS = 90;
+/** The fewest entries a quarter, at the read's own rate, for a stage's quarter without one to count. */
+export const NO_INTAKE_USUAL = 3;
 /** In such a stage, an open deal is past what its stays explain when older than this many times its longest finished stay. */
 export const NO_INTAKE_FACTOR = 2;
 
@@ -340,7 +342,10 @@ const stuckInStageExpected: Rule = {
     const retired = [...stays].flatMap(([stage, list]) => {
       const last = newest.get(stage)!;
       const finished = list.filter((s) => s.done);
-      if (daysSince(last, ctx.now) <= NO_INTAKE_DAYS || finished.length === 0) return [];
+      // Only a stage entered often enough for a quarter's silence to mean something: at the read's own rate, at least
+      // NO_INTAKE_USUAL entries a quarter, so a stage almost every deal skips isn't called one nobody enters any more.
+      const usual = (list.length * NO_INTAKE_DAYS) / daysSince(from, ctx.now);
+      if (daysSince(last, ctx.now) <= NO_INTAKE_DAYS || finished.length === 0 || usual < NO_INTAKE_USUAL) return [];
       const longest = Math.max(...finished.map((s) => s.days));
       const old = open.filter((d) => d.StageName === stage && entered(d) !== null && entered(d)! >= from && days(d) > NO_INTAKE_FACTOR * longest);
       return old.length >= MIN_SEGMENT ? [{ stage, since: last.toISOString().slice(0, 10), deals: old }] : [];
@@ -368,10 +373,9 @@ const stuckInStageExpected: Rule = {
     const uncoveredWords = uncoveredStages.length ? named(said`The history we read, which starts on ${eng(readFrom)}, doesn't cover how long deals stay in ${andList(uncoveredStages)}, so we can't tell which are stuck there.`, { readFrom: [readFrom, "date"] }) : null;
     const ancientWords = ancient.length ? named(said`${ancient.length === 1 ? "One open deal has" : said`${ancient.length} open deals have`} been in ${ancient.length === 1 ? "its" : "their"} stage since before ${eng(readFrom)}, when the history we read starts.`, { ancient: ancient.length, readFrom: [readFrom, "date"] }) : null;
     const retiredWords = retired.map((r) => named(said`No deal has entered ${org(r.stage)} since ${eng(r.since)}, and ${r.deals.length} are still open in it.`, { retiredSince: [r.since, "date"], retiredOpen: r.deals.length }));
-    // Older than the read: raised when there are at least a segment's worth and more than the share of stays a stage may
-    // leave running where we lose sight of them (TAIL_LIMIT): a long tail leaves a few that old on a steady org.
-    const manyAncient = ancient.length >= MIN_SEGMENT && ancient.length > TAIL_LIMIT * open.length;
-    const narrow = retired.length > 0 || manyAncient;
+    // Deals older than the read are said, never raised: a long tail leaves more than 5% that old on a steady org (on the
+    // e45 probes, raising ten or more raised 52 to 61% of steady orgs with nine-month lognormal stages). They stop a pass.
+    const narrow = retired.length > 0;
 
     const isPast = (d: Deal): boolean => pastLine(days(d), models.get(d.StageName)!);
     const judged = deals.length ? judge({ open: deals, stageOf: (d) => d.StageName, ageOf: days, entries: all.filter((e) => models.has(e.stage) && e.age <= models.get(e.stage)!.horizon), models, dimensions: dimensions(ctx), stageDimension: "stage", minSegment: MIN_SEGMENT }) : null;
@@ -428,12 +432,11 @@ const stuckInStageExpected: Rule = {
     const rows = [
       ...listedPast.map((d) => ({ id: d.Id, problem: `In ${d.StageName} for ${daysText(shownDays(d))} ${dayWord(shownDays(d))}, where about three quarters of stays in that stage last ${daysText(shownLine(d))} ${dayWord(shownLine(d))} or less` })),
       ...retiredDeals.filter(({ d }) => !listedPast.includes(d)).map(({ d, since }) => ({ id: d.Id, problem: `In ${d.StageName} for ${Math.floor(days(d))} days; no deal has entered ${d.StageName} since ${since}` })),
-      ...(manyAncient ? ancient.map((d) => ({ id: d.Id, problem: `In ${d.StageName} since before ${readFrom}, when the history we read starts` })) : []),
     ];
     return {
       outcome: "issue",
       title: said`Some deals are sitting in their stage longer than your stage times explain`,
-      summary: said`${judged ? said`${lead}${totalSentence}${leftOut}${segmentSentence}` : said``}${tail(...retiredWords, manyAncient ? ancientWords : null)}`,
+      summary: said`${judged ? said`${lead}${totalSentence}${leftOut}${segmentSentence}` : said``}${tail(...retiredWords, ancientWords)}`,
       recommendation: said`Go through these in pipeline reviews, and either move each deal on with a dated next step or close it.`,
       recommendationType: "change",
       severity: "high",

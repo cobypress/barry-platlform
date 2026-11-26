@@ -274,20 +274,19 @@ describe("fires on the trap, and on deals no estimate is needed to call long", (
     assert.match(f.summary, / No deal has entered Qualified since 2025-\d\d-\d\d, and 12 are still open in it\.$/);
     assert.equal(f.facts.retired, 12);
     assert.ok(f.subjects.some((s) => s.type === "stage" && s.label === "Qualified"));
-    // Under the segment minimum, or with an entry inside the quarter, it is not raised this way.
+    // Under the segment minimum, with an entry inside the quarter, or a stage entered under three times a quarter, not raised this way.
+    assert.equal(stuck(withQualified({ finished: 10, finishedAgo: [600, 700], open: 12, openAgo: [400, 480] }), true).facts.retired ?? 0, 0);
     assert.notEqual(stuck(withQualified({ finished: 25, finishedAgo: [600, 700], open: 9, openAgo: [400, 480] }), true).facts.retired, 9);
     assert.equal(stuck(withQualified({ finished: 25, finishedAgo: [60, 700], open: 12, openAgo: [400, 480] }), true).facts.retired, 0);
   });
 
-  test("deals in their stage since before the history we read starts: raised when there are many, more than 5% of open deals, else the check can't tell, and never left out", () => {
-    const many = stuck(withQualified({ finished: 25, finishedAgo: [600, 700], open: 30, openAgo: [800, 900] }), true);
-    assert.equal(many.status, "issue", many.summary);
-    assert.match(many.summary, / 30 open deals have been in their stage since before 2024-10-31, when the history we read starts\.$/);
-    // A segment's worth that is a small share of the pipeline (12 of about 320): a long tail leaves that many, so it can't tell.
-    assert.equal(stuck(withQualified({ finished: 25, finishedAgo: [600, 700], open: 12, openAgo: [800, 900] }), true).status, "not_measurable");
-    const few = stuck(withQualified({ finished: 25, finishedAgo: [600, 700], open: 5, openAgo: [800, 900] }), true);
-    assert.equal(few.status, "not_measurable", few.summary);
-    assert.match(few.summary, /5 open deals have been in their stage since before 2024-10-31, when the history we read starts\./);
+  test("deals in their stage since before the history we read starts are said plainly, never left out and never raised alone: the check can't tell", () => {
+    // On the e45 probes, raising ten or more raised 52 to 61% of steady orgs with nine-month lognormal stages.
+    for (const open of [5, 30]) {
+      const f = stuck(withQualified({ finished: 25, finishedAgo: [600, 700], open, openAgo: [800, 900] }), true);
+      assert.equal(f.status, "not_measurable", f.summary);
+      assert.match(f.summary, new RegExp(`^${open} open deals have been in their stage since before 2024-10-31, when the history we read starts\\. We can't measure stays that long from the history we read, so this doesn't show whether any deals here are stuck\\.$`));
+    }
   });
 
   test("a pass needs most of the open pipeline compared: three quarters or more", () => {
