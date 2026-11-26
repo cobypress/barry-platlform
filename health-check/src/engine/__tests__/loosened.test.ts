@@ -1,7 +1,7 @@
 import { test, describe } from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
-import { ALL_MODULES } from "../../domains/index.ts";
+import { LATEST_RULE_VERSIONS } from "../../domains/index.ts";
 import { issueUnder, LOOSENED, loosenedFrom, loosenedProblems, passedOnlyByChange } from "../loosened.ts";
 import { buildDigest } from "../../digest/build.ts";
 import { buildReport } from "../../narrative/sections.ts";
@@ -14,7 +14,8 @@ import { join } from "node:path";
 // Rule versions that loosened a rule (DECISIONS.md 732): what the declarations may
 // say, the one rule that judges a pass, and what the digest carries for the console.
 
-const versions = new Map(ALL_MODULES.flatMap((m) => m.rules).map((r) => [r.id, r.version]));
+// With the versions behind a switch (DECISIONS.md 777): cur.stuck-in-stage 3 runs only with HC_STUCK_EXPECTED on.
+const versions = LATEST_RULE_VERSIONS;
 
 describe("the declarations (decision 732)", () => {
   test("every declaration names a real rule, a version it has had and earlier versions that exist", () => {

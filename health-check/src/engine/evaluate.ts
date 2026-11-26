@@ -200,7 +200,7 @@ function toFinding(rule: Rule, result: RuleResult, pseudonyms: Pseudonymiser, as
   // Hours to fix and a fix prompt (DECISIONS.md 628), from the scrubbed text, so a
   // prompt is built from what the finding says and nothing the scrub took out.
   // A remove, deactivate or merge a guard held back is now "investigate", which the prompt reads as held back.
-  const { fields: fix, promptWords } = fixFields(rule.id, scrubbed, pseudonyms);
+  const { fields: fix, promptWords } = fixFields(rule.id, scrubbed, pseudonyms, rule.version);
   // The hours' basis is put together from the fix table's fixed words and the
   // finding's whole-number counts alone (effortHours is given nothing else), so
   // it holds no word the org chose: marked with no spans as it's made (DECISIONS.md 663).

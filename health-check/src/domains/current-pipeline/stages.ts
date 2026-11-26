@@ -24,6 +24,17 @@ export function stageRuns(deal: Deal): Array<{ stage: string; days: number }> {
   return runs;
 }
 
+/** When each run of a stage began, the last (unfinished) run too: every entry into a stage the history shows (DECISIONS.md 777). */
+export function stageEntries(deal: Deal): Array<{ stage: string; entered: Date }> {
+  const entries: Array<{ stage: string; entered: Date }> = [];
+  for (let i = 0; i < deal.history.length; i++) {
+    const row = deal.history[i]!;
+    if (i > 0 && deal.history[i - 1]!.StageName === row.StageName) continue;
+    entries.push({ stage: row.StageName, entered: new Date(row.CreatedDate) });
+  }
+  return entries;
+}
+
 export const daysSince = (from: Date, now: Date): number => (now.getTime() - from.getTime()) / DAY;
 
 /** The fiscal quarter holding `date`, as calendar dates. */

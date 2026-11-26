@@ -4,9 +4,9 @@ import type { Pseudonymiser } from "../privacy/pseudonymiser.ts";
 import { effortHours, timeBandOf } from "./hours.ts";
 import { markedFixPrompt } from "./prompt.ts";
 import { textSha256, type MarkedSentence } from "../engine/org-words.ts";
-import { FIX_TABLE } from "./table.ts";
+import { fixRuleOf } from "./table.ts";
 
-export { FIX_TABLE, NEVER_RAISES } from "./table.ts";
+export { FIX_BY_VERSION, FIX_TABLE, fixRuleOf, NEVER_RAISES } from "./table.ts";
 export { DIFFICULTY_WORDS, difficultyOf } from "./difficulty.ts";
 
 /**
@@ -18,8 +18,10 @@ export function fixFields(
   ruleId: string,
   f: Pick<Finding, "title" | "summary" | "recommendation" | "recommendationType" | "subjects" | "facts"> & Partial<Pick<Finding, "orgWords">>,
   pseudonyms: Pseudonymiser,
+  /** The rule's version: a version with its own fix declaration is fixed by it (DECISIONS.md 777). */
+  version?: number,
 ): { fields: { effortHours?: EffortHours; timeBand?: TimeBand; fixComplexity?: FixComplexity; difficulty?: Difficulty; fixPrompt?: string }; promptWords?: MarkedSentence } {
-  const rule = FIX_TABLE[ruleId];
+  const rule = fixRuleOf(ruleId, version);
   if (!rule) return { fields: {} };
   const hours = effortHours(rule.hours, f.facts);
   const prompt = markedFixPrompt(f, rule.prompt, pseudonyms);
