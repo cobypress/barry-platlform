@@ -5,7 +5,7 @@ import { andList } from "../../engine/said-forms.ts";
 import type { Evidence, Metric, MetricSegment, SegmentCheck, SeriesPoint } from "../../schemas/index.ts";
 import { meanStat } from "../average.ts";
 import { loadPipeline } from "../historic-pipeline/cohort.ts";
-import { groupBy, median, quantile, round1 } from "../historic-pipeline/metrics.ts";
+import { groupBy, median, round1 } from "../historic-pipeline/metrics.ts";
 import { bandedZ, MIN_EACH_OUTCOME, NOT_A_CAUSE, WHOLE_SHARE, MIN_SEGMENTS, WIN_GAP, zBar, zOf } from "../historic-pipeline/paths/insights.ts";
 import { dayPlus, daySaid, LAG_QUANTILE, OPEN_SHARE } from "../historic-pipeline/reached.ts";
 import { localDay, zoneNote, zoneOf } from "../time-zone.ts";
@@ -57,6 +57,15 @@ export type Cohort =
   | { status: "not_measurable"; reason: string; evidence: Evidence[] }
   | { status: "ok"; from: string; to: string; lagDays: number; floored: boolean; leads: JourneyLead[]; deals: JourneyDeal[]; exclusions: string[]; evidence: Evidence[] };
 
+/** The nearest-rank quantile: the ⌈q·n⌉-th smallest value, so at least q of the values are at or below it. */
+export function nearestRank(values: number[], q: number): number {
+  const sorted = [...values].sort((a, b) => a - b);
+  return sorted[Math.max(0, Math.ceil(q * sorted.length) - 1)]!;
+}
+
+/** How many times the source check may raise its bar before it gives up and raises nothing (a test may lower it). */
+export const SEARCH_LIMIT = { rounds: 20 };
+
 /** Whole days from one calendar day to another. */
 export const daysBetween = (from: string, to: string): number => Math.round((Date.parse(`${to}T00:00:00Z`) - Date.parse(`${from}T00:00:00Z`)) / DAY);
 const created = (l: Lead): Date => new Date(l.CreatedDate.replace(/\+0000$/, "Z"));
@@ -101,7 +110,9 @@ export function journeyOf(ctx: Ctx): Cohort {
   const evidence = data.evidence;
   const closedCount = closedDays.length;
   if (closedCount < minSample) return { status: "not_measurable", reason: named(said`${closedCount} closed deals from leads is below the calibrated minimum of ${minSample}.`, { closedCount, minSample }), evidence };
-  const percentile = Math.ceil(quantile(closedDays, LAG_QUANTILE));
+  // Nearest rank, not interpolated: the ⌈0.9n⌉-th shortest journey, so at least 90% of them really closed within the
+  // days the sentences state (an interpolated 90th percentile of 25 journeys left only 88% within it).
+  const percentile = nearestRank(closedDays, LAG_QUANTILE);
   // Under our least time, the period ends that many days before the run instead, and the sentences say so.
   const floored = percentile < LEAST_LAG_DAYS;
   const lagDays = Math.max(LEAST_LAG_DAYS, percentile);
@@ -111,6 +122,9 @@ export function journeyOf(ctx: Ctx): Cohort {
 
   const inPeriod = (l: Lead): boolean => dayOf(l) >= from && dayOf(l) <= to;
   const recent = data.leads.filter((l) => dayOf(l) > to).length;
+  // The read starts at the window's first instant in UTC; in a zone behind it, a lead made in its first hours falls on
+  // the day before `from` there. Left out, and said, so every lead read is counted or excluded and `from` stays true.
+  const early = data.leads.filter((l) => dayOf(l) < from).length;
   const dealOfLead = (l: Lead): JourneyDeal | undefined => (l.IsConverted && l.ConvertedOpportunityId ? followed.get(l.ConvertedOpportunityId) : undefined);
   const notFollowed = (l: Lead): boolean => l.IsConverted && l.ConvertedOpportunityId !== null && !dealOfLead(l);
   // A lead converted into a deal another lead came first to: the deal is counted from that lead alone, so this one is
@@ -126,6 +140,7 @@ export function journeyOf(ctx: Ctx): Cohort {
           ? named(said`${plural(recent, "lead")} created after ${daySaid(to)}, too recent to have had ${lagDays} days, the least time we allow for a lead to become a closed deal`, { recent, lagDays: [lagDays, "day"] })
           : named(said`${plural(recent, "lead")} created after ${daySaid(to)}, too recent to have had the ${lagDays} days that ${LAG_SHARE}% of the leads that became closed deals took`, { recent, lagDays: [lagDays, "day"], lagShare: [LAG_SHARE, "percent"] })]
       : []),
+    ...(early ? [named(said`${plural(early, "lead")} created before ${daySaid(from)} in your org's time zone, at the very start of what we read`, { early })] : []),
     ...(left ? [named(said`${plural(left, "lead")} converted into a deal we couldn't follow: not read, at a stage with no meaning, or closed before the lead was made`, { left })] : []),
     ...(second ? [named(said`${plural(second, "lead")} converted into the same deal as an earlier lead, which is counted from that lead`, { second })] : []),
   ];
@@ -332,15 +347,21 @@ export const sourceWinRate: Rule = {
       return { found, tests };
     };
     // Bonferroni over every comparison made, in every round: the bar is raised until the search it sets makes no more
-    // comparisons than the bar allows for. It only rises, so this ends.
+    // comparisons than the bar allows for. It only rises, so it settles; if it hasn't within the limit, nothing is
+    // raised, since no bar was shown to cover the comparisons made.
     let bar = zBar(tried.length);
     let result = search(bar);
-    for (let i = 0; i < 20; i++) {
+    let settled = false;
+    for (let i = 0; i < SEARCH_LIMIT.rounds; i++) {
       const next = zBar(result.tests);
-      if (next <= bar) break;
+      if (next <= bar) {
+        settled = true;
+        break;
+      }
       bar = next;
       result = search(bar);
     }
+    if (!settled) return { outcome: "not_measurable", reason: said`We couldn't settle how high a gap would have to be to tell it from chance across these sources, so we haven't compared them.`, evidence: c.evidence };
     // Only the two that say something new: converting more often and winning less, or converting less and winning more.
     // A source converting exactly as often as the rest says nothing about conversion, so this check leaves it out.
     const raised = result.found.filter((t) => (t.c.gap < 0 ? t.conversion > t.otherConversion : t.conversion < t.otherConversion)).slice(0, MOST_RAISED);
