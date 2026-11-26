@@ -10,7 +10,7 @@ import type { Pseudonymiser } from "../privacy/pseudonymiser.ts";
 import { knownPeople } from "../fix/prompt.ts";
 import { spansIfCurrent, textSha256, type OrgSpan } from "../engine/org-words.ts";
 import { engineOwn, orgValuesOf } from "../engine/automatic-words.ts";
-import { areaReasonFrom, areaReasonParts, AREA_REASON_TODAY, UNSCORED_RULES } from "../domains/scoring.ts";
+import { areaReasonFrom, areaReasonParts, AREA_REASON_TODAY, UNSCORED_RULES, unscoredVersion } from "../domains/scoring.ts";
 import { hasLoosened, hasTightened, issueUnder, passedUnder } from "../engine/loosened.ts";
 import { DIGEST_VERSION, NAMED_PEOPLE_SENTENCE, RunDigest, type DigestArea, type DigestReadiness, type DigestFinding, type DigestMetric, type DigestTotal, type DigestValueModel, type SentenceOrgWords } from "../schemas/digest.ts";
 import { FIX_PROMPT_MAX, type Finding, type Metric } from "../schemas/index.ts";
@@ -171,7 +171,8 @@ export function ruleChangeOf(f: Finding, change: RuleChangeContext): Pick<Digest
   if (!loosened && !tightened) return { ruleVersion: f.ruleVersion, ...(from !== undefined ? { carriedFrom: from } : {}) };
   const under = loosened ? issueUnder(f, change.ownCalls) : undefined;
   // For a rule we have tightened, an issue's verdict on the old line (DECISIONS.md 754): the mirror of issueUnder.
-  const passed = tightened ? passedUnder(f, change.ownCalls) : undefined;
+  // Never on a reading the score leaves out (778): version 4 is not across version 3's tightening.
+  const passed = tightened && !unscoredVersion(f) ? passedUnder(f, change.ownCalls) : undefined;
   return { ruleVersion: f.ruleVersion, ...(under ? { issueUnder: under } : {}), ...(from !== undefined ? { carriedFrom: from } : {}), ...(passed ? { passedUnder: passed } : {}) };
 }
 

@@ -915,7 +915,7 @@ export const FIX_BY_VERSION: Readonly<Record<string, Readonly<Record<number, Fix
     // Version 4, behind HC_STUCK_UNSCORED (DECISIONS.md 778): the same report, as a list to review, with a test that can be met.
     4: {
       ...FIX_TABLE["cur.stuck-in-stage"]!,
-      prompt: change("deals", ["Build a report of open deals in their stage longer than three quarters of won deals took, by stage and owner, longest first.", "Add it to the pipeline review, where each owner decides on their own deals."], ["At each review, every deal on the report has an agreed next step or a decision recorded."]),
+      prompt: change("deals", ["Build a report of open deals in their stage longer than about three quarters of won deals stayed there, by stage and owner, longest first.", "Add it to the pipeline review, where each owner decides on their own deals."], ["At each review, every deal on the report has an agreed next step or a decision recorded."]),
     },
   },
 };

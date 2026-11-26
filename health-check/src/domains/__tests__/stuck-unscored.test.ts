@@ -1,13 +1,15 @@
 import { test, describe, before } from "node:test";
 import assert from "node:assert/strict";
 import { analyseExtracts, loadExtracts, runFromRecording } from "../../testing/harness.ts";
+import { steadyPipeline, withPipeline } from "../../testing/steady-pipeline.ts";
+import { AS_OF } from "../../testing/synthetic-org.ts";
 import { scoreDomain, scoreDomains, overallScore, unscoredVersion, UNSCORED_VERSIONS } from "../scoring.ts";
 import { verdictOf } from "../../narrative/select.ts";
 import { currentPipelineModule, currentPipelineUnscoredModule, withStuckUnscored } from "../current-pipeline/index.ts";
-import { SALES_CLOUD_MODULES } from "../index.ts";
+import { LATEST_RULE_VERSIONS, SALES_CLOUD_MODULES } from "../index.ts";
 import { fixRuleOf, FIX_TABLE } from "../../fix/table.ts";
 import { compareWithBaseline, type Progress, type ProgressSide } from "../../progress/compare.ts";
-import { foundByStricter, issueUnder, LOOSENED, passedOnlyByChange, passedUnder, TIGHTENED } from "../../engine/loosened.ts";
+import { CHANGED, changedFrom, changedProblems, issueUnder, LOOSENED, TIGHTENED } from "../../engine/loosened.ts";
 import { ruleChangeOf } from "../../digest/build.ts";
 import { stuckUnscoredStartLine } from "../../worker/env.ts";
 import type { Finding } from "../../schemas/index.ts";
@@ -38,18 +40,31 @@ describe("version 4: shown, never scored (decision 778)", () => {
     assert.equal(f.title, "Open deals that have waited longest in their stage");
     assert.equal(
       f.summary,
-      "Open deals that have been in their stage longer than three quarters of your won deals took: 59 of 70 (84.3%). 6 more open deals couldn't be compared, as they're in stages with too few won deals to set a line. Some open deals are always past this point, because the deals still open at any moment are the slower ones, so this share on its own doesn't show a problem. The list is for your pipeline reviews.",
+      "Open deals that have been in their stage longer than about three quarters of won deals stayed there: 59 of 70 (84.3%). 6 more open deals couldn't be compared, as they're in stages with too few won deals to set a line. Some open deals are usually past this point, because the deals still open at any moment tend to be the slower ones. Whether this share is a problem depends on what is normal for these stages, which we can't tell from it, so the list is for your pipeline reviews.",
     );
     assert.equal(f.recommendation, "In pipeline reviews, go through the deals that have waited longest in each stage, and agree a next step or a decision for each.");
-    assert.deepEqual(f.value, { kind: "not_sized", reason: "Some open deals are past this point in any pipeline, so the Amount on them doesn't show money at risk, and we don't put a figure on it." });
+    assert.deepEqual(f.value, { kind: "not_sized", reason: "Some open deals are usually past this point, so the Amount on them doesn't show money at risk, and we don't put a figure on it." });
     assert.match(f.fixPrompt!, /At each review, every deal on the report has an agreed next step or a decision recorded\./);
-    assert.doesNotMatch(`${f.title} ${f.summary} ${f.recommendation} ${f.fixPrompt}`, /sitting in stages for longer|shrinks at each review|move each deal on with a dated next step or close it/);
+    assert.doesNotMatch(`${f.title} ${f.summary} ${f.recommendation} ${f.fixPrompt}`, /sitting in stages for longer|shrinks at each review|move each deal on with a dated next step or close it|always past|doesn't show a problem|within 0 /);
     const rows = out.records.find((r) => r.ruleId === RULE)!.rows;
     assert.ok(rows.length > 0 && rows.length <= f.facts.hits!);
     for (const r of rows) {
-      const m = /^In \S+ for (\d+(?:\.\d)?) (day|days), where three quarters of won deals moved on within (\d+(?:\.\d)?) (day|days)$/.exec(r.problem);
+      const m = /^In \S+ for (\d+(?:\.\d)?) (day|days|hour|hours), where about three quarters of won deals' stays there ended within (\d+(?:\.\d)?) (day|days|hour|hours)$/.exec(r.problem);
       assert.ok(m, r.problem);
       assert.ok(Number(m[1]) > Number(m[3]), r.problem);
+    }
+  });
+
+  test("a deal whose time past the line reads the same as the line when printed is counted and not listed, so no line reads against itself", () => {
+    // Seed 1 holds one such deal: 74 past the line, 73 listed.
+    const out = analyseExtracts(withPipeline(extracts, steadyPipeline("exponential", 300, 1, new Date(AS_OF))), { stuckUnscored: true, modules: [currentPipelineModule] });
+    const f = out.findings.find((x) => x.ruleId === RULE)!;
+    const rows = out.records.find((r) => r.ruleId === RULE)!.rows;
+    assert.equal(f.facts.hits, 74);
+    assert.equal(rows.length, 73);
+    for (const r of rows) {
+      const m = /for (\d+(?:\.\d)?) \S+, where .* within (\d+(?:\.\d)?) /.exec(r.problem)!;
+      assert.ok(Number(m[1]) > Number(m[2]), r.problem);
     }
   });
 
@@ -112,15 +127,29 @@ describe("between runs (decision 778)", () => {
     assert.deepEqual(where(compareWithBaseline(side("a", [f(RULE, "passed", 4)]), side("b", [f(RULE, "issue", 2)]))), ["changedBack"]);
   });
 
-  test("the lead journey's versions read as the check changing: a pass across them is never fixed, an issue across them never new", () => {
+  test("the lead journey's versions are declared as changed: an issue then a pass says so once, a pass or nothing then an issue is open and never new or stricter, and two runs alike compare as any", () => {
     for (const [rule, from, to] of [["lead.response-time", 1, 2], ["lead.no-first-response", 2, 3], ["lead.no-first-response", 1, 3]] as const) {
-      assert.equal(passedOnlyByChange(rule, from, to, issueUnder(f(rule, "passed", to), undefined)), true, `${rule} ${from} to ${to}: an issue then a pass`);
-      assert.equal(foundByStricter(rule, from, to, passedUnder(f(rule, "issue", to), undefined)), true, `${rule} ${from} to ${to}: a pass then an issue`);
-      assert.deepEqual(where(compareWithBaseline(side("a", [f(rule, "issue", from)]), side("b", [f(rule, "passed", to)])), rule), ["ruleChanged"]);
+      const issueThenPass = compareWithBaseline(side("a", [f(rule, "issue", from)]), side("b", [f(rule, "passed", to)]));
+      assert.deepEqual(where(issueThenPass, rule), ["ruleChanged"], `${rule} ${from} to ${to}`);
+      assert.equal(issueThenPass.carried, undefined, "said once, carried nowhere");
+      assert.deepEqual(where(compareWithBaseline(side("a", [f(rule, "passed", from)]), side("b", [f(rule, "issue", to)])), rule), ["changedBack"], "never new, never stricter");
+      assert.deepEqual(where(compareWithBaseline(side("a", [{ ...f(rule, "passed", from), status: "not_measurable" } as Finding]), side("b", [f(rule, "issue", to)])), rule), ["changedBack"], "not measurable then: never new");
+      // The next run at the same version: the ordinary comparison.
+      assert.deepEqual(where(compareWithBaseline(side("b", [f(rule, "passed", to)]), side("c", [f(rule, "issue", to)])), rule), ["added"]);
+      assert.deepEqual(where(compareWithBaseline(side("b", [f(rule, "issue", to)]), side("c", [f(rule, "passed", to)])), rule), ["fixed"]);
     }
-    assert.ok(TIGHTENED["lead.response-time"] && TIGHTENED["lead.no-first-response"]);
+    assert.equal(LOOSENED["lead.response-time"], undefined, "neither looser");
+    assert.equal(TIGHTENED["lead.response-time"], undefined, "nor stricter");
+    assert.deepEqual(Object.keys(TIGHTENED), [RULE], "the stricter note is reachable only through version 3, behind HC_STUCK_EXPECTED");
+    assert.deepEqual(changedFrom("lead.no-first-response"), { "3": [1, 2] });
+    assert.deepEqual(changedProblems(CHANGED, LATEST_RULE_VERSIONS), []);
     // With the journey off the versions are the earlier ones, and an issue then a pass under them is a fix, as before.
     assert.deepEqual(where(compareWithBaseline(side("a", [f("lead.response-time", "issue", 1)]), side("b", [f("lead.response-time", "passed", 1)])), "lead.response-time"), ["fixed"]);
+  });
+
+  test("the digest gives version 4 no passedUnder: it is not across version 3's tightening", () => {
+    assert.deepEqual(ruleChangeOf(f(RULE, "issue", 4, { wonLineRate: 30 }), { ownCalls: 0, carried: {} }), { ruleVersion: 4 });
+    assert.ok("passedUnder" in ruleChangeOf(f(RULE, "issue", 3, { wonLineRate: 30 }), { ownCalls: 0, carried: {} }), "version 3's issue still carries it");
   });
 
   test("the digest carries carriedFrom for any rule kept apart, and nothing new where nothing is kept apart", () => {

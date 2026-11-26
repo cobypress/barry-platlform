@@ -782,30 +782,33 @@ const stuckInStageUnscored: Rule = {
     // Version 2's own reading, every segment of ten or more, for the judges between runs (loosened.ts, stuckBefore3).
     const read = segmentRate(deals, isPast, dimensions(ctx), { segmentLimit: -Infinity, minSegment: MIN_SEGMENT });
     const facts = { hits: read.hits, n: read.n, rate: read.rate, wonLineRate: read.rate, ...(read.hotspots[0] ? { wonLineWorstSegmentRate: read.hotspots[0].rate } : {}) };
-    const lead = named(said`Open deals that have been in their stage longer than three quarters of your won deals took: ${read.hits} of ${read.n} (${read.rate}%).`, { wonWithinPct: STUCK_PCT, hits: read.hits, n: read.n, rate: [read.rate, "percent"] });
+    // "About": the line is a percentile of won deals' stays, read between two of them.
+    const lead = named(said`Open deals that have been in their stage longer than about three quarters of won deals stayed there: ${read.hits} of ${read.n} (${read.rate}%).`, { wonWithinPct: STUCK_PCT, hits: read.hits, n: read.n, rate: [read.rate, "percent"] });
     if (read.hits === 0) return { outcome: "pass", summary: said`${lead}${leftOut}`, evidence, segmentsChecked: read.segmentsChecked, facts };
-    // Each deal's days against its line on one basis: days down, the line up, to one decimal, and only where they read apart.
-    const shownDays = (d: Deal): number => Math.floor(days(d) * 10) / 10;
-    const shownLine = (d: Deal): number => Math.ceil(lines.get(d.StageName)! * 10) / 10;
+    // Each deal's time against its line on one basis: the deal's rounded down, the line's up, in whole hours where the
+    // line is under a day (as 776 does) and in days to one decimal otherwise, and listed only where the two read apart.
+    const inHours = (d: Deal): boolean => lines.get(d.StageName)! < 1;
+    const shownDays = (d: Deal): number => (inHours(d) ? Math.floor(days(d) * 24) : Math.floor(days(d) * 10) / 10);
+    const shownLine = (d: Deal): number => (inHours(d) ? Math.ceil(lines.get(d.StageName)! * 24) : Math.ceil(lines.get(d.StageName)! * 10) / 10);
     const text = (x: number): string => (Number.isInteger(x) ? `${x}` : x.toFixed(1));
-    const unit = (x: number): string => (x === 1 ? "day" : "days");
+    const unitOf = (d: Deal, x: number): string => (inHours(d) ? (x === 1 ? "hour" : "hours") : x === 1 ? "day" : "days");
     const listed = deals.filter((d) => isPast(d) && shownDays(d) > shownLine(d));
     return {
       outcome: "issue",
       title: said`Open deals that have waited longest in their stage`,
-      summary: said`${lead}${leftOut} Some open deals are always past this point, because the deals still open at any moment are the slower ones, so this share on its own doesn't show a problem. The list is for your pipeline reviews.`,
+      summary: said`${lead}${leftOut} Some open deals are usually past this point, because the deals still open at any moment tend to be the slower ones. Whether this share is a problem depends on what is normal for these stages, which we can't tell from it, so the list is for your pipeline reviews.`,
       recommendation: said`In pipeline reviews, go through the deals that have waited longest in each stage, and agree a next step or a decision for each.`,
       recommendationType: "investigate",
       severity: "info",
       confidence: "high",
       evidence,
-      value: notSized(said`Some open deals are past this point in any pipeline, so the Amount on them doesn't show money at risk, and we don't put a figure on it.`),
+      value: notSized(said`Some open deals are usually past this point, so the Amount on them doesn't show money at risk, and we don't put a figure on it.`),
       effort: { size: "S" },
       owner: "Head of sales",
       segmentsChecked: read.segmentsChecked,
       subjects: [],
       facts,
-      ...(listed.length ? { records: { object: "Opportunity" as const, rows: listed.map((d) => ({ id: d.Id, problem: `In ${d.StageName} for ${text(shownDays(d))} ${unit(shownDays(d))}, where three quarters of won deals moved on within ${text(shownLine(d))} ${unit(shownLine(d))}` })), fix: "Agree a next step or a decision for it" } } : {}),
+      ...(listed.length ? { records: { object: "Opportunity" as const, rows: listed.map((d) => ({ id: d.Id, problem: `In ${d.StageName} for ${text(shownDays(d))} ${unitOf(d, shownDays(d))}, where about three quarters of won deals' stays there ended within ${text(shownLine(d))} ${unitOf(d, shownLine(d))}` })), fix: "Agree a next step or a decision for it" } } : {}),
     };
   },
 };
