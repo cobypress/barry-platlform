@@ -8,6 +8,7 @@ import { scoreCaveatFor } from "../../narrative/edition-note.ts";
 import { buildReport, type ReportInput } from "../../narrative/sections.ts";
 import { loadRun } from "../../render/render-run.ts";
 import { METADATA_POINTER, refusalSentence } from "../../salesforce/refusal-words.ts";
+import { textSha256 } from "../../engine/org-words.ts";
 import type { RunDigest } from "../../schemas/digest.ts";
 import type { Calibration, Finding } from "../../schemas/index.ts";
 import { AutomaticReplay, automaticSyntheticCalibration } from "../../testing/automatic.ts";
@@ -29,7 +30,7 @@ const MADE_AT = "2026-11-26T09:00:00.000Z";
 const ON: ScoreOptions = { areaReasons: true };
 const NONE = "We couldn't measure this area.";
 const TOO_LITTLE = "Too little of this area could be measured to score it fairly.";
-const OTHERS = "We couldn't measure other checks in this area either, and each gives its own reason.";
+const OTHERS = "We couldn't measure other checks in this area either, and they give their own reasons.";
 const ANOTHER = "We couldn't measure another check in this area either, and it gives its own reason.";
 const FORECAST_OFF = "Forecasting isn't in use, or can't be read, so we don't report a forecast figure. Salesforce holds no forecast rows for this period.";
 const THIN = "9 closed deals with stage history is below our minimum of 20.";
@@ -68,6 +69,9 @@ describe("an unscored area's reason from its own checks (DECISIONS.md 769)", () 
     ["too little measured, half and half: as before", [check("a", "passed"), check("b", "issue"), check("c", "not_measurable", UNSPLIT), check("d", "not_measurable", UNSPLIT), check("e", "not_measurable", THIN), check("f", "not_measurable", THIN), check("g", "passed")], TOO_LITTLE],
     ["one check measured and nothing unmeasured: no reason made up", [check("a", "passed")], TOO_LITTLE],
     ["a check with several readings counts once", [check("a", "not_measurable", THIN), check("a", "not_measurable", THIN), check("b", "not_measurable", NO_LINE), check("c", "not_measurable", NO_LINE)], `${NO_LINE} ${THIN}`],
+    ["one check giving two reasons, one long: no other check, so no pointer", [check("a", "not_measurable", UNSPLIT), check("a", "not_measurable", THIN)], UNSPLIT],
+    ["one check giving three reasons and nothing else: the first alone", [check("a", "not_measurable", UNSPLIT), check("a", "not_measurable", THIN), check("a", "not_measurable", NO_LINE)], UNSPLIT],
+    ["too little measured, an edition reason from one check and another from two: the one most give (review)", [check("x", "passed"), check("a", "not_measurable", METADATA_POINTER), check("b", "not_measurable", THIN), check("c", "not_measurable", THIN)], `${TOO_LITTLE} ${THIN}`],
     ["a check with a reading measured isn't unmeasured, so its reason isn't said", [check("a", "not_measurable", THIN), check("a", "issue"), check("b", "not_measurable", NO_LINE)], `${TOO_LITTLE} ${NO_LINE}`],
   ];
   for (const [name, findings, expected] of cases) {
@@ -279,5 +283,58 @@ describe("the switch through a run, and dormant (DECISIONS.md 769)", () => {
       assert.deepEqual(on.input.findings, off.input.findings);
       assert.deepEqual((on.input.scores ?? []).map((s) => s.status), (off.input.scores ?? []).map((s) => s.status));
     }
+  });
+});
+
+describe("a check's reason the name or id guard would change, and checks marking one sentence differently (review of 769)", () => {
+  const base = clone(extracts) as Map<string, any>;
+  base.get("forecast").items = { ...base.get("forecast").items, data: [] };
+  const a = analyseExtracts(base, { calibration });
+  /** Every unmeasured forecast check giving this reason, with these words marked as the org's. */
+  const withReason = (text: string, marked: (i: number) => string[]): Finding[] => {
+    let k = 0;
+    return clone(a.findings).map((f) => {
+      if (f.domain !== "forecast" || f.status !== "not_measurable") return f;
+      const spans = marked(k++).map((w) => ({ start: text.indexOf(w), end: text.indexOf(w) + w.length }));
+      return { ...f, notMeasurableReason: text, orgWords: { ...f.orgWords, notMeasurableReason: { spans, textSha256: textSha256(text) } } };
+    });
+  };
+  const digestOf = (findings: Finding[]) => {
+    const scores = scoreDomains(loaded.input.run.modules, findings, loaded.input.run.ruleSetVersion, ON);
+    return { scores, c: checkedDigest({ input: { ...loaded.input, calibration, findings, metrics: a.metrics, scores }, pseudonyms: loaded.pseudonyms, inventory: null, madeAt: MADE_AT }) };
+  };
+  for (const [what, name] of [["a person's name", "Priya Shah"], ["a Salesforce id", "00O000000000001AAA"]] as const) {
+    test(`${what} in the checks' reason: the area says what it said before, ours, and the run is released`, async () => {
+      const text = `The forecast report ${name} couldn't be read.`;
+      const findings = withReason(text, () => [name]);
+      const { scores, c } = digestOf(findings);
+      assert.equal((scores.find((s) => s.domain === "forecast") as { reason: string }).reason, text, "the score keeps the checks' reason");
+      released(c, what);
+      const f = area(c.digest!, "forecast");
+      assert.equal(f.status === "not_measurable" && f.reason, NONE);
+      assert.deepEqual(spansOf(c.digest!, "forecast"), []);
+      // The documents print the same sentence in its place.
+      const { withWholeNotes, listedReason } = await import("../../render/area-notes.ts");
+      const { scorecard } = await import("../../narrative/select.ts");
+      const report = { input: { ...loaded.input, run: { ...loaded.input.run, areaReasons: true as const }, findings, scores } };
+      assert.equal(listedReason(report, "forecast", text, loaded.pseudonyms), NONE);
+      const row = withWholeNotes(report, scorecard(findings, scores), loaded.pseudonyms).find((r) => r.domain === "forecast")!;
+      assert.ok(row.wholeNotes && !row.wholeNotes.some((n) => n.includes(name)), JSON.stringify(row.wholeNotes));
+    });
+  }
+
+  test("a name the guard lets through is said, marked as the org's", () => {
+    const text = "The forecast report Pipeline Review couldn't be read.";
+    const { c } = digestOf(withReason(text, () => ["Pipeline Review"]));
+    released(c, "plain");
+    assert.deepEqual(spansOf(c.digest!, "forecast"), ["Pipeline Review"]);
+  });
+
+  test("checks marking the same sentence differently: the area marks every word any of them marks", () => {
+    const text = "The forecast report Pipeline Review couldn't be read.";
+    const { c } = digestOf(withReason(text, (i) => (i % 2 ? ["Pipeline"] : ["Review"])));
+    assert.deepEqual(spansOf(c.digest!, "forecast"), ["Pipeline", "Review"]);
+    const { c: touching } = digestOf(withReason(text, (i) => (i % 2 ? ["Pipeline"] : [" Review"])));
+    assert.deepEqual(spansOf(touching.digest!, "forecast"), ["Pipeline Review"]);
   });
 });

@@ -23,6 +23,8 @@ export type Render = {
   refText(id: string): string;
   /** A counted finding's own figure over 12 months, from the value model. */
   yearly(findingId: string): number | undefined;
+  /** The run's map, for the name and id guard an area's own reason passes before it's printed (DECISIONS.md 769). */
+  pseudonyms?: Pseudonymiser;
 };
 
 /** A reference is a place in the raw notes, not a figure, so the number check passes over it. */
@@ -45,6 +47,7 @@ export function inDocumentOrder<T>(pseudonyms: Pseudonymiser, make: (words: Cust
 export function renderContext(pseudonyms: Pseudonymiser, currency: string, draft: boolean, refs: Map<string, string> = new Map(), yearly: Map<string, number> = new Map(), words: CustomerWords = pseudonyms.customerWords()): Render {
   const say = words;
   return {
+    pseudonyms,
     yearly: (findingId) => yearly.get(findingId),
     t: (text) => escapeXml(plainWords(ukDates(say(text)))),
     currency,

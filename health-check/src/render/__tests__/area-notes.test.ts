@@ -51,7 +51,7 @@ const unreadableAll = new Map([...extracts].map(([id, v]) => {
 }));
 
 const chartNotes = (report: BuiltReport): string[] => {
-  const rows = withWholeNotes(report, scorecard(report.teamFindings, report.input.scores ?? [], areasOf(report.input.run, report.teamFindings)));
+  const rows = withWholeNotes(report, scorecard(report.teamFindings, report.input.scores ?? [], areasOf(report.input.run, report.teamFindings)), undefined);
   const chart = scorecardChart(rows, scorecardOptions(report));
   assert.equal(chart.kind, "chart");
   const texts = chart.kind === "chart" ? [...chart.svg.matchAll(/<text[^>]*>([^<]*)<\/text>/g)].map((m) => m[1]!.replace(/&#39;|&apos;/g, "'")) : [];
@@ -65,7 +65,7 @@ describe("the scorecard chart with the areas' own reasons (DECISIONS.md 769)", (
   const reportOff = buildReport(off.input);
 
   test("on: every unscored area's note is a whole sentence it was given, none cut", () => {
-    const rows = withWholeNotes(reportOn, scorecard(reportOn.teamFindings, reportOn.input.scores ?? [], areasOf(reportOn.input.run, reportOn.teamFindings)));
+    const rows = withWholeNotes(reportOn, scorecard(reportOn.teamFindings, reportOn.input.scores ?? [], areasOf(reportOn.input.run, reportOn.teamFindings)), on.pseudonyms);
     const chart = scorecardChart(rows, scorecardOptions(reportOn));
     const svg = chart.kind === "chart" ? chart.svg : "";
     assert.ok(!svg.includes("…"), "nothing cut");
@@ -76,7 +76,7 @@ describe("the scorecard chart with the areas' own reasons (DECISIONS.md 769)", (
 
   test("off: the rows and the chart are as they were", () => {
     const rows = scorecard(reportOff.teamFindings, reportOff.input.scores ?? [], areasOf(reportOff.input.run, reportOff.teamFindings));
-    assert.equal(withWholeNotes(reportOff, rows), rows);
+    assert.equal(withWholeNotes(reportOff, rows, off.pseudonyms), rows);
     assert.ok(chartNotes(reportOff).length > 0);
   });
 

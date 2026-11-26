@@ -105,16 +105,25 @@ export function areaReasonParts(domain: string, findings: Finding[], today: stri
     }
   });
   if (tally.size === 0) return null;
-  const ranked = [...tally].sort(([a, x], [b, y]) => Number(editionIsWhy(b)) - Number(editionIsWhy(a)) || y.checks - x.checks || x.first - y.first);
-  const [lead, held] = ranked[0]!;
-  const first: AreaReasonPart = { text: lead, findingIds: held.findingIds };
-  if (today === TOO_LITTLE) return held.checks * 2 > open.length ? [{ text: TOO_LITTLE, findingIds: [] }, first] : null;
+  const byChecks = ([a, x]: [string, { checks: number; first: number }], [b, y]: [string, { checks: number; first: number }]) => y.checks - x.checks || x.first - y.first;
+  const part = ([text, held]: [string, { findingIds: string[] }]): AreaReasonPart => ({ text, findingIds: held.findingIds });
+  // Some checks measured: the reason more than half the unmeasured checks give, by count alone, so an edition's
+  // reason one check gives never hides the one most give (review of 769). One the edition gave leads only when it is that.
+  if (today === TOO_LITTLE) {
+    const most = [...tally].sort(byChecks)[0]!;
+    return most[1].checks * 2 > open.length ? [{ text: TOO_LITTLE, findingIds: [] }, part(most)] : null;
+  }
+  // Nothing measured: the edition's reason first (710), then by count.
+  const ranked = [...tally].sort((x, y) => Number(editionIsWhy(y[0])) - Number(editionIsWhy(x[0])) || byChecks(x, y));
+  const [lead] = ranked[0]!;
+  const first = part(ranked[0]!);
   if (ranked.length === 1) return [first];
-  const [other, second] = ranked[1]!;
-  if (ranked.length === 2 && lead.length <= SHORT_REASON && other.length <= SHORT_REASON) return [first, { text: other, findingIds: second.findingIds }];
-  // The checks that don't give the first reason, for one sentence or the other: never a count, which the number check would have to trace.
+  if (ranked.length === 2 && lead.length <= SHORT_REASON && ranked[1]![0].length <= SHORT_REASON) return [first, part(ranked[1]!)];
+  // The other checks, counted as checks, not readings: one check can give several reasons. With none, the first reason
+  // alone; never a count, which the number check would have to trace.
   const rest = open.filter((group) => !group.some((f) => f.notMeasurableReason === lead)).length;
-  return [first, { text: rest === 1 ? "We couldn't measure another check in this area either, and it gives its own reason." : "We couldn't measure other checks in this area either, and each gives its own reason.", findingIds: [] }];
+  if (rest === 0) return [first];
+  return [first, { text: rest === 1 ? "We couldn't measure another check in this area either, and it gives its own reason." : "We couldn't measure other checks in this area either, and they give their own reasons.", findingIds: [] }];
 }
 
 /** The reason an area gave before 769 and the parts its own checks' reasons now make, or null for a reason not made so (DECISIONS.md 769). */
