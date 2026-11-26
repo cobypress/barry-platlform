@@ -113,7 +113,7 @@ function untrackedReason(data: Ready): Said | null {
     ? said`We couldn't measure first responses: we found no recorded change to Lead Status on any of the ${data.statusHistory.converted} leads converted in the window. Either Salesforce isn't keeping a history of that field, or we can't see it. A lead answered only by a change of status would look unanswered. Check that field history tracking is on for Lead Status and that the connected user can see the field. Later runs will measure from the day it's kept.`
     : null;
 }
-const historyExclusions = (data: Ready): string[] => (data.statusHistory.kind === "from" ? [said`Leads created before ${daySaid(data.statusHistory.day)}, the earliest lead status change we found`] : []);
+const historyExclusions = (data: Ready): string[] => (data.statusHistory.kind === "from" ? [said`Leads created before ${daySaid(data.statusHistory.day)}, the day of the earliest lead status change we found`] : []);
 /** A thin sample's reason, saying why when the changes found start late: a count alone wouldn't say the history cut it. */
 const thinReason = (data: Ready, n: number, minSample: number, what: "response" | "leads"): Said =>
   data.statusHistory.kind === "from"

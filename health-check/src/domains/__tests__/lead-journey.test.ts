@@ -150,7 +150,7 @@ describe("leads that became won deals (L2's measure)", () => {
     assert.equal(m.stats.lagDays, 30);
     assert.deepEqual(m.dateRange, { from: "2024-10-31", to: "2026-10-01" });
     assert.ok(m.assumptions.includes("Leads made between 31 October 2024 and 1 October 2026 are counted. The period ends 30 days before the run, our minimum, so recent leads have time to close"), m.assumptions.join(" | "));
-    assert.ok(m.exclusions.includes("1 lead created after 1 October 2026, too recent to have had the 30 days we allow at the least for a lead to become a closed deal"), m.exclusions.join(" | "));
+    assert.ok(m.exclusions.includes("1 lead created after 1 October 2026, too recent to have had 30 days, the least time we allow for a lead to become a closed deal"), m.exclusions.join(" | "));
     assert.ok(!JSON.stringify(m).includes("9 in 10"));
   });
 
@@ -455,7 +455,7 @@ describe("Lead Status history not kept (audit risk 10)", () => {
     assert.ok(judged(true) < judged(false));
     const off = analyseExtracts(withJourney(extracts, records)).findings.find((x) => x.ruleId === "lead.no-first-response")!;
     assert.equal(off.evidence[0]!.count, judged(false));
-    assert.ok(f.evidence[0]!.exclusions.includes(`Leads created before ${Number(start.slice(8))} January 2026, the earliest lead status change we found`), f.evidence[0]!.exclusions.join(" | "));
+    assert.ok(f.evidence[0]!.exclusions.includes(`Leads created before ${Number(start.slice(8))} January 2026, the day of the earliest lead status change we found`), f.evidence[0]!.exclusions.join(" | "));
     // Every lead after the start has its change, so none is unanswered; before, the leads made earlier looked unanswered.
     assert.equal(f.facts.hits, 0);
     assert.ok(off.facts.hits! > 0);

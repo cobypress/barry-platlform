@@ -119,7 +119,7 @@ export function journeyOf(ctx: Ctx): Cohort {
     ...data.exclusions,
     ...(recent
       ? [floored
-          ? said`${plural(recent, "lead")} created after ${daySaid(to)}, too recent to have had the ${lagDays} days we allow at the least for a lead to become a closed deal`
+          ? said`${plural(recent, "lead")} created after ${daySaid(to)}, too recent to have had ${lagDays} days, the least time we allow for a lead to become a closed deal`
           : said`${plural(recent, "lead")} created after ${daySaid(to)}, too recent to have had the ${lagDays} days that 9 in 10 of the leads that became closed deals took`]
       : []),
     ...(left ? [said`${plural(left, "lead")} converted into a deal we couldn't follow: not read, at a stage with no meaning, or closed before the lead was made`] : []),
@@ -191,7 +191,7 @@ export function journeyMetrics(ctx: Ctx): Metric[] {
   const converted = c.leads.filter((l) => l.lead.IsConverted).length;
   const closed = c.deals.filter((d) => !d.open);
   const stats = { converted, conversionRate: pct(converted, c.leads.length), closedDeals: closed.length, wonDeals: won.length, winRate: pct(won.length, closed.length), openDeals: c.deals.length - closed.length, lagDays: c.lagDays };
-  metrics.push({ ...definitions.won, ...rest, assumptions: [...assumptions, said`Quarters are calendar quarters, by the day each lead was made. The last ends with the period, and its leads have had the least time to close, so it can read a little low`], evidence, status: "measured", value: rate(c.leads), n: c.leads.length, segments, series, stats });
+  metrics.push({ ...definitions.won, ...rest, assumptions: [...assumptions, said`Quarters are calendar quarters, by the day each lead was made. The last quarter ends with the period, and its leads have had the least time to close, so it can read a little low`], evidence, status: "measured", value: rate(c.leads), n: c.leads.length, segments, series, stats });
   return metrics;
 }
 
