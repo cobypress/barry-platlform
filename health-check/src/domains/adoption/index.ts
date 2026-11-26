@@ -9,7 +9,7 @@ import { notSized, pct, plural, type Rule, type RuleContext, type RuleResult } f
 import type { Evidence, Metric, MetricSegment, SeriesPoint } from "../../schemas/index.ts";
 import { opportunitiesGate } from "../gate.ts";
 import type { DomainModule } from "../types.ts";
-import { joinSaid, org, said, type Said } from "../../engine/org-words.ts";
+import { joinSaid, org, said, type Said, word } from "../../engine/org-words.ts";
 
 // Roadmap 3.2: whether people use Salesforce, and how. Everything here is read
 // from set-up (users, login history, report definitions), never from CRM
@@ -290,7 +290,7 @@ export function adoptionMetrics(ctx: Ctx): Metric[] {
 
 // ─── Rules ───────────────────────────────────────────────────────────────────
 
-const RISK = "We don't put a figure on it. The seats of people who've stopped logging in are already counted as licence waste, so a figure here would count them twice.";
+const RISK = said`We don't put a figure on it. The seats of people who've stopped logging in are already counted as licence waste, so a figure here would count them ${word("twice")}.`;
 
 const fallingAdoption: Rule = {
   id: "adp.falling-adoption",

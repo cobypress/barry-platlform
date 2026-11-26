@@ -1,5 +1,5 @@
 import { opportunitiesExtractor, stagesExtractor, type HistoryRow, type OpportunityRow, type StageRow } from "../../extract/opportunities.ts";
-import { named } from "../../engine/named.ts";
+import { named, named as valued } from "../../engine/named.ts";
 import { usersExtractor } from "../../extract/users.ts";
 import type { RuleContext } from "../../engine/rule.ts";
 import { localDay, zoneOf } from "../time-zone.ts";
@@ -90,8 +90,9 @@ export function inferredMeanings(calibration: Calibration, flags: StageRow[] | n
 export function inferredStagesNote(inferred: Array<{ stage: string; category: StageCategory }>, fromOrgSettings = false): Said {
   const items = inferred.map((s) => said`${org(s.stage)} as ${s.category}`);
   // An automatic run's calibration was agreed with nobody (DECISIONS.md 693): no consultant is to come back to it.
-  if (fromOrgSettings) return said`You haven't told us yet what ${inferred.length === 1 ? "one stage means" : "some stages mean"}, so we used Salesforce's own setting for ${inferred.length === 1 ? "it" : "each"}: ${andList(items)}.`;
-  return said`We haven't yet agreed with you what ${inferred.length === 1 ? "one stage means" : "some stages mean"}, so we used Salesforce's own setting for ${inferred.length === 1 ? "it" : "each"}: ${andList(items)}.`;
+  // "one stage" is said only of one: the count is named (DECISIONS.md 773).
+  if (fromOrgSettings) return named(said`You haven't told us yet what ${inferred.length === 1 ? "one stage means" : "some stages mean"}, so we used Salesforce's own setting for ${inferred.length === 1 ? "it" : "each"}: ${andList(items)}.`, { stages: inferred.length });
+  return named(said`We haven't yet agreed with you what ${inferred.length === 1 ? "one stage means" : "some stages mean"}, so we used Salesforce's own setting for ${inferred.length === 1 ? "it" : "each"}: ${andList(items)}.`, { stages: inferred.length });
 }
 
 /**
@@ -102,7 +103,7 @@ export function inferredStagesNote(inferred: Array<{ stage: string; category: St
 export function namedStagesNote(named: Array<{ stage: string; category: StageCategory }>): Said {
   const items = named.map((s) => (s.category === "lost" ? said`${org(s.stage)} as lost` : said`${org(s.stage)} as no decision`));
   return named.length === 1
-    ? said`We've assumed what one stage means from its name, and you can tell us if it's wrong: ${andList(items)}.`
+    ? valued(said`We've assumed what one stage means from its name, and you can tell us if it's wrong: ${andList(items)}.`, { stages: named.length })
     : said`We've assumed what some stages mean from their names, and you can tell us if any is wrong: ${andList(items)}.`;
 }
 
@@ -114,7 +115,7 @@ export function namedStagesNote(named: Array<{ stage: string; category: StageCat
 export function modelStagesNote(read: Array<{ stage: string; category: StageCategory }>): Said {
   const items = read.map((s) => (s.category === "lost" ? said`${org(s.stage)} as lost` : said`${org(s.stage)} as no decision`));
   return read.length === 1
-    ? said`We've used AI to read what one stage means from its name, and you can tell us if it's wrong: ${andList(items)}.`
+    ? named(said`We've used AI to read what one stage means from its name, and you can tell us if it's wrong: ${andList(items)}.`, { stages: read.length })
     : said`We've used AI to read what some stages mean from their names, and you can tell us if any is wrong: ${andList(items)}.`;
 }
 

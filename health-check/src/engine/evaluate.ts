@@ -490,9 +490,14 @@ function analyseWithin(input: AnalysisInput): AnalysisOutput {
     },
     leanOn: (metricId) => {
       for (const note of leanedOn.get(metricId) ?? []) assumed.add(note);
+      // Its notes were made, and named, while the metric's builder ran: the rule may take their values (DECISIONS.md 773).
+      const builder = builtBy.get(metricId);
+      if (builder) leanedBuilders.add(builder);
     },
   };
   const leanedOn = new Map<string, string[]>();
+  // The builders whose notes the rule running now leaned on (leanOn).
+  let leanedBuilders = new Set<string>();
   // Notes said on named metrics of the builder running now (DECISIONS.md 756).
   let onMetric = new Map<string, string[]>();
   let inBuilder = false;
@@ -558,13 +563,14 @@ function analyseWithin(input: AnalysisInput): AnalysisOutput {
       currencyRead = false;
       noted = new Set();
       inRule = true;
+      leanedBuilders = new Set();
       const made = namedFor(`rule:${rule.id}`, () => runRule(rule, ctx, pseudonyms, records, assumed, () => (mode === "none" && currencyRead ? (r) => withoutCurrency(r, noCurrency()) : null), noted));
       // And each finding's, from its own texts as made, before any is reworded (DECISIONS.md 768).
       for (const f of made) {
         const texts = [f.title, f.summary, f.recommendation, f.notMeasurableReason, ...(f.value.kind === "not_sized" ? [f.value.reason] : [f.value.period, ...f.value.assumptions])];
-        const values = namedIn(texts, `rule:${rule.id}`);
+        const values = namedIn(texts, [`rule:${rule.id}`, ...leanedBuilders]);
         if (values) namedValues[f.id] = values;
-        const words = notFiguresIn(texts, `rule:${rule.id}`);
+        const words = notFiguresIn(texts, [`rule:${rule.id}`, ...leanedBuilders]);
         if (words) notFigures[f.id] = words;
       }
       findings.push(...made);

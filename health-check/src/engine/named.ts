@@ -88,12 +88,13 @@ export function notFigures(text: string, spans: Array<{ start: number; end: numb
 }
 
 /** The sentences these texts hold whole that carry word() pieces, made while `by` ran or at a module's load. */
-export function notFiguresIn(texts: ReadonlyArray<string | null | undefined>, by: string): Array<{ sentence: string; spans: Array<{ start: number; end: number }> }> | null {
+export function notFiguresIn(texts: ReadonlyArray<string | null | undefined>, by: string | readonly string[]): Array<{ sentence: string; spans: Array<{ start: number; end: number }> }> | null {
+  const owners = new Set(typeof by === "string" ? [by] : by);
   if (!words) return null;
   const own = texts.filter((t): t is string => typeof t === "string" && t.trim() !== "");
   const out = new Map<string, Array<{ start: number; end: number }>>();
   for (const [text, spans] of fixedWords) if (own.some((t) => t.includes(text))) out.set(text, spans);
-  for (const e of words) if (e.owner === by && !out.has(e.text) && own.some((t) => t.includes(e.text))) out.set(e.text, e.spans);
+  for (const e of words) if (e.owner !== null && owners.has(e.owner) && !out.has(e.text) && own.some((t) => t.includes(e.text))) out.set(e.text, e.spans);
   return out.size > 0 ? [...out].map(([sentence, spans]) => ({ sentence, spans })) : null;
 }
 
@@ -133,7 +134,8 @@ function written(text: string): Set<number> {
  * named for another finding never backs this one; and, of a module-level
  * sentence, only the values it writes.
  */
-export function namedIn(texts: ReadonlyArray<string | null | undefined>, by: string): Record<string, number> | null {
+export function namedIn(texts: ReadonlyArray<string | null | undefined>, by: string | readonly string[]): Record<string, number> | null {
+  const owners = new Set(typeof by === "string" ? [by] : by);
   if (!ledger) return null;
   const own = texts.filter((t): t is string => typeof t === "string" && t.trim() !== "");
   const out: Record<string, number> = {};
@@ -152,7 +154,7 @@ export function namedIn(texts: ReadonlyArray<string | null | undefined>, by: str
     add(Object.fromEntries(Object.entries(values).filter(([, v]) => shown.has(v))));
   }
   for (const entry of ledger) {
-    if (entry.owner !== by || seen.has(entry.text) || !own.some((t) => t.includes(entry.text))) continue;
+    if (entry.owner === null || !owners.has(entry.owner) || seen.has(entry.text) || !own.some((t) => t.includes(entry.text))) continue;
     seen.add(entry.text);
     add(entry.values);
   }

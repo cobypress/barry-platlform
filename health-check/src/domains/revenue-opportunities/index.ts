@@ -19,6 +19,8 @@ import { moneySaid } from "../../engine/said-forms.ts";
 // stage with `org`, so the digest can say which words are the org's
 // (DECISIONS.md 655, 657). A reason passed on from an extract stays plain.
 
+/** The deals a dormant account is sized at: "one more deal in it" (DECISIONS.md 773 names it). */
+const DEALS_EACH = 1;
 const DOMAIN = "revenue_opportunities";
 const STALLED_DAYS = 60;
 const WIN_BACK_MIN_MONTHS = 6;
@@ -159,11 +161,11 @@ const dormantAccounts: Rule = {
     const value: Value =
       typical === null
         ? notSized(named(said`${wonAmounts.length} won deals with amounts is below the calibrated minimum of ${ctx.calibration.minSample}, so there's no typical deal to size this from.`, { wonWithAmounts: wonAmounts.length, minSample: ctx.calibration.minSample }))
-        : atOwnWinRate(ctx, typical * dormant.length, {
+        : atOwnWinRate(ctx, typical * dormant.length * DEALS_EACH, {
             multiCurrency: data.multiCurrency,
             period: "one-off, if each account buys once more",
             basis: named(said`${plural(dormant.length, "dormant account")} at your median won deal of ${moneySaid(typicalWon!, ctx.calibration.currency)}`, { medianWonMoney: typicalWon }),
-            caveat: said`Assumes each account has one more deal in it, and buys as often as an average deal wins. Some will have closed or moved on, so treat this as a ceiling`,
+            caveat: named(said`Assumes each account has one more deal in it, and buys as often as an average deal wins. Some will have closed or moved on, so treat this as a ceiling`, { dealsEach: DEALS_EACH }),
           });
     const stranded = dormant.filter((a) => inactive.has(a.OwnerId)).length;
     return {

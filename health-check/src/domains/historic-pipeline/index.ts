@@ -11,7 +11,7 @@ import { deepDiveMetrics } from "./deep-dive.ts";
 import { PROCESS_RULES, processMetrics } from "./process.ts";
 import { driverMetrics } from "./drivers.ts";
 import { priorWinsExtractor } from "../../extract/prior-wins.ts";
-import { eng, joinSaid, org, said, type Said } from "../../engine/org-words.ts";
+import { eng, joinSaid, org, said, type Said, word } from "../../engine/org-words.ts";
 import { andList, moneySaid } from "../../engine/said-forms.ts";
 import { dimensionWords } from "./process.ts";
 import { pathMetrics } from "./paths/variants.ts";
@@ -48,7 +48,7 @@ const unmappedStages: Rule = {
     if (missing.length > 0 && ctx.calibration.source === "org_settings") {
       return {
         outcome: "not_measurable",
-        reason: said`You haven't told us what these stages mean, so we read them from your Salesforce stage settings: ${stageList(missing)}. Where a deal is in one, we've used Salesforce's own setting for whether it's open, won or lost, and said so. If you tell us what each means, your next health check can use it.`,
+        reason: said`You haven't told us what these stages mean, so we read them from your Salesforce stage settings: ${stageList(missing)}. Where a deal is in ${word("one")}, we've used Salesforce's own setting for whether it's open, won or lost, and said so. If you tell us what each means, your next health check can use it.`,
         evidence,
       };
     }

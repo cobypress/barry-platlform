@@ -26,7 +26,9 @@ const TOP_SHARE = 10;
 const MULTI_CURRENCY = "The org is multi-currency, and amounts can't be added until historic rates are supplied.";
 
 const thinReason = (n: number, noun: "closed deals with stage history" | "won deals" | "lost and no decision deals with stage history" | "won deals with stage history", minSample: number): Said => named(said`${n} ${noun} is below the calibrated minimum of ${minSample}.`, { n, minSample });
-const amountOf = (d: Deal): number => d.Amount ?? 0;
+/** What a deal with no amount counts as: "count as zero" says it, and is named with it (DECISIONS.md 773). */
+const NO_AMOUNT = 0;
+const amountOf = (d: Deal): number => d.Amount ?? NO_AMOUNT;
 const total = (deals: Deal[]): number => Math.round(deals.reduce((sum, d) => sum + amountOf(d), 0));
 const tooManyBlank = (deals: Deal[]): boolean => pct(deals.filter((d) => d.Amount === null).length, deals.length) > MAX_MISSING_AMOUNT_PCT;
 const wonIn = (ctx: Ctx, data: Ready): Deal[] => data.deals.filter((d) => d.category === "won" && closedInWindow(d, ctx.window));
@@ -173,7 +175,7 @@ function winSources(ctx: Ctx, data: Ready): Metric[] {
   if (won.length < minSample) return every.map((d) => notMeasurable(d, thinReason(won.length, "won deals", minSample)));
   const blank = won.filter((d) => d.Amount === null).length;
   if (tooManyBlank(won)) return every.map((d) => notMeasurable(d, named(said`${blank} of ${won.length} won deals have no amount, so shares of won value would mislead.`, { blank, won: won.length })));
-  const blankNote = blank > 0 ? [named(said`${blank} won deals with no amount count as zero`, { blank })] : [];
+  const blankNote = blank > 0 ? [named(said`${blank} won deals with no amount count as zero`, { blank, countedAs: NO_AMOUNT })] : [];
   const withAccount = won.filter((d) => d.AccountId);
   const noAccount = won.length - withAccount.length;
   const accountExclusions = noAccount > 0 ? [`${noAccount} won deals with no account`] : [];
@@ -267,7 +269,7 @@ function lostFrom(ctx: Ctx, data: Ready): Metric[] {
   else if (tooManyBlank(lost)) metrics.push(notMeasurable({ ...valueDefinition, exclusions }, named(said`${lost.filter((d) => d.Amount === null).length} of ${lost.length} lost deals have no amount, so the value lost would mislead.`, { lost: lost.length })));
   else {
     const blank = lost.filter((d) => d.Amount === null).length;
-    metrics.push(measured({ ...valueDefinition, exclusions, assumptions: [...valueDefinition.assumptions, ...(blank ? [named(said`${blank} lost deals with no amount count as zero`, { blank })] : [])] }, { value: total(lost), n: lost.length, dateRange: ctx.window, segments: byStage.map(([key, group]) => ({ dimension: "stage left", key, n: group.length, value: total(group), notMeasurableReason: null })) }));
+    metrics.push(measured({ ...valueDefinition, exclusions, assumptions: [...valueDefinition.assumptions, ...(blank ? [named(said`${blank} lost deals with no amount count as zero`, { blank, countedAs: NO_AMOUNT })] : [])] }, { value: total(lost), n: lost.length, dateRange: ctx.window, segments: byStage.map(([key, group]) => ({ dimension: "stage left", key, n: group.length, value: total(group), notMeasurableReason: null })) }));
   }
   return metrics;
 }

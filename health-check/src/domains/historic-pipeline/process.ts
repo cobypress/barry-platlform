@@ -308,7 +308,7 @@ const deadEndStage: Rule = {
     const wait = round1(median(dying.map(waitOf)));
     const result = segmentRate(dying, (d) => waitOf(d) > line, dimensions(ctx), { segmentLimit: 50, minSegment: minSample });
     const checked = [...segments, ...result.segmentsChecked];
-    if (wait <= line) return { outcome: "pass", summary: named(said`More lost deals leave from ${org(stage)} than from any other stage (${dying.length} of ${lost.length}, ${share}%), but after a median of ${wait} days there, no longer than three quarters of won deals took (${line} days).`, { dying: dying.length, lost: lost.length, share: [share, "percent"], wait: [wait, "day"], line: [line, "day"] }), evidence: data.evidence, segmentsChecked: checked, facts: { share, wait, line } };
+    if (wait <= line) return { outcome: "pass", summary: named(said`More lost deals leave from ${org(stage)} than from any other stage (${dying.length} of ${lost.length}, ${share}%), but after a median of ${wait} days there, no longer than three quarters of won deals took (${line} days).`, { wonWithinPct: WAIT_PCT, dying: dying.length, lost: lost.length, share: [share, "percent"], wait: [wait, "day"], line: [line, "day"] }), evidence: data.evidence, segmentsChecked: checked, facts: { share, wait, line } };
     return {
       outcome: "issue",
       title: said`Lost deals wait in ${org(stage)} before they're closed`,

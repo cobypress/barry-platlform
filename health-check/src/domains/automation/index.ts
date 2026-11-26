@@ -10,7 +10,7 @@ import { labelsExtractor } from "../../extract/labels.ts";
 import type { DomainModule } from "../types.ts";
 import { objectResolver } from "../object-names.ts";
 import { WHERE } from "../where.ts";
-import { eng, joinSaid, org, said } from "../../engine/org-words.ts";
+import { eng, joinSaid, org, said, word } from "../../engine/org-words.ts";
 
 // Apex coverage, API versions and trigger counts moved to technical health
 // (DECISIONS.md 169). This area keeps how the automation is built.
@@ -174,7 +174,7 @@ const hardcodedIds: Rule = {
       severity: "high",
       confidence: "high",
       evidence,
-      value: notSized(said`The cost is a future outage rather than a present one.`),
+      value: notSized(said`The cost is a future outage rather than a present ${word("one")}.`),
       effort: { size: "S" },
       owner: "Salesforce admin",
       segmentsChecked: segments,

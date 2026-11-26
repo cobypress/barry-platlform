@@ -18,7 +18,7 @@ import { loadPipeline, unsplitLostReason, type Deal } from "../historic-pipeline
 import { potentialRevenue, SITUATIONS, type Situation } from "../historic-pipeline/potential.ts";
 import type { Value } from "../../schemas/index.ts";
 import type { DomainModule } from "../types.ts";
-import { joinSaid, org, said, type Said } from "../../engine/org-words.ts";
+import { joinSaid, org, said, type Said, word } from "../../engine/org-words.ts";
 import { andList, grouped } from "../../engine/said-forms.ts";
 
 // Every title, summary, recommendation and reason of its own is written with
@@ -190,7 +190,7 @@ const missingAmount = dealRule({
   isHit: (d) => d.Amount === null || d.Amount === 0,
   issueTitle: said`Open deals are missing an amount`,
   sentence: (hits, n, rate) =>
-    named(said`Open deals with no amount: ${hits} of ${n} (${rate}%). These deals count for nothing in your pipeline value, so it looks smaller than it is, and you can't see what work is coming or weigh one deal against another. When enough are blank, nobody can tell how much of the pipeline rests on a few accounts or people.`, { hits, n, rate: [rate, "percent"] }),
+    named(said`Open deals with no amount: ${hits} of ${n} (${rate}%). These deals count for nothing in your pipeline value, so it looks smaller than it is, and you can't see what work is coming or weigh ${word("one")} deal against another. When enough are blank, nobody can tell how much of the pipeline rests on a few accounts or people.`, { hits, n, rate: [rate, "percent"] }),
   recommendation: said`Require an amount, even an estimate, once a price is known, and fill in the gaps.`,
   effort: "S",
   owner: "Sales operations",

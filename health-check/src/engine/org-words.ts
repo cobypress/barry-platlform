@@ -26,9 +26,8 @@ const ORG = Symbol("org words");
 /** A value the org chose, wrapped for `said`. */
 export type OrgWords = { readonly [ORG]: string };
 
-const WORD = Symbol("not a figure");
-/** A word of ours that reads as a number but claims none, wrapped for `said` (DECISIONS.md 773). */
-export type NotAFigure = { readonly [WORD]: string };
+/** The words word() made, each its own String object, so said tells them from any other text. */
+const WORDS = new WeakSet<object>();
 
 /**
  * A number word of ours that is no claim: "we don't impute one", "count them
@@ -37,7 +36,12 @@ export type NotAFigure = { readonly [WORD]: string };
  * Nothing else reads it: the reader and every served check see the word as before.
  * A lint test refuses it around a digit or anything but one literal.
  */
-export const word = (text: string): NotAFigure => ({ [WORD]: text });
+export function word(text: string): Said {
+  // Typed as ours, a Said, as eng() is: what said may take; at run time a String said can tell apart.
+  const w = new String(text);
+  WORDS.add(w);
+  return w as unknown as Said;
+}
 
 /** Marks a value the org chose: a label, an API name, a stage, a picklist value. */
 export const org = (text: string): OrgWords => ({ [ORG]: text });
@@ -67,7 +71,7 @@ const PASSED = Symbol("passed on");
 export type PassedOn = { readonly [PASSED]: { text: string; spans: OrgSpan[] | null; passed: OrgSpan[] } };
 
 /** What `said` takes: a number, org words, a reason passed on, a sentence already made, or a literal. Never `any`. */
-type Piece<T> = 0 extends 1 & T ? never : T extends number | OrgWords | PassedOn | Said | NotAFigure ? T : Literal<T>;
+type Piece<T> = 0 extends 1 & T ? never : T extends number | OrgWords | PassedOn | Said ? T : Literal<T>;
 
 /**
  * One analysis's sentences and their spans. A text made twice with different
@@ -216,7 +220,11 @@ function piecesOf(strings: readonly string[], pieces: readonly unknown[], senten
   let known = true;
   pieces.forEach((piece, i) => {
     const at = text.length;
-    if (piece !== null && typeof piece === "object" && PASSED in piece) {
+    if (piece instanceof String && WORDS.has(piece)) {
+      // Our own word, and no figure: no span of the org's, only where it sits (DECISIONS.md 773).
+      text += piece.valueOf();
+      words.push({ start: at, end: text.length });
+    } else if (piece !== null && typeof piece === "object" && PASSED in piece) {
       // A reason passed on: its own spans, or unknown; and where it sits, for the org-value guard.
       const { text: reason, spans: own, passed: inner } = (piece as PassedOn)[PASSED];
       text += reason;
@@ -225,10 +233,6 @@ function piecesOf(strings: readonly string[], pieces: readonly unknown[], senten
       passed.push({ start: at, end: text.length });
       // A reason passed on twice keeps where the first one sits, so it too is held to the org's values.
       for (const r of inner) passed.push({ start: at + r.start, end: at + r.end });
-    } else if (piece !== null && typeof piece === "object" && WORD in piece) {
-      // Our own word, and no figure: no span of the org's, only where it sits (DECISIONS.md 773).
-      text += (piece as NotAFigure)[WORD];
-      words.push({ start: at, end: text.length });
     } else if (piece !== null && typeof piece === "object" && ORG in piece) {
       const words = (piece as OrgWords)[ORG];
       text += words;

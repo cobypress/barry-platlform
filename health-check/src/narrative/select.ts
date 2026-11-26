@@ -50,6 +50,15 @@ const WORST_REP = new RegExp(`Worst by rep: ${USER}, at`, "g");
 const REP_OR_USER = new RegExp(String.raw`\b[Rr]ep ${USER}|${USER}`, "g");
 
 /**
+ * A rep's or user's token stands for one person: where the team-level rewrite
+ * writes "one rep" or "one person" for the first it replaces, this is the value
+ * that "one" says (DECISIONS.md 773). The rewrite's own count, for the strict check.
+ */
+export const ONE_PERSON = 1;
+/** How many people's tokens the team-level rewrite replaces in a text. */
+export const peopleRewritten = (text: string): number => [...text.matchAll(REP_OR_USER)].length;
+
+/**
  * Executive reports stay at team level (see QUESTIONS.md, question 7). A token
  * would become a name at render, so it's replaced with a description before then.
  */

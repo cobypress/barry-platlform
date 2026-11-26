@@ -5,6 +5,7 @@ import { countOf } from "../fix/hours.ts";
 import { FIX_TABLE } from "../fix/table.ts";
 import { assembleMarked } from "../fix/prompt.ts";
 import { PROSE_SOURCES, type BuiltReport } from "../narrative/sections.ts";
+import { ONE_PERSON, peopleRewritten } from "../narrative/select.ts";
 import { MONEY_FACTS } from "../value/model.ts";
 import type { Finding, Metric } from "../schemas/index.ts";
 import type { RunDigest } from "../schemas/digest.ts";
@@ -201,8 +202,12 @@ export function strictDataset(report: BuiltReport, set: FigureSet, named: NamedV
   const free = orgFree(set);
   const extra: DatasetFigure[] = [];
   const currency = report.input.calibration.currency;
+  const asRead = new Map(report.input.findings.map((f) => [f.id, f]));
   for (const f of findings) {
     extra.push(...hoursFigures(f));
+    // "one rep", "one person": the team-level rewrite's count for the first person it replaced (DECISIONS.md 773).
+    const read = asRead.get(f.id);
+    if (read && [read.title, read.summary, read.recommendation].some((t) => peopleRewritten(t) > 0)) extra.push({ source: f.id, kind: "number", value: ONE_PERSON });
     // A target's money facts are money (DECISIONS.md 369), as the documents' set holds them.
     for (const name of MONEY_FACTS[f.ruleId] ?? []) {
       const amount = f.facts[name];
