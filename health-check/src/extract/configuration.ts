@@ -77,13 +77,16 @@ export type ObjectFieldUsage = { object: string; fields: FieldUsage[]; notScanne
 const USAGE_CHUNK = 50;
 const usageTypes = (f: FieldSummary): boolean => f.aggregatable && !f.calculated && f.type !== "boolean";
 
+/** The months a field's recent fill rate covers: "records from the last 12 months" (DECISIONS.md 772 names it). */
+export const FIELD_RECENT_MONTHS = 12;
+
 export const fieldUsageExtractor: Extractor<Record<string, Sourced<ObjectFieldUsage>>> = {
   id: "field-usage",
   version: 1,
   // Counts how many records fill each field.
   records: true,
   async run(ctx) {
-    const recentFrom = monthsBefore(ctx.now, 12);
+    const recentFrom = monthsBefore(ctx.now, FIELD_RECENT_MONTHS);
     const schema = ctx.get(schemaExtractor);
     const out: Record<string, Sourced<ObjectFieldUsage>> = {};
     for (const object of CORE_OBJECTS) {

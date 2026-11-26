@@ -69,13 +69,13 @@ const conversionBySource: Rule = {
     const leads = settled(ctx, data);
     const { minSample } = ctx.calibration;
     const evidence = [{ ...data.evidence[0]!, count: leads.length, exclusions: [...data.exclusions, `Leads created in the last ${CONVERSION_AGE_DAYS} days, which haven't had time to convert`] }];
-    if (leads.length < minSample) return { outcome: "not_measurable", reason: said`${leads.length} leads old enough to judge is below the calibrated minimum of ${minSample}.`, evidence };
+    if (leads.length < minSample) return { outcome: "not_measurable", reason: named(said`${leads.length} leads old enough to judge is below the calibrated minimum of ${minSample}.`, { leads: leads.length, minSample }), evidence };
     const rate = (group: Lead[]): number => pct(group.filter((l) => l.IsConverted).length, group.length);
     const overall = rate(leads);
     const sources = groupsOf(leads, (l) => l.source);
     const low = sources.filter(([, group]) => group.length >= minSample && rate(group) < overall * CONVERSION_FLOOR).sort(([a, x], [b, y]) => rate(x) - rate(y) || a.localeCompare(b));
     const segments = [{ dimension: "source", segments: sources.length }];
-    if (low.length === 0) return { outcome: "pass", summary: said`${overall}% of leads convert, and no source with ${minSample} or more leads is under half of that.`, evidence, segmentsChecked: segments, facts: { overall } };
+    if (low.length === 0) return { outcome: "pass", summary: named(said`${overall}% of leads convert, and no source with ${minSample} or more leads is under half of that.`, { overall: [overall, "percent"], minSample }), evidence, segmentsChecked: segments, facts: { overall } };
     const [name, group] = low[0]!;
     return {
       outcome: "issue",
@@ -121,11 +121,11 @@ const thinReason = (data: Ready, n: number, minSample: number, what: "response" 
 const thinSaid = (data: Ready, n: number, minSample: number, what: "response" | "leads"): Said =>
   data.statusHistory.kind === "from"
     ? what === "response"
-      ? said`${n} leads with a response is below the calibrated minimum of ${minSample}. The earliest lead status change we found is on ${daySaid(data.statusHistory.day)}, so leads made before then are left out.`
-      : said`${n} leads is below the calibrated minimum of ${minSample}. The earliest lead status change we found is on ${daySaid(data.statusHistory.day)}, so leads made before then are left out.`
+      ? named(said`${n} leads with a response is below the calibrated minimum of ${minSample}. The earliest lead status change we found is on ${daySaid(data.statusHistory.day)}, so leads made before then are left out.`, { n, minSample })
+      : named(said`${n} leads is below the calibrated minimum of ${minSample}. The earliest lead status change we found is on ${daySaid(data.statusHistory.day)}, so leads made before then are left out.`, { n, minSample })
     : what === "response"
-      ? said`${n} leads with a response is below the calibrated minimum of ${minSample}.`
-      : said`${n} leads is below the calibrated minimum of ${minSample}.`;
+      ? named(said`${n} leads with a response is below the calibrated minimum of ${minSample}.`, { n, minSample })
+      : named(said`${n} leads is below the calibrated minimum of ${minSample}.`, { n, minSample });
 
 const responseTimeRule = (journey: boolean): Rule => ({
   id: "lead.response-time",
@@ -153,7 +153,7 @@ const responseTimeRule = (journey: boolean): Rule => ({
     ).sort((a, b) => b.hours - a.hours || a.key.localeCompare(b.key));
     const segmentsChecked = Object.entries(dims).map(([dimension, keyOf]) => ({ dimension, segments: new Set(touched.map(keyOf)).size }));
     if (overall <= RESPONSE_TARGET_HOURS && hotspots.length === 0) {
-      return { outcome: "pass", summary: said`The median first response is ${overall} hours, with no segment over ${RESPONSE_SEGMENT_HOURS} hours.`, evidence, segmentsChecked, facts: { medianHours: overall, leads: touched.length } };
+      return { outcome: "pass", summary: named(said`The median first response is ${overall} hours, with no segment over ${RESPONSE_SEGMENT_HOURS} hours.`, { overall: [overall, "hour"], responseSegmentHours: [RESPONSE_SEGMENT_HOURS, "hour"] }), evidence, segmentsChecked, facts: { medianHours: overall, leads: touched.length } };
     }
     const worst = hotspots[0];
     return {
@@ -193,7 +193,7 @@ const noResponseRule = (journey: boolean): Rule => ({
     if (leads.length < ctx.calibration.minSample) return { outcome: "not_measurable", reason: thinReason(data, leads.length, ctx.calibration.minSample, "leads"), evidence };
     const result = segmentRate(leads, (l) => l.firstTouch === null, dimensions(ctx), { segmentLimit: NO_TOUCH_SEGMENT_LIMIT, minSegment: MIN_SEGMENT });
     const facts = { hits: result.hits, n: result.n, rate: result.rate };
-    if (result.rate <= NO_TOUCH_LIMIT && result.hotspots.length === 0) return { outcome: "pass", summary: said`Leads with no logged response: ${result.hits} of ${result.n} (${result.rate}%), with no segment above ${NO_TOUCH_SEGMENT_LIMIT}%.`, evidence, segmentsChecked: result.segmentsChecked, facts };
+    if (result.rate <= NO_TOUCH_LIMIT && result.hotspots.length === 0) return { outcome: "pass", summary: named(said`Leads with no logged response: ${result.hits} of ${result.n} (${result.rate}%), with no segment above ${NO_TOUCH_SEGMENT_LIMIT}%.`, { hits: result.hits, n: result.n, rate: [result.rate, "percent"], noTouchSegmentLimit: [NO_TOUCH_SEGMENT_LIMIT, "percent"] }), evidence, segmentsChecked: result.segmentsChecked, facts };
     const worst = result.hotspots[0];
     return {
       outcome: "issue",
@@ -228,7 +228,7 @@ const convertedWithoutOpportunity: Rule = {
     if (converted.length === 0) return { outcome: "pass", summary: said`No leads were converted in the window.`, evidence, segmentExemptReason: "There are no converted leads to segment." };
     const result = segmentRate(converted, (l) => l.ConvertedOpportunityId === null, dimensions(ctx), { segmentLimit: 40, minSegment: MIN_SEGMENT });
     const facts = { hits: result.hits, n: result.n, rate: result.rate };
-    if (result.rate <= NO_OPPORTUNITY_LIMIT && result.hotspots.length === 0) return { outcome: "pass", summary: said`Converted with no opportunity: ${result.hits} of ${result.n} (${result.rate}%), with no segment above 40%.`, evidence, segmentsChecked: result.segmentsChecked, facts };
+    if (result.rate <= NO_OPPORTUNITY_LIMIT && result.hotspots.length === 0) return { outcome: "pass", summary: named(said`Converted with no opportunity: ${result.hits} of ${result.n} (${result.rate}%), with no segment above 40%.`, { hits: result.hits, n: result.n, rate: [result.rate, "percent"] }), evidence, segmentsChecked: result.segmentsChecked, facts };
     const worst = result.hotspots[0];
     return {
       outcome: "issue",
@@ -277,11 +277,11 @@ const sourceReturn: Rule = {
     const { minSample } = ctx.calibration;
     const big = returns.rows.filter((r) => r.leads >= minSample);
     const evidence = [{ ...data.evidence[0]!, exclusions: [...data.exclusions, "Won deals that didn't come from a converted lead"], note: "Won Amount on the opportunity each lead converted to" }];
-    if (big.length === 0) return { outcome: "not_measurable", reason: said`No source has the calibrated minimum of ${minSample} leads.`, evidence };
+    if (big.length === 0) return { outcome: "not_measurable", reason: named(said`No source has the calibrated minimum of ${minSample} leads.`, { minSample }), evidence };
     const dry = big.filter((r) => r.deals === 0).sort((a, b) => b.leads - a.leads || a.source.localeCompare(b.source));
     const segments = [{ dimension: "source", segments: returns.rows.length }];
     const total = returns.rows.reduce((sum, r) => sum + r.won, 0);
-    if (dry.length === 0) return { outcome: "pass", summary: said`Every source with ${minSample} or more leads has produced at least one win.`, evidence, segmentsChecked: segments, facts: { wonFromLeads: Math.round(total) } };
+    if (dry.length === 0) return { outcome: "pass", summary: named(said`Every source with ${minSample} or more leads has produced at least one win.`, { minSample }), evidence, segmentsChecked: segments, facts: { wonFromLeads: Math.round(total) } };
     const leads = dry.reduce((sum, r) => sum + r.leads, 0);
     return {
       outcome: "issue",
@@ -337,7 +337,7 @@ const campaignReturn: Rule = {
     const under = rows.filter((r) => r.returned < r.cost).sort((a, b) => a.returned / a.cost - b.returned / b.cost || a.type.localeCompare(b.type));
     const spend = rows.reduce((sum, r) => sum + r.cost, 0);
     const segments = [{ dimension: "campaign type", segments: rows.length }];
-    if (under.length === 0) return { outcome: "pass", summary: said`Every campaign type with a recorded cost returned more than it cost, across ${moneySaid(spend, ctx.calibration.currency)} of spend.`, evidence, segmentsChecked: segments, facts: { spend, types: rows.length } };
+    if (under.length === 0) return { outcome: "pass", summary: named(said`Every campaign type with a recorded cost returned more than it cost, across ${moneySaid(spend, ctx.calibration.currency)} of spend.`, { spend: [spend, "money"] }), evidence, segmentsChecked: segments, facts: { spend, types: rows.length } };
     const gap = Math.round(under.reduce((sum, r) => sum + r.cost - r.returned, 0));
     const [cost, returned] = [under.reduce((sum, r) => sum + r.cost, 0), under.reduce((sum, r) => sum + r.returned, 0)];
     return {
@@ -392,7 +392,7 @@ const funnelMetricsOf = (journey: boolean) => (ctx: Ctx): Metric[] => {
     );
   const rate = (group: Lead[]): number => pct(group.filter((l) => l.IsConverted).length, group.length);
   const leads = settled(ctx, data);
-  if (leads.length < minSample) metrics.push({ ...definitions.conversion, evidence, status: "not_measurable", reason: said`${leads.length} leads is below the calibrated minimum of ${minSample}.` });
+  if (leads.length < minSample) metrics.push({ ...definitions.conversion, evidence, status: "not_measurable", reason: named(said`${leads.length} leads is below the calibrated minimum of ${minSample}.`, { leads: leads.length, minSample }) });
   else metrics.push({ ...definitions.conversion, evidence, status: "measured", value: rate(leads), n: leads.length, segments: cuts(leads, rate), ...rest });
 
   const touched = judgeable(ctx, data).filter((l) => l.firstTouch);

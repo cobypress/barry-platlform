@@ -1,4 +1,5 @@
 import { joinSaid, org, said, type Said } from "../../../engine/org-words.ts";
+import { named as valued } from "../../../engine/named.ts";
 import { notSized, pct, plural, type Rule, type RuleContext, type RuleResult } from "../../../engine/rule.ts";
 import { andList } from "../../../engine/said-forms.ts";
 import { PROBABILITY_FIELD, stagesExtractor, type StageRow, type StagesRead } from "../../../extract/opportunities.ts";
@@ -274,7 +275,7 @@ function build(ctx: Ctx, data: PipelineData): Loaded {
   const closedAll = data.deals.filter((d) => (d.category === "won" || d.category === "lost" || d.category === "no_decision") && closedInWindow(d, ctx.window));
   const fromOpen = closedFromOpen(ctx, data);
   if (closedAll.length > 0 && fromOpen.length === 0) {
-    return nm(said`Stage history isn't tracked for these deals: none of the ${closedAll.length} deals that closed in the window has a recorded open stage.`);
+    return nm(valued(said`Stage history isn't tracked for these deals: none of the ${closedAll.length} deals that closed in the window has a recorded open stage.`, { closedAll: closedAll.length }));
   }
   // Every deal with a recorded open stage, open or closed, whenever it closed: each stage picks its own by when they reached it.
   const { deals, beforeHistory, before } = cohortDeals(ctx, data);
@@ -282,8 +283,8 @@ function build(ctx: Ctx, data: PipelineData): Loaded {
   if (closedInIt < minSample) {
     return nm(
       beforeHistory
-        ? said`${closedInIt} closed deals created since your stage history starts is below the calibrated minimum of ${minSample}.`
-        : said`${closedInIt} closed deals with stage history is below the calibrated minimum of ${minSample}.`,
+        ? valued(said`${closedInIt} closed deals created since your stage history starts is below the calibrated minimum of ${minSample}.`, { closedInIt, minSample })
+        : valued(said`${closedInIt} closed deals with stage history is below the calibrated minimum of ${minSample}.`, { closedInIt, minSample }),
     );
   }
   const listed = stagesListed(data, read.data, deals);
@@ -297,8 +298,8 @@ function build(ctx: Ctx, data: PipelineData): Loaded {
     const open = counted.filter((s) => s.probability !== null && s.tooOpen).map((s) => s.stage);
     return nm(
       open.length
-        ? said`No open stage could be tested: too many of the deals that reached ${andList(open.map((s) => said`${org(s)}`))} in their period are still open to say how often they are won, and no other stage had enough deals that reached it and have since closed, with ${MIN_EACH_OUTCOME} won and ${MIN_EACH_OUTCOME} lost.`
-        : said`No open stage could be tested: none with a probability set had enough deals that reached it and have since closed, with ${MIN_EACH_OUTCOME} won and ${MIN_EACH_OUTCOME} lost.`,
+        ? valued(said`No open stage could be tested: too many of the deals that reached ${andList(open.map((s) => said`${org(s)}`))} in their period are still open to say how often they are won, and no other stage had enough deals that reached it and have since closed, with ${MIN_EACH_OUTCOME} won and ${MIN_EACH_OUTCOME} lost.`, { minEachOutcome: MIN_EACH_OUTCOME, minEachOutcome2: MIN_EACH_OUTCOME })
+        : valued(said`No open stage could be tested: none with a probability set had enough deals that reached it and have since closed, with ${MIN_EACH_OUTCOME} won and ${MIN_EACH_OUTCOME} lost.`, { minEachOutcome: MIN_EACH_OUTCOME, minEachOutcome2: MIN_EACH_OUTCOME }),
     );
   }
   // Every stage tested raises the bar for all, as every comparison does for the path insights (703), never below Z_MIN.
@@ -358,9 +359,9 @@ export function probabilityMetrics(ctx: Ctx): Metric[] {
   const { minSample } = ctx.calibration;
   const assumptions = [
     ...HOW,
-    ...stages.filter((s) => s.lagDays !== null && s.to !== null).map((s) => said`${org(s.stage)}: 90% of the closed deals that reached it had closed within ${s.lagDays!} days, so its period ends on ${daySaid(s.to!)}`),
-    ...(beforeHistory ? [said`${beforeHistory} deals created before your stage history starts are left out, since it can't show every stage they were in`] : []),
-    said`A stage is named only when at least ${minSample} of those deals have closed, ${MIN_EACH_OUTCOME} won and ${MIN_EACH_OUTCOME} lost, its probability is ${WIN_GAP} points or more from the won share, and outside the range chance could give it across the ${plural(tested, "stage")} we could test`,
+    ...stages.filter((s) => s.lagDays !== null && s.to !== null).map((s) => valued(said`${org(s.stage)}: 90% of the closed deals that reached it had closed within ${s.lagDays!} days, so its period ends on ${daySaid(s.to!)}`, { lagDays: [s.lagDays!, "day"] })),
+    ...(beforeHistory ? [valued(said`${beforeHistory} deals created before your stage history starts are left out, since it can't show every stage they were in`, { beforeHistory })] : []),
+    valued(said`A stage is named only when at least ${minSample} of those deals have closed, ${MIN_EACH_OUTCOME} won and ${MIN_EACH_OUTCOME} lost, its probability is ${WIN_GAP} points or more from the won share, and outside the range chance could give it across the ${plural(tested, "stage")} we could test`, { minSample, minEachOutcome: MIN_EACH_OUTCOME, minEachOutcome2: MIN_EACH_OUTCOME, winGap: [WIN_GAP, "points"], tested }),
   ];
   const segments: MetricSegment[] = [];
   const stats: Record<string, number> = { deals: deals.length, beforeHistory, stages: stages.length, tested, named: stages.filter((s) => s.named).length, z: loaded.z };
@@ -414,20 +415,20 @@ function waysSaid(s: StageFigures): Said {
   const names = andList(s.ways.map((w) => WAYS[w.dimension]!()));
   const holding = s.ways.filter((w) => w.holds).length;
   const every = s.ways.every((w) => w.held === w.compared);
-  const ways = s.ways.length === 1 ? said`the one way we could split these deals (by ${names})` : said`${s.ways.length} ways we could split these deals (by ${names})`;
+  const ways = s.ways.length === 1 ? said`the one way we could split these deals (by ${names})` : valued(said`${s.ways.length} ways we could split these deals (by ${names})`, { ways: s.ways.length });
   if (every) return said` It was on the same side of the setting in every group we could compare, in ${s.ways.length === 1 ? said`` : said`each of the `}${ways}.`;
   if (holding === s.ways.length) return said` It was on the same side of the setting in most groups, in ${s.ways.length === 1 ? said`` : said`each of the `}${ways}.`;
-  return said` It was on the same side of the setting in most groups in ${holding} of the ${ways}.`;
+  return valued(said` It was on the same side of the setting in most groups in ${holding} of the ${ways}.`, { holding });
 }
 
 const sentenceOf = (s: StageFigures): Said => {
   // Deals made before the stage history starts are left out; when any reached it in the period, the count says whose it is (712).
   const period = s.leftOut ? said`made since your stage history starts that reached it between ${daySaid(s.from!)} and ${daySaid(s.to!)}` : said`that reached it between ${daySaid(s.from!)} and ${daySaid(s.to!)}`;
   const outcome =
-    s.open === 0 ? said`Of the ${s.reached} deals ${period}, ${s.share}% were won`
-    : s.open === 1 ? said`Of the ${s.cohort} deals ${period}, 1 is still open and ${s.share}% of the other ${s.reached} were won`
-    : said`Of the ${s.cohort} deals ${period}, ${s.open} are still open and ${s.share}% of the other ${s.reached} were won`;
-  return said`${org(s.stage)} is set to ${s.probability!}% in Salesforce. ${outcome}, so in that period it was ${direction(s)}.${waysSaid(s)}`;
+    s.open === 0 ? valued(said`Of the ${s.reached} deals ${period}, ${s.share}% were won`, { reached: s.reached, share: [s.share, "percent"] })
+    : s.open === 1 ? valued(said`Of the ${s.cohort} deals ${period}, 1 is still open and ${s.share}% of the other ${s.reached} were won`, { cohort: s.cohort, share: [s.share, "percent"], reached: s.reached })
+    : valued(said`Of the ${s.cohort} deals ${period}, ${s.open} are still open and ${s.share}% of the other ${s.reached} were won`, { cohort: s.cohort, open: s.open, share: [s.share, "percent"], reached: s.reached });
+  return valued(said`${org(s.stage)} is set to ${s.probability!}% in Salesforce. ${outcome}, so in that period it was ${direction(s)}.${waysSaid(s)}`, { probability: [s.probability!, "percent"] });
 };
 
 function titleOf(stages: StageFigures[]): Said {
@@ -435,7 +436,7 @@ function titleOf(stages: StageFigures[]): Said {
   const lower = stages.every((s) => s.gap! > 0);
   if (stages.length === 1) return said`The probability on ${org(stages[0]!.stage)} in Salesforce was ${higher ? said`higher` : said`lower`} than how often its deals were won`;
   const way = higher ? said`higher` : lower ? said`lower` : said`higher or lower`;
-  return said`The probabilities on ${plural(stages.length, "stage")} in Salesforce were ${way} than how often their deals were won`;
+  return valued(said`The probabilities on ${plural(stages.length, "stage")} in Salesforce were ${way} than how often their deals were won`, { stages: stages.length });
 }
 
 const NOT_A_CAUSE = said` This compares each setting with what happened to the deals that reached the stage; it doesn't say why they differ.`;
@@ -471,7 +472,7 @@ export const probabilityVsReality: Rule = {
     if (shown.length === 0) {
       return {
         outcome: "pass",
-        summary: said`None of the ${plural(tested, "stage")} we could test had a probability in Salesforce ${WIN_GAP} points or more from how often the deals that reached it were won, beyond what chance could make of them.${tooOpenSaid(stages)}`,
+        summary: valued(said`None of the ${plural(tested, "stage")} we could test had a probability in Salesforce ${WIN_GAP} points or more from how often the deals that reached it were won, beyond what chance could make of them.${tooOpenSaid(stages)}`, { tested, winGap: [WIN_GAP, "points"] }),
         evidence,
         segmentsChecked: checked,
         facts: { deals: deals.length, tested },

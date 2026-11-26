@@ -48,7 +48,7 @@ function rowsOf<R>(ctx: RuleContext, source: Sourced<R[]>, what: "Case milestone
 
 const nm = (reason: string, evidence: Evidence[]): RuleResult => ({ outcome: "not_measurable", reason, evidence });
 /** Why a check can't pass on a read that stopped at its row limit. */
-const cutOff = (n: number, scope: Said): Said => said`The read stopped at its row limit, so we checked only the first ${grouped(n)} ${scope} in order of Salesforce id, and can't say the rest are within the line.`;
+const cutOff = (n: number, scope: Said): Said => named(said`The read stopped at its row limit, so we checked only the first ${grouped(n)} ${scope} in order of Salesforce id, and can't say the rest are within the line.`, { n });
 const cases = (ctx: RuleContext): ServiceCases => ctx.data(serviceCasesExtractor);
 
 /** A rate rule over cases, with the segments rule 4 asks for. */
@@ -79,7 +79,7 @@ function caseRate<R>(
   if (!over && result.hotspots.length === 0) {
     // A read that stopped at its row limit is a part, and a part can't show the rest are within the line (rule 5).
     if (options.truncated) return nm(cutOff(result.n, options.scope), evidence);
-    return { outcome: "pass", summary: said`${options.pass(result.hits, result.n, result.rate)} No segment is above ${options.segmentLimit}%.`, evidence, segmentsChecked: result.segmentsChecked, facts: { ...facts, segmentLimit: options.segmentLimit } };
+    return { outcome: "pass", summary: named(said`${options.pass(result.hits, result.n, result.rate)} No segment is above ${options.segmentLimit}%.`, { segmentLimit: [options.segmentLimit, "percent"] }), evidence, segmentsChecked: result.segmentsChecked, facts: { ...facts, segmentLimit: options.segmentLimit } };
   }
   const worst = result.hotspots[0];
   // The dimension is one of the rule's own names; the segment's key is the org's value.
@@ -130,20 +130,20 @@ const backlogGrowth: Rule = {
     const opened = inWindow(created.data).reduce((s, r) => s + r.n, 0);
     const shut = inWindow(closed.data).reduce((s, r) => s + r.n, 0);
     const evidence = [ctx.ev(created.source, { count: opened, dateRange: range, note: "Counts by month in the org's time zone" }), ctx.ev(closed.source, { count: shut, dateRange: range })];
-    if (opened < ctx.calibration.minSample) return nm(said`Only ${plural(opened, "case")} came in over the last ${GROWTH_MONTHS} full months, fewer than the ${ctx.calibration.minSample} we need.`, evidence);
+    if (opened < ctx.calibration.minSample) return nm(named(said`Only ${plural(opened, "case")} came in over the last ${GROWTH_MONTHS} full months, fewer than the ${ctx.calibration.minSample} we need.`, { opened, growthMonths: GROWTH_MONTHS, minSample: ctx.calibration.minSample }), evidence);
     const growing = months.filter((m) => sum(created.data, m) > sum(closed.data, m)).length;
     const priorities = [...new Set([...created.data, ...closed.data].map(priorityOf))].sort();
     const segmentsChecked: SegmentCheck[] = [{ dimension: "month", segments: months.length }, { dimension: "priority", segments: priorities.length }];
     const byPriority = priorities.map((p) => ({ p, growth: months.reduce((s, m) => s + sum(created.data, m, p) - sum(closed.data, m, p), 0) })).sort((a, b) => b.growth - a.growth);
     const facts = { months: GROWTH_MONTHS, growingMonths: growing, opened, closed: shut, growth: opened - shut, limit: GROWTH_LIMIT };
     if (growing < GROWTH_LIMIT || opened <= shut) {
-      return { outcome: "pass", summary: said`Over the last ${GROWTH_MONTHS} full months, ${opened} cases came in and ${shut} were closed. More came in than closed in ${growing} of the ${GROWTH_MONTHS} months.`, evidence, segmentsChecked, facts };
+      return { outcome: "pass", summary: named(said`Over the last ${GROWTH_MONTHS} full months, ${opened} cases came in and ${shut} were closed. More came in than closed in ${growing} of the ${GROWTH_MONTHS} months.`, { growthMonths: GROWTH_MONTHS, opened, shut, growing, growthMonths2: [GROWTH_MONTHS, "month"] }), evidence, segmentsChecked, facts };
     }
     const top = byPriority[0]!;
     return {
       outcome: "issue",
       title: said`Your case backlog is growing`,
-      summary: said`More cases came in than were closed in ${growing} of the last ${GROWTH_MONTHS} full months: ${opened} opened and ${shut} closed, so the backlog grew by ${opened - shut}. Most of the growth is at ${org(top.p)} priority (${top.growth}).`,
+      summary: named(said`More cases came in than were closed in ${growing} of the last ${GROWTH_MONTHS} full months: ${opened} opened and ${shut} closed, so the backlog grew by ${opened - shut}. Most of the growth is at ${org(top.p)} priority (${top.growth}).`, { growing, growthMonths: GROWTH_MONTHS, opened, shut, growth: top.growth }),
       recommendation: said`Find where the extra cases sit by priority and team, then add capacity there or stop the cause, such as a product fault or a missing help article, before the backlog ages.`,
       recommendationType: "change",
       severity: "medium",
@@ -175,8 +175,8 @@ const backlogAge: Rule = {
       totalLimit: 25,
       segmentLimit: 50,
       scope: said`open cases`,
-      sentence: (hits, n, rate) => said`Open cases older than ${days} days: ${hits} of ${n} (${rate}%).`,
-      pass: (hits, n, rate) => said`Open cases older than ${days} days: ${hits} of ${n} (${rate}%).`,
+      sentence: (hits, n, rate) => named(said`Open cases older than ${days} days: ${hits} of ${n} (${rate}%).`, { days: [days, "day"], hits, n, rate: [rate, "percent"] }),
+      pass: (hits, n, rate) => named(said`Open cases older than ${days} days: ${hits} of ${n} (${rate}%).`, { days: [days, "day"], hits, n, rate: [rate, "percent"] }),
       title: said`Too many open cases are old`,
       recommendation: said`Review the oldest cases each week, close what's resolved or abandoned, and escalate the rest. Ask why they stalled: a missing answer, a waiting customer or a queue nobody watches.`,
       severity: "medium",
@@ -202,7 +202,7 @@ const priorityResolution: Rule = {
     const high = read.rows.filter((c) => HIGH.test(c.Priority ?? ""));
     const rest = read.rows.filter((c) => !HIGH.test(c.Priority ?? ""));
     if (high.length < MIN_SEGMENT || rest.length < MIN_SEGMENT) {
-      return nm(said`Too few cases to compare: ${plural(high.length, "high-priority case")} and ${rest.length} others closed in the last year, and each side needs ${MIN_SEGMENT}.`, read.evidence);
+      return nm(named(said`Too few cases to compare: ${plural(high.length, "high-priority case")} and ${rest.length} others closed in the last year, and each side needs ${MIN_SEGMENT}.`, { high: high.length, rest: rest.length, minSegment: MIN_SEGMENT }), read.evidence);
     }
     const highMedian = round1(median(high.map(hours)));
     const restMedian = round1(median(rest.map(hours)));
@@ -212,12 +212,12 @@ const priorityResolution: Rule = {
     // A median from part of the cases, in id order, isn't the cases' median.
     if (read.truncated) return nm(cutOff(read.rows.length, said`closed cases`), read.evidence);
     if (highMedian < restMedian) {
-      return { outcome: "pass", summary: said`High-priority cases took a median ${highMedian} hours to close, against ${restMedian} hours for the rest.`, evidence: read.evidence, segmentsChecked, facts };
+      return { outcome: "pass", summary: named(said`High-priority cases took a median ${highMedian} hours to close, against ${restMedian} hours for the rest.`, { highMedian: [highMedian, "hour"], restMedian: [restMedian, "hour"] }), evidence: read.evidence, segmentsChecked, facts };
     }
     return {
       outcome: "issue",
       title: said`High-priority cases aren't resolved any faster`,
-      summary: said`High-priority cases took a median ${highMedian} hours to close, and the rest ${restMedian} hours, so priority isn't changing which cases get worked first. From ${high.length} high-priority and ${rest.length} other cases closed in the last year.`,
+      summary: named(said`High-priority cases took a median ${highMedian} hours to close, and the rest ${restMedian} hours, so priority isn't changing which cases get worked first. From ${high.length} high-priority and ${rest.length} other cases closed in the last year.`, { highMedian: [highMedian, "hour"], restMedian: [restMedian, "hour"], high: high.length, rest: rest.length }),
       recommendation: said`Make priority drive the work: route high-priority cases to their own queue or a higher routing priority, and give them a resolution target the team can see.`,
       recommendationType: "change",
       severity: "medium",
@@ -258,8 +258,8 @@ const milestoneBreaches: Rule = {
       totalLimit: MILESTONE_LIMIT,
       segmentLimit: 25,
       scope: said`milestones with a known outcome`,
-      sentence: (hits, n, rate) => said`Milestones missed: ${hits} of ${n} (${rate}%) of those met or past their target in the last year.`,
-      pass: (hits, n, rate) => said`Milestones missed: ${hits} of ${n} (${rate}%).`,
+      sentence: (hits, n, rate) => named(said`Milestones missed: ${hits} of ${n} (${rate}%) of those met or past their target in the last year.`, { hits, n, rate: [rate, "percent"] }),
+      pass: (hits, n, rate) => named(said`Milestones missed: ${hits} of ${n} (${rate}%).`, { hits, n, rate: [rate, "percent"] }),
       title: said`Response and resolution targets are being missed`,
       recommendation: said`Look at the milestone types missed most, and whether the targets, the business hours behind them or the staffing are wrong. Add warning actions so agents see a breach coming.`,
       severity: "high",
@@ -296,7 +296,7 @@ const firstReply: Rule = {
       if (!first.has(r.ParentId) || t < first.get(r.ParentId)!) first.set(r.ParentId, t);
     }
     const evidence = [ctx.ev(replies.source, { count: replies.data.length, dateRange: yearRange(ctx, SERVICE_MONTHS), note: "The first email sent on each case" }), ctx.ev(data.open.source, { count: emailCases.length, note: "Cases from email, open or closed, created in the last year" })];
-    if (emailCases.length < ctx.calibration.minSample) return nm(said`Only ${plural(emailCases.length, "case")} came in by email in the last year, fewer than the ${ctx.calibration.minSample} we need.`, evidence);
+    if (emailCases.length < ctx.calibration.minSample) return nm(named(said`Only ${plural(emailCases.length, "case")} came in by email in the last year, fewer than the ${ctx.calibration.minSample} we need.`, { emailCases: emailCases.length, minSample: ctx.calibration.minSample }), evidence);
     const answered = emailCases.filter((c) => first.has(c.Id) && first.get(c.Id)! >= Date.parse(c.CreatedDate));
     if (answered.length === 0) return nm(said`No email case has a reply sent from Salesforce, so replies may be sent from somewhere else.`, evidence);
     // A case whose reply wasn't read would count as unanswered, and a median from part of the cases isn't theirs.
@@ -309,7 +309,7 @@ const firstReply: Rule = {
     const result = segmentRate(answered, (c) => hoursTo(c) > FIRST_REPLY_HOURS, { priority: priorityOf, "owner type": ownerType }, { segmentLimit: 50, minSegment: MIN_SEGMENT });
     const facts = { medianHours: med, p75Hours: p75, answered: answered.length, unanswered, cases: emailCases.length, targetHours: FIRST_REPLY_HOURS, late: result.hits, lateRate: result.rate };
     if (med <= FIRST_REPLY_HOURS && result.hotspots.length === 0) {
-      return { outcome: "pass", summary: said`Email cases got a first reply in a median ${med} hours, within ${FIRST_REPLY_HOURS} hours. ${unanswered} of ${emailCases.length} have no reply from Salesforce yet.`, evidence, segmentsChecked: result.segmentsChecked, facts };
+      return { outcome: "pass", summary: named(said`Email cases got a first reply in a median ${med} hours, within ${FIRST_REPLY_HOURS} hours. ${unanswered} of ${emailCases.length} have no reply from Salesforce yet.`, { med: [med, "hour"], firstReplyHours: [FIRST_REPLY_HOURS, "hour"], unanswered, emailCases: emailCases.length }), evidence, segmentsChecked: result.segmentsChecked, facts };
     }
     const worst = result.hotspots[0];
     return {
@@ -358,8 +358,8 @@ const reopened: Rule = {
       totalLimit: REOPEN_LIMIT,
       segmentLimit: 25,
       scope: said`cases closed in the last year`,
-      sentence: (hits, n, rate) => said`Cases closed in the last year and then reopened: ${hits} of ${n} (${rate}%). Each one went back to a customer as solved when it wasn't.`,
-      pass: (hits, n, rate) => said`Cases closed in the last year and then reopened: ${hits} of ${n} (${rate}%).`,
+      sentence: (hits, n, rate) => named(said`Cases closed in the last year and then reopened: ${hits} of ${n} (${rate}%). Each one went back to a customer as solved when it wasn't.`, { hits, n, rate: [rate, "percent"] }),
+      pass: (hits, n, rate) => named(said`Cases closed in the last year and then reopened: ${hits} of ${n} (${rate}%).`, { hits, n, rate: [rate, "percent"] }),
       title: said`Cases are being closed before they're solved`,
       recommendation: said`Ask the customer to confirm before closing, look at which case types reopen most, and fix the cause there: a missing answer, a fix that didn't hold, or a target that rewards closing fast.`,
       severity: "medium",
@@ -387,8 +387,8 @@ const unassigned: Rule = {
       totalLimit: 10,
       segmentLimit: 25,
       scope: said`open cases`,
-      sentence: (hits, n, rate) => said`Open cases still owned by a queue more than ${QUEUE_DAYS} days after they came in: ${hits} of ${n} (${rate}%). Nobody has taken them on.`,
-      pass: (hits, n, rate) => said`Open cases still in a queue after ${QUEUE_DAYS} days: ${hits} of ${n} (${rate}%).`,
+      sentence: (hits, n, rate) => named(said`Open cases still owned by a queue more than ${QUEUE_DAYS} days after they came in: ${hits} of ${n} (${rate}%). Nobody has taken them on.`, { queueDays: [QUEUE_DAYS, "day"], hits, n, rate: [rate, "percent"] }),
+      pass: (hits, n, rate) => named(said`Open cases still in a queue after ${QUEUE_DAYS} days: ${hits} of ${n} (${rate}%).`, { queueDays: [QUEUE_DAYS, "day"], hits, n, rate: [rate, "percent"] }),
       title: said`Cases wait in queues with nobody working them`,
       recommendation: said`Make sure every case queue has members who watch it, and route work from busy queues automatically. Age is from when the case came in, so check the oldest first.`,
       severity: "high",
@@ -422,8 +422,8 @@ const originMissing: Rule = {
       totalLimit: share,
       segmentLimit: Math.min(100, share * 2),
       scope: said`cases created in the last year`,
-      sentence: (hits, n, rate) => said`Cases with no origin: ${hits} of ${n} (${rate}%) created in the last year. Without it, you can't tell which channels bring the work.`,
-      pass: (hits, n, rate) => said`Cases with no origin: ${hits} of ${n} (${rate}%), within the ${share}% agreed.`,
+      sentence: (hits, n, rate) => named(said`Cases with no origin: ${hits} of ${n} (${rate}%) created in the last year. Without it, you can't tell which channels bring the work.`, { hits, n, rate: [rate, "percent"] }),
+      pass: (hits, n, rate) => named(said`Cases with no origin: ${hits} of ${n} (${rate}%), within the ${share}% agreed.`, { hits, n, rate: [rate, "percent"], share: [share, "percent"] }),
       title: said`Cases don't say where they came from`,
       recommendation: said`Set Origin automatically for every channel (Email-to-Case, web forms, messaging and the phone), and make it required when an agent creates a case by hand.`,
       severity: "low",
@@ -454,8 +454,8 @@ const classification: Rule = {
       totalLimit: 25,
       segmentLimit: 50,
       scope: said`cases closed in the last year`,
-      sentence: (hits, n, rate) => said`Closed cases with no type or reason: ${hits} of ${n} (${rate}%). You can't report on why customers get in touch, or fix the causes that come up most.`,
-      pass: (hits, n, rate) => said`Closed cases with no type or reason: ${hits} of ${n} (${rate}%).`,
+      sentence: (hits, n, rate) => named(said`Closed cases with no type or reason: ${hits} of ${n} (${rate}%). You can't report on why customers get in touch, or fix the causes that come up most.`, { hits, n, rate: [rate, "percent"] }),
+      pass: (hits, n, rate) => named(said`Closed cases with no type or reason: ${hits} of ${n} (${rate}%).`, { hits, n, rate: [rate, "percent"] }),
       title: said`Cases don't record why the customer got in touch`,
       recommendation: said`Make Type or Reason required on closing, keep its values short and agreed, and report on them monthly.`,
       severity: "low",
@@ -480,8 +480,8 @@ const customerLinked: Rule = {
       totalLimit: 10,
       segmentLimit: 25,
       scope: said`open cases`,
-      sentence: (hits, n, rate) => said`Open cases with neither a contact nor an account: ${hits} of ${n} (${rate}%). Nobody can see the customer's history, or reply from the case.`,
-      pass: (hits, n, rate) => said`Open cases with neither a contact nor an account: ${hits} of ${n} (${rate}%).`,
+      sentence: (hits, n, rate) => named(said`Open cases with neither a contact nor an account: ${hits} of ${n} (${rate}%). Nobody can see the customer's history, or reply from the case.`, { hits, n, rate: [rate, "percent"] }),
+      pass: (hits, n, rate) => named(said`Open cases with neither a contact nor an account: ${hits} of ${n} (${rate}%).`, { hits, n, rate: [rate, "percent"] }),
       title: said`Open cases aren't linked to a customer`,
       recommendation: said`Match incoming email and web cases to contacts automatically, and ask agents to link the customer before working a case.`,
       severity: "low",

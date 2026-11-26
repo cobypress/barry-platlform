@@ -1,4 +1,5 @@
 import { apexExtractor } from "../../extract/automation.ts";
+import { named as valued } from "../../engine/named.ts";
 import { codeLintExtractor, LINT_SOURCES } from "../../extract/code-lint.ts";
 import type { LintFinding, LintKind, RuleTally } from "../../extract/lint/findings.ts";
 import { notSized, plural, type Rule, type RuleContext, type RuleResult } from "../../engine/rule.ts";
@@ -173,7 +174,7 @@ function linesOf(lines: number[], more: boolean): Said {
   const shown = lines.slice(0, LINES);
   const rest = more || lines.length > LINES;
   if (shown.length === 1 && !rest) return said`line ${shown[0]!}`;
-  const numbers = shown.map((n) => said`${n}`);
+  const numbers = shown.map((n) => valued(said`${n}`, { n }));
   return rest ? said`lines ${joinSaid(numbers, ", ")} and others` : said`lines ${andList(numbers)}`;
 }
 
@@ -230,7 +231,7 @@ function evaluateGroup(group: Group, ctx: RuleContext): RuleResult | RuleResult[
   const alreadyBy = [...new Set(already.map((t) => group.already![t.rule]!.by()))];
   const notes = joinSaid(
     [
-      ...(alreadyCount ? [alreadyCount === 1 ? said` 1 more is in a class our own check of ${andList(alreadyBy)} already names, for a related problem.` : said` ${alreadyCount} more are in classes our own check of ${andList(alreadyBy)} already names, for a related problem.`] : []),
+      ...(alreadyCount ? [alreadyCount === 1 ? said` 1 more is in a class our own check of ${andList(alreadyBy)} already names, for a related problem.` : valued(said` ${alreadyCount} more are in classes our own check of ${andList(alreadyBy)} already names, for a related problem.`, { alreadyCount })] : []),
       ...(suppressed ? [said` ${plural(suppressed, "more was", "more were")} marked to be ignored in the code.`] : []),
     ],
     "",
@@ -238,7 +239,7 @@ function evaluateGroup(group: Group, ctx: RuleContext): RuleResult | RuleResult[
   if (found === 0) {
     return checked === 0
       ? { outcome: "pass", summary: said`Our code checker found nothing of this kind.${notes}`, evidence, segmentExemptReason: "It read no class or trigger to segment.", facts }
-      : { outcome: "pass", summary: said`Our code checker found nothing of this kind in the ${plural(checked, "class or trigger", "classes and triggers")} it read.${notes}`, evidence, segmentsChecked: segments, facts };
+      : { outcome: "pass", summary: valued(said`Our code checker found nothing of this kind in the ${plural(checked, "class or trigger", "classes and triggers")} it read.${notes}`, { checked }), evidence, segmentsChecked: segments, facts };
   }
 
   // Where, from the findings the step kept: worst first is how it bounded them, so a component may show fewer lines than it has.
@@ -263,7 +264,7 @@ function evaluateGroup(group: Group, ctx: RuleContext): RuleResult | RuleResult[
   return {
     outcome: "issue",
     title: group.issueTitle(),
-    summary: said`Our code checker found ${plural(found, "place", "places")} in ${plural(components.length, "class or trigger", "classes and triggers")} of the ${checked} it read ${group.where()}. ${group.why()}${placesText}${notes}`,
+    summary: valued(said`Our code checker found ${plural(found, "place", "places")} in ${plural(components.length, "class or trigger", "classes and triggers")} of the ${checked} it read ${group.where()}. ${group.why()}${placesText}${notes}`, { found, components: components.length, checked }),
     recommendation: group.recommendation(),
     recommendationType: "change",
     severity: raise ? group.raised : group.severity,

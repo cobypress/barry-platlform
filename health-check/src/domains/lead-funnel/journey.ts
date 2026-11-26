@@ -284,7 +284,7 @@ function smallestTellable(c: Compared, bar: number): number {
 const confidenceOf = (ctx: Ctx, c: Compared): "high" | "medium" | "low" => (c.compared === 0 ? "low" : Math.min(c.group.n, c.other.n) >= ctx.calibration.minSample * 2 ? "high" : "medium");
 
 const stillOpen = (open: number): Said =>
-  open === 0 ? said`` : open === 1 ? said` 1 deal from these leads is still open, and the gap holds whichever way it goes.` : said` ${open} deals from these leads are still open, and the gap holds whichever way they go.`;
+  open === 0 ? said`` : open === 1 ? said` 1 deal from these leads is still open, and the gap holds whichever way it goes.` : named(said` ${open} deals from these leads are still open, and the gap holds whichever way they go.`, { open });
 
 const segmentsOf = (deals: JourneyDeal[], dims: Record<string, (d: JourneyDeal) => string>): SegmentCheck[] => Object.entries(dims).map(([dimension, keyOf]) => ({ dimension, segments: new Set(deals.map(keyOf)).size }));
 
@@ -368,7 +368,7 @@ export const sourceWinRate: Rule = {
     if (raised.length === 0) {
       return {
         outcome: "pass",
-        summary: said`We compared the win rate of deals from ${plural(tried.length, "lead source")} that had enough closed deals with the win rate of deals from the other sources. None converted more often but won less often, or converted less often but won more, by a gap we could tell from chance.`,
+        summary: named(said`We compared the win rate of deals from ${plural(tried.length, "lead source")} that had enough closed deals with the win rate of deals from the other sources. None converted more often but won less often, or converted less often but won more, by a gap we could tell from chance.`, { tried: tried.length }),
         evidence: c.evidence,
         segmentsChecked: checked,
         facts: { sources: tried.length, leads: c.leads.length, deals: c.deals.length },
@@ -387,7 +387,7 @@ export const sourceWinRate: Rule = {
     return raised.map(({ source, leads, otherLeads, others, conversion, otherConversion, c: cmp, aside: apart }): RuleResult => {
       const winsLess = cmp.gap < 0;
       const within = cmp.compared
-        ? said` The gap pointed the same way in ${cmp.held} of the ${cmp.compared} teams we could check it in.`
+        ? named(said` The gap pointed the same way in ${cmp.held} of the ${cmp.compared} teams we could check it in.`, { held: cmp.held, compared: cmp.compared })
         : said` We couldn't check this within teams: these deals couldn't be split into teams big enough to compare on both sides.`;
       const fromOthers = others === 1 ? said`from the other source` : said`from other sources`;
       const pair = others === 1 ? said` With two sources, this is one difference seen from one side.` : said``;
@@ -395,7 +395,7 @@ export const sourceWinRate: Rule = {
         outcome: "issue",
         key: `source:${source}`,
         title: winsLess ? said`Leads from ${org(source)} convert more often, but their deals are won less often` : said`Leads from ${org(source)} convert less often, but their deals are won more often`,
-        summary: said`Of the leads created ${periodSaid(c)}, ${conversion}% of the ${leads} from ${org(source)} were converted, against ${otherConversion}% of the ${otherLeads} ${fromOthers}${leftOut(apart)}. Their ${cmp.group.n} closed deals were won ${cmp.group.rate}% of the time, against ${cmp.other.rate}% of the ${cmp.other.n} closed deals ${fromOthers}.${pair}${stillOpen(cmp.open)}${within}${NOT_A_CAUSE}`,
+        summary: named(said`Of the leads created ${periodSaid(c)}, ${conversion}% of the ${leads} from ${org(source)} were converted, against ${otherConversion}% of the ${otherLeads} ${fromOthers}${leftOut(apart)}. Their ${cmp.group.n} closed deals were won ${cmp.group.rate}% of the time, against ${cmp.other.rate}% of the ${cmp.other.n} closed deals ${fromOthers}.${pair}${stillOpen(cmp.open)}${within}${NOT_A_CAUSE}`, { conversion: [conversion, "percent"], leads, otherConversion: [otherConversion, "percent"], otherLeads, n: cmp.group.n, rate: [cmp.group.rate, "percent"], rate2: [cmp.other.rate, "percent"], n2: cmp.other.n }),
         recommendation: winsLess
           ? said`Check how leads from ${org(source)} are qualified before they're converted, and whether their deals are a good fit, before putting more into the source.`
           : said`Look at what makes deals from ${org(source)} win, and whether more of its leads are worth converting.`,
@@ -441,13 +441,13 @@ export const fastConversion: Rule = {
     const cmp = compare(ctx, c.from, fast, later, Object.values(dims));
     const checked = segmentsOf(timed, dims);
     if (!cmp) {
-      return { outcome: "not_measurable", reason: said`Fewer than ${ctx.calibration.minSample} closed deals, with ${MIN_EACH_OUTCOME} won and ${MIN_EACH_OUTCOME} lost, came from leads converted within ${FAST_DAYS} days, or from leads converted later, so the two can't be compared.`, evidence: c.evidence };
+      return { outcome: "not_measurable", reason: named(said`Fewer than ${ctx.calibration.minSample} closed deals, with ${MIN_EACH_OUTCOME} won and ${MIN_EACH_OUTCOME} lost, came from leads converted within ${FAST_DAYS} days, or from leads converted later, so the two can't be compared.`, { minSample: ctx.calibration.minSample, minEachOutcome: MIN_EACH_OUTCOME, minEachOutcome2: MIN_EACH_OUTCOME, fastDays: [FAST_DAYS, "day"] }), evidence: c.evidence };
     }
     const bar = zBar(1);
     if (!clears(cmp, bar)) {
       return {
         outcome: "pass",
-        summary: said`We couldn't tell whether deals from leads converted within ${FAST_DAYS} days were won more or less often than deals from leads converted later: a gap in win rate would have had to be about ${smallestTellable(cmp, bar)} points or more to tell it from chance, and it wasn't.`,
+        summary: named(said`We couldn't tell whether deals from leads converted within ${FAST_DAYS} days were won more or less often than deals from leads converted later: a gap in win rate would have had to be about ${smallestTellable(cmp, bar)} points or more to tell it from chance, and it wasn't.`, { fastDays: [FAST_DAYS, "day"] }),
         evidence: c.evidence,
         segmentsChecked: checked,
         facts: { fast: cmp.group.n, later: cmp.other.n },
@@ -455,15 +455,15 @@ export const fastConversion: Rule = {
     }
     const more = cmp.gap > 0;
     const closed = cmp.group.n + cmp.other.n;
-    const who = cmp.open === 0 ? said`Of the ${closed} deals from leads created ${periodSaid(c)},` : said`Of the ${closed + cmp.open} deals from leads created ${periodSaid(c)}, ${cmp.open} ${cmp.open === 1 ? said`is` : said`are`} still open. Of the other ${closed},`;
+    const who = cmp.open === 0 ? named(said`Of the ${closed} deals from leads created ${periodSaid(c)},`, { closed }) : named(said`Of the ${closed + cmp.open} deals from leads created ${periodSaid(c)}, ${cmp.open} ${cmp.open === 1 ? said`is` : said`are`} still open. Of the other ${closed},`, { open: cmp.open, closed });
     const within = cmp.compared
-      ? said` The gap pointed the same way in ${cmp.held} of the ${cmp.compared} sources and teams we could check it in.`
+      ? named(said` The gap pointed the same way in ${cmp.held} of the ${cmp.compared} sources and teams we could check it in.`, { held: cmp.held, compared: cmp.compared })
       : said` We couldn't check this within sources or teams: these deals couldn't be split into groups big enough to compare on both sides.`;
     return {
       outcome: "issue",
       key: "fast",
-      title: more ? said`Deals from leads converted within ${FAST_DAYS} days were won more often than deals from leads converted later` : said`Deals from leads converted within ${FAST_DAYS} days were won less often than deals from leads converted later`,
-      summary: said`${who} the ${cmp.group.n} whose lead was converted within ${FAST_DAYS} days were won ${cmp.group.rate}% of the time, against ${cmp.other.rate}% of the ${cmp.other.n} whose lead was converted later.${within}${NOT_A_CAUSE}`,
+      title: more ? named(said`Deals from leads converted within ${FAST_DAYS} days were won more often than deals from leads converted later`, { fastDays: [FAST_DAYS, "day"] }) : named(said`Deals from leads converted within ${FAST_DAYS} days were won less often than deals from leads converted later`, { fastDays: [FAST_DAYS, "day"] }),
+      summary: named(said`${who} the ${cmp.group.n} whose lead was converted within ${FAST_DAYS} days were won ${cmp.group.rate}% of the time, against ${cmp.other.rate}% of the ${cmp.other.n} whose lead was converted later.${within}${NOT_A_CAUSE}`, { n: cmp.group.n, fastDays: [FAST_DAYS, "day"], rate: [cmp.group.rate, "percent"], rate2: [cmp.other.rate, "percent"], n2: cmp.other.n }),
       recommendation: more
         ? said`Look at what happens to the leads converted quickly, and whether the leads that wait could be worked sooner.`
         : said`Look at why leads converted quickly go on to win less often, and whether they're converted before they're ready.`,

@@ -116,7 +116,7 @@ export function shareRule(options: ShareRule): Rule {
       const overLimit = result.rate > options.totalLimit;
       const leftOut = scoped.leftOut ? said` ${scoped.leftOut}` : said``;
       if (!overLimit && result.hotspots.length === 0) {
-        return { outcome: "pass", summary: said`Affected: ${result.hits} of ${result.n} ${options.scopeLabel} (${result.rate}%), with no segment above ${options.segmentLimit}%.${leftOut}`, evidence, segmentsChecked: result.segmentsChecked, facts: { hits: result.hits, n: result.n, rate: result.rate } };
+        return { outcome: "pass", summary: named(said`Affected: ${result.hits} of ${result.n} ${options.scopeLabel} (${result.rate}%), with no segment above ${options.segmentLimit}%.${leftOut}`, { hits: result.hits, n: result.n, rate: [result.rate, "percent"], segmentLimit: [options.segmentLimit, "percent"] }), evidence, segmentsChecked: result.segmentsChecked, facts: { hits: result.hits, n: result.n, rate: result.rate } };
       }
       const worst = result.hotspots[0];
       // A segment's key is the org's: a stage, a record type, a team or a person's token.
@@ -135,7 +135,7 @@ export function shareRule(options: ShareRule): Rule {
           typeof options.sized === "function"
             ? potentialRevenue(ctx, data, scoped.deals.filter(scoped.isHit), () => (options.sized as (c: RuleContext, d: Ready) => Situation)(ctx, data))
             : options.sized
-              ? exposure(ctx, scoped.deals.filter(scoped.isHit), data.multiCurrency, said`${result.hits} deals affected`)
+              ? exposure(ctx, scoped.deals.filter(scoped.isHit), data.multiCurrency, named(said`${result.hits} deals affected`, { hits: result.hits }))
               : notSized(said`This affects how far the pipeline can be trusted, which has no direct figure.`),
         effort: { size: "S" },
         owner: options.owner,
@@ -171,7 +171,7 @@ function leftOutSentence(noLine: number, noEntry: number): Said | undefined {
   const entry = (k: number) => said`history that doesn't show when ${k === 1 ? "it" : "they"} entered ${k === 1 ? "its" : "their"} stage`;
   if (!noEntry) return said`${lead}, as ${n === 1 ? "it's" : "they're"} in ${line(n)}.`;
   if (!noLine) return said`${lead}, as ${n === 1 ? "it has" : "they have"} ${entry(n)}.`;
-  return said`${lead}: ${noLine} in ${line(noLine)}, and ${noEntry} with ${entry(noEntry)}.`;
+  return named(said`${lead}: ${noLine} in ${line(noLine)}, and ${noEntry} with ${entry(noEntry)}.`, { noLine, noEntry });
 }
 
 const stuckInStage = shareRule({
@@ -184,7 +184,7 @@ const stuckInStage = shareRule({
   scopeLabel: said`open deals with a stage to compare`,
   scope(ctx, data, open) {
     const lines = stageLines(ctx, data);
-    if (lines.size === 0) return { reason: said`No open stage has ${ctx.calibration.minSample} won deals to compare with.` };
+    if (lines.size === 0) return { reason: named(said`No open stage has ${ctx.calibration.minSample} won deals to compare with.`, { minSample: ctx.calibration.minSample }) };
     const deals = open.filter((d) => lines.has(d.StageName) && enteredCurrentStage(d));
     const noLine = open.filter((d) => !lines.has(d.StageName)).length;
     const noEntry = open.filter((d) => lines.has(d.StageName) && !enteredCurrentStage(d)).length;
@@ -192,7 +192,7 @@ const stuckInStage = shareRule({
       deals,
       isHit: (d) => daysSince(enteredCurrentStage(d)!, ctx.now) > lines.get(d.StageName)!,
       problem: (d) => `In ${d.StageName} for ${daysSince(enteredCurrentStage(d)!, ctx.now)} days, where three quarters of won deals moved on within ${Math.round(lines.get(d.StageName)!)} days`,
-      exclusions: [...(noLine ? [said`${plural(noLine, "deal")} in stages with too few won deals to compare`] : []), ...(noEntry ? [said`${plural(noEntry, "deal")} whose history doesn't show when they entered this stage`] : [])],
+      exclusions: [...(noLine ? [named(said`${plural(noLine, "deal")} in stages with too few won deals to compare`, { noLine })] : []), ...(noEntry ? [named(said`${plural(noEntry, "deal")} whose history doesn't show when they entered this stage`, { noEntry })] : [])],
       // Said in the summary too, where "58 of 70" sat beside 76 open deals elsewhere (night 3 reading pass, item 21).
       leftOut: leftOutSentence(noLine, noEntry),
     };
@@ -246,10 +246,10 @@ const repeatedPushes = shareRule({
     const fiscal = fiscalStartOf(ctx);
     const deals = open.filter((d) => d.history.length > 0);
     const noHistory = open.length - deals.length;
-    return { deals, isHit: (d) => pushesOf(d, fiscal).length >= REPEAT_PUSHES, problem: (d) => `Close date moved later ${pushesOf(d, fiscal).length} times`, exclusions: noHistory ? [said`${plural(noHistory, "deal")} with no stage history`] : [] };
+    return { deals, isHit: (d) => pushesOf(d, fiscal).length >= REPEAT_PUSHES, problem: (d) => `Close date moved later ${pushesOf(d, fiscal).length} times`, exclusions: noHistory ? [named(said`${plural(noHistory, "deal")} with no stage history`, { noHistory })] : [] };
   },
   issueTitle: said`Close dates are being pushed again and again`,
-  sentence: (hits, n, rate) => said`Open deals whose close date has moved later ${REPEAT_PUSHES} or more times: ${hits} of ${n} (${rate}%). A date that keeps moving usually means the deal isn't really on track.`,
+  sentence: (hits, n, rate) => named(said`Open deals whose close date has moved later ${REPEAT_PUSHES} or more times: ${hits} of ${n} (${rate}%). A date that keeps moving usually means the deal isn't really on track.`, { repeatPushes: REPEAT_PUSHES, hits, n, rate: [rate, "percent"] }),
   recommendation: said`Treat a second push as a trigger for a manager to review the deal.`,
   owner: "Head of sales",
   sized: true,
@@ -270,7 +270,7 @@ const missingNextSteps = shareRule({
     return { deals: open, isHit: (d) => !filled.has(d.Id), problem: () => "Next step is empty", evidence: [ctx.ev(steps.source, { count: steps.data.length, note: "Read as filled or empty only. The text itself is never fetched" })] };
   },
   issueTitle: said`Deals are missing a next step`,
-  sentence: (hits, n, rate) => said`Open deals with an empty next step: ${hits} of ${n} (${rate}%).`,
+  sentence: (hits, n, rate) => named(said`Open deals with an empty next step: ${hits} of ${n} (${rate}%).`, { hits, n, rate: [rate, "percent"] }),
   recommendation: said`Make a next step part of how a deal stays in the forecast, and check it in pipeline reviews.`,
   owner: "Head of sales",
   sized: false,
@@ -289,7 +289,7 @@ function concentrationRule(options: { id: string; title: string; limit: number; 
       const { data, deals } = loaded;
       if (data.multiCurrency) return { outcome: "not_measurable", reason: said`The org is multi-currency, and amounts can't be added until historic rates are supplied.`, evidence: data.evidence };
       const blank = deals.filter((d) => d.Amount === null).length;
-      if (pct(blank, deals.length) > MAX_BLANK_AMOUNT_SHARE) return { outcome: "not_measurable", reason: said`${blank} of ${deals.length} open deals have no amount, so shares of the total would mislead.`, evidence: data.evidence };
+      if (pct(blank, deals.length) > MAX_BLANK_AMOUNT_SHARE) return { outcome: "not_measurable", reason: named(said`${blank} of ${deals.length} open deals have no amount, so shares of the total would mislead.`, { blank, deals: deals.length }), evidence: data.evidence };
       const byKey = new Map<string, number>();
       let unkeyed = 0;
       for (const deal of deals) {
@@ -298,10 +298,10 @@ function concentrationRule(options: { id: string; title: string; limit: number; 
         else byKey.set(key, (byKey.get(key) ?? 0) + (deal.Amount ?? 0));
       }
       const total = [...byKey.values()].reduce((a, b) => a + b, 0);
-      const exclusions = [...data.exclusions, ...(blank ? [said`${plural(blank, "deal")} with no amount`] : []), ...(unkeyed ? [said`${plural(unkeyed, "deal")} with no ${options.subject}`] : [])];
+      const exclusions = [...data.exclusions, ...(blank ? [named(said`${plural(blank, "deal")} with no amount`, { blank })] : []), ...(unkeyed ? [named(said`${plural(unkeyed, "deal")} with no ${options.subject}`, { unkeyed })] : [])];
       const evidence = [{ ...data.evidence[0]!, count: deals.length, dateRange: { from: ctx.window.to, to: ctx.window.to }, exclusions, note: "Open deals" }];
       if (total === 0) return { outcome: "not_measurable", reason: said`Open deals have no amounts to compare.`, evidence };
-      if (byKey.size < options.minKeys) return { outcome: "not_measurable", reason: said`Only ${plural(byKey.size, options.subject)} ${byKey.size === 1 ? "holds" : "hold"} open pipeline, so a share means little.`, evidence };
+      if (byKey.size < options.minKeys) return { outcome: "not_measurable", reason: named(said`Only ${plural(byKey.size, options.subject)} ${byKey.size === 1 ? "holds" : "hold"} open pipeline, so a share means little.`, { size: byKey.size }), evidence };
       const [top, amount] = [...byKey].sort(([ka, a], [kb, b]) => b - a || ka.localeCompare(kb))[0]!;
       const share = pct(amount, total);
       const segments = [{ dimension: options.subject, segments: byKey.size }];
@@ -337,7 +337,7 @@ const accountConcentration = concentrationRule({
   labelOf: (ctx, key) => ctx.pseudonyms.label("account", key, key),
   minKeys: 2,
   issueTitle: said`Too much of your pipeline rests on one account`,
-  sentence: (share) => said`One account holds ${share}% of open pipeline. If that relationship stalls, the number goes with it.`,
+  sentence: (share) => named(said`One account holds ${share}% of open pipeline. If that relationship stalls, the number goes with it.`, { share: [share, "percent"] }),
   recommendation: said`Check how much of this is real, then build pipeline elsewhere so one account can't decide the quarter.`,
 });
 
@@ -350,7 +350,7 @@ const repConcentration = concentrationRule({
   labelOf: (ctx, key) => ctx.userLabel(key),
   minKeys: MIN_REPS,
   issueTitle: said`Too much of your pipeline rests on one rep`,
-  sentence: (share) => said`One rep holds ${share}% of open pipeline, so an absence or a departure would leave a large gap.`,
+  sentence: (share) => named(said`One rep holds ${share}% of open pipeline, so an absence or a departure would leave a large gap.`, { share: [share, "percent"] }),
   recommendation: said`Check the territory split, and make sure someone else knows these deals.`,
 });
 
@@ -416,22 +416,22 @@ const coverage: Rule = {
     const evidence = [ctx.ev(quotas.source, { count: result.reps.length, dateRange: result.quarter, exclusions: ["Quotas held by people who own no deals, because a manager's quota repeats the team's", "Open deals closing outside this quarter or already past their close date"] }), { ...loaded.data.evidence[0]!, count: loaded.deals.length }];
     const segments = [{ dimension: "rep", segments: result.reps.length }];
     const facts = { quota: result.quota, won: result.won, remaining: result.remaining, openThisQuarter: result.open };
-    if (result.remaining <= 0) return { outcome: "pass", summary: said`Won deals have already covered this quarter's quota of ${result.quota}.`, evidence, segmentsChecked: segments, facts };
+    if (result.remaining <= 0) return { outcome: "pass", summary: named(said`Won deals have already covered this quarter's quota of ${result.quota}.`, { quota: result.quota }), evidence, segmentsChecked: segments, facts };
     const low = result.reps.filter((r) => r.quota > r.won && r.open / (r.quota - r.won) < COVERAGE_TARGET).sort((a, b) => a.open / (a.quota - a.won) - b.open / (b.quota - b.won) || a.owner.localeCompare(b.owner));
     if (result.coverage >= COVERAGE_TARGET && low.length === 0) {
-      return { outcome: "pass", summary: said`Coverage is ${result.coverage} times what's left of quota this quarter, at or above our working target of ${COVERAGE_TARGET}.`, evidence, segmentsChecked: segments, facts: { ...facts, coverage: result.coverage } };
+      return { outcome: "pass", summary: named(said`Coverage is ${result.coverage} times what's left of quota this quarter, at or above our working target of ${COVERAGE_TARGET}.`, { coverage: [result.coverage, "ratio"], coverageTarget: [COVERAGE_TARGET, "ratio"] }), evidence, segmentsChecked: segments, facts: { ...facts, coverage: result.coverage } };
     }
     const shortfall = Math.max(0, Math.round(result.remaining * COVERAGE_TARGET - result.open));
     return {
       outcome: "issue",
       title: said`There isn't enough pipeline to cover this quarter's quota`,
-      summary: said`Open pipeline closing this quarter is ${result.coverage} times what's left of quota, against our working target of ${COVERAGE_TARGET}. Quota ${moneySaid(result.quota, ctx.calibration.currency)}, won ${moneySaid(result.won, ctx.calibration.currency)}, open ${moneySaid(result.open, ctx.calibration.currency)}.`,
+      summary: named(said`Open pipeline closing this quarter is ${result.coverage} times what's left of quota, against our working target of ${COVERAGE_TARGET}. Quota ${moneySaid(result.quota, ctx.calibration.currency)}, won ${moneySaid(result.won, ctx.calibration.currency)}, open ${moneySaid(result.open, ctx.calibration.currency)}.`, { coverage: [result.coverage, "ratio"], coverageTarget: [COVERAGE_TARGET, "ratio"], quota: [result.quota, "money"], won: [result.won, "money"], open: [result.open, "money"] }),
       recommendation: said`Decide this month whether to build more pipeline or reset the number. Coverage can't be fixed in the last weeks of a quarter.`,
       recommendationType: "investigate",
       severity: result.coverage < COVERAGE_TARGET / 2 ? "high" : "medium",
       confidence: "medium",
       evidence,
-      value: { kind: "revenue", amount: shortfall, unit: ctx.calibration.currency, period: said`more pipeline needed for the quarter starting ${eng(result.quarter.from)}`, assumptions: [said`A target of ${COVERAGE_TARGET} times the remaining quota, which is our working figure`, said`Quota comes from Collaborative Forecasts, for people who own deals`, said`Open pipeline in the quarter is taken at full Amount, with no stage weighting`] },
+      value: { kind: "revenue", amount: shortfall, unit: ctx.calibration.currency, period: said`more pipeline needed for the quarter starting ${eng(result.quarter.from)}`, assumptions: [named(said`A target of ${COVERAGE_TARGET} times the remaining quota, which is our working figure`, { coverageTarget: [COVERAGE_TARGET, "ratio"] }), said`Quota comes from Collaborative Forecasts, for people who own deals`, said`Open pipeline in the quarter is taken at full Amount, with no stage weighting`] },
       // The decision is the small part, and it's the urgent part. Building pipeline afterwards is the dependency.
       effort: { size: "S" },
       owner: "Head of sales",
@@ -470,7 +470,7 @@ function currentMetrics(ctx: Ctx): Metric[] {
   const placed = deals.filter((d) => enteredCurrentStage(d));
   const days = (d: Deal): number => daysSince(enteredCurrentStage(d)!, ctx.now);
   const round = (n: number): number => Math.round(n * 10) / 10;
-  if (placed.length < minSample) metrics.push({ ...definitions.age, ...common, status: "not_measurable", reason: said`${placed.length} open deals with stage history is below the calibrated minimum of ${minSample}.` });
+  if (placed.length < minSample) metrics.push({ ...definitions.age, ...common, status: "not_measurable", reason: named(said`${placed.length} open deals with stage history is below the calibrated minimum of ${minSample}.`, { placed: placed.length, minSample }) });
   else metrics.push({ ...definitions.age, ...common, status: "measured", value: round(median(placed.map(days))), n: placed.length, segments: segment(placed, dims, minSample, (group) => round(median(group.map(days)))), ...rest, stats: meanStat(placed.map(days)) });
   metrics.push(...openStageMetrics(ctx, data, deals, evidence), ...deliveryOutlook(ctx, data, deals, evidence));
   return metrics;

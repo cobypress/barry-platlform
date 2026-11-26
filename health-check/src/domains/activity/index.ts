@@ -91,16 +91,16 @@ const eventLinkCollapse: Rule = {
     if ("outcome" in data) return data;
     const users = ctx.data(usersExtractor);
     const months = fullMonths(data.from, todayIn(ctx));
-    if (months.length < RECENT_MONTHS + PRIOR_MONTHS) return { outcome: "not_measurable", reason: said`${plural(months.length, "whole month")} of events is too few to compare ${RECENT_MONTHS} recent months with the ${PRIOR_MONTHS} before them.`, evidence: data.evidence };
+    if (months.length < RECENT_MONTHS + PRIOR_MONTHS) return { outcome: "not_measurable", reason: named(said`${plural(months.length, "whole month")} of events is too few to compare ${RECENT_MONTHS} recent months with the ${PRIOR_MONTHS} before them.`, { months: months.length, recentMonths: RECENT_MONTHS, priorMonths: PRIOR_MONTHS }), evidence: data.evidence };
     const recent = new Set(months.slice(-RECENT_MONTHS));
     const prior = new Set(months.slice(-(RECENT_MONTHS + PRIOR_MONTHS), -RECENT_MONTHS));
     const overall = compare(data.events, prior, recent);
     const { minSample } = ctx.calibration;
     const evidence = [stamped(ctx, data, overall.prior.total + overall.recent.total, `Linked means the event has a related record. Compares ${[...prior][0]} to ${[...prior].at(-1)} with ${[...recent][0]} to ${[...recent].at(-1)}`)];
-    if (overall.prior.total < minSample) return { outcome: "not_measurable", reason: said`${overall.prior.total} events in the comparison months is below the calibrated minimum of ${minSample}.`, evidence };
+    if (overall.prior.total < minSample) return { outcome: "not_measurable", reason: named(said`${overall.prior.total} events in the comparison months is below the calibrated minimum of ${minSample}.`, { total: overall.prior.total, minSample }), evidence };
     // A real org went from 3 linked events to 1, which halves the share and means nothing.
     if (overall.prior.linked < MIN_GROUP_EVENTS) {
-      return { outcome: "not_measurable", reason: said`Only ${plural(overall.prior.linked, "event")} in the earlier months ${overall.prior.linked === 1 ? "was" : "were"} linked to a record, too few to call a fall.`, evidence };
+      return { outcome: "not_measurable", reason: named(said`Only ${plural(overall.prior.linked, "event")} in the earlier months ${overall.prior.linked === 1 ? "was" : "were"} linked to a record, too few to call a fall.`, { linked: overall.prior.linked }), evidence };
     }
 
     const roles = new Map(users.status === "ok" ? users.data.map((u) => [u.Id, u.UserRole?.Name ?? "No role"]) : []);
@@ -117,7 +117,7 @@ const eventLinkCollapse: Rule = {
     const byMonth = Object.fromEntries(months.map((month) => [`linkedShare ${month}`, compare(data.events, new Set([month]), new Set([month])).prior.share]));
     const facts = { priorShare: overall.prior.share, recentShare: overall.recent.share, priorEvents: overall.prior.total, recentEvents: overall.recent.total, ...byMonth };
     if (!overall.collapsed && hotspots.length === 0) {
-      return { outcome: "pass", summary: said`Events linked to a record were ${overall.prior.share}% before and ${overall.recent.share}% in the last ${RECENT_MONTHS} whole months, with no team or rep falling by half.`, evidence, segmentsChecked, facts };
+      return { outcome: "pass", summary: named(said`Events linked to a record were ${overall.prior.share}% before and ${overall.recent.share}% in the last ${RECENT_MONTHS} whole months, with no team or rep falling by half.`, { share: [overall.prior.share, "percent"], share2: [overall.recent.share, "percent"], recentMonths: RECENT_MONTHS }), evidence, segmentsChecked, facts };
     }
     const volume = overall.volumeFell ? said`Total events fell as well, so check whether events are syncing at all.` : said`Total events held steady, so a monthly total won't show this: events are still arriving, but they aren't reaching the records they belong to.`;
     const capture = ctx.data(activityCaptureExtractor);
@@ -127,8 +127,8 @@ const eventLinkCollapse: Rule = {
       title: overall.collapsed ? said`Events have stopped being linked to your deals` : said`Some teams' events have stopped being linked to deals`,
       // The dimension is one of our own two names; the team's role name or the rep's token is the org's.
       summary: overall.collapsed
-        ? said`Events linked to a record fell from ${overall.prior.share}% to ${overall.recent.share}% in the last ${RECENT_MONTHS} whole months. ${volume}`
-        : said`The overall linked share looks fine at ${overall.recent.share}%, but it has fallen by at least half for ${dimensionWords(hotspots[0]!.dimension)} ${org(hotspots[0]!.key)}, from ${hotspots[0]!.comparison.prior.share}% to ${hotspots[0]!.comparison.recent.share}%.`,
+        ? named(said`Events linked to a record fell from ${overall.prior.share}% to ${overall.recent.share}% in the last ${RECENT_MONTHS} whole months. ${volume}`, { share: [overall.prior.share, "percent"], share2: [overall.recent.share, "percent"], recentMonths: RECENT_MONTHS })
+        : named(said`The overall linked share looks fine at ${overall.recent.share}%, but it has fallen by at least half for ${dimensionWords(hotspots[0]!.dimension)} ${org(hotspots[0]!.key)}, from ${hotspots[0]!.comparison.prior.share}% to ${hotspots[0]!.comparison.recent.share}%.`, { share: [overall.recent.share, "percent"] }),
       recommendation: said`Find what changed when the drop began. Check Einstein Activity Capture's Relate Synced Events setting, and any change to how calendars sync.`,
       recommendationType: "investigate",
       severity: "high",
@@ -181,7 +181,7 @@ const dealsWithoutActivity = shareRule({
   },
   issueTitle: said`Deals are closing with nothing logged against them`,
   sentence: (hits, n, rate) =>
-    said`Won and lost deals with no task, event or email against them: ${hits} of ${n} (${rate}%). This usually reflects process rather than effort: when logging isn't expected and nothing captures email or meetings automatically, the work happens but Salesforce never sees it. The cost is that nobody can look back at how a deal was won or why it was lost.`,
+    named(said`Won and lost deals with no task, event or email against them: ${hits} of ${n} (${rate}%). This usually reflects process rather than effort: when logging isn't expected and nothing captures email or meetings automatically, the work happens but Salesforce never sees it. The cost is that nobody can look back at how a deal was won or why it was lost.`, { hits, n, rate: [rate, "percent"] }),
   recommendation: said`Agree the few moments worth recording on a deal, such as the first meeting and the proposal going out, or turn on automatic capture.`,
   owner: "Head of sales",
   sized: false,
@@ -206,17 +206,17 @@ const wonAgainstLost: Rule = {
     const lost = deals.filter((d) => d.category === "lost");
     const { minSample } = ctx.calibration;
     const evidence = [stamped(ctx, data, deals.length, "Won and lost deals created in the readable year")];
-    if (won.length < minSample || lost.length < minSample) return { outcome: "not_measurable", reason: said`${won.length} won and ${lost.length} lost deals is below the calibrated minimum of ${minSample} each.`, evidence };
+    if (won.length < minSample || lost.length < minSample) return { outcome: "not_measurable", reason: named(said`${won.length} won and ${lost.length} lost deals is below the calibrated minimum of ${minSample} each.`, { won: won.length, lost: lost.length, minSample }), evidence };
     const wonMedian = median(won.map(count));
     const lostMedian = median(lost.map(count));
     const teams = new Set(deals.map((d) => d.team)).size;
     const segments = [{ dimension: "outcome", segments: 2 }, { dimension: "team", segments: teams }];
     const facts = { wonMedian, lostMedian, won: won.length, lost: lost.length };
-    if (wonMedian > lostMedian) return { outcome: "pass", summary: said`Won deals have a median of ${wonMedian} logged activities against ${lostMedian} on lost deals.`, evidence, segmentsChecked: segments, facts };
+    if (wonMedian > lostMedian) return { outcome: "pass", summary: named(said`Won deals have a median of ${wonMedian} logged activities against ${lostMedian} on lost deals.`, { wonMedian, lostMedian }), evidence, segmentsChecked: segments, facts };
     return {
       outcome: "issue",
       title: said`Lost deals get as much logged effort as won ones`,
-      summary: said`Lost deals have a median of ${lostMedian} logged activities against ${wonMedian} on won deals, so effort isn't going where deals are won, or isn't being logged evenly.`,
+      summary: named(said`Lost deals have a median of ${lostMedian} logged activities against ${wonMedian} on won deals, so effort isn't going where deals are won, or isn't being logged evenly.`, { lostMedian, wonMedian }),
       recommendation: said`Look at when deals are qualified out. If they're dropped late, that's where the time goes.`,
       recommendationType: "investigate",
       severity: "low",
@@ -248,7 +248,7 @@ const repActivity: Rule = {
     const openByRep = new Map<string, number>();
     for (const deal of pipeline.deals) if (deal.category === "open" && active.has(deal.OwnerId)) openByRep.set(deal.OwnerId, (openByRep.get(deal.OwnerId) ?? 0) + 1);
     const evidence = [stamped(ctx, data, openByRep.size, `Logged in the last ${RECENT_DAYS} days, per open deal`)];
-    if (openByRep.size < MIN_REPS) return { outcome: "not_measurable", reason: said`${plural(openByRep.size, "rep")} with open deals is too few to compare.`, evidence };
+    if (openByRep.size < MIN_REPS) return { outcome: "not_measurable", reason: named(said`${plural(openByRep.size, "rep")} with open deals is too few to compare.`, { size: openByRep.size }), evidence };
     // Each rep's recent touches, counted in one pass over them all.
     const recentByRep = new Map<string, number>();
     for (const t of data.touches) if (new Date(t.at).toISOString() >= cutoff) recentByRep.set(t.ownerId, (recentByRep.get(t.ownerId) ?? 0) + 1);
@@ -257,7 +257,7 @@ const repActivity: Rule = {
     const low = rates.filter((r) => r.rate < typical * REP_FLOOR_SHARE).sort((a, b) => a.rate - b.rate || a.rep.localeCompare(b.rep));
     const segments = [{ dimension: "rep", segments: rates.length }];
     const facts = { typicalPerDeal: typical, reps: rates.length, low: low.length };
-    if (low.length === 0) return { outcome: "pass", summary: said`No rep logs under ${REP_FLOOR_SHARE * 100}% of the typical ${typical} activities per open deal.`, evidence, segmentsChecked: segments, facts };
+    if (low.length === 0) return { outcome: "pass", summary: named(said`No rep logs under ${REP_FLOOR_SHARE * 100}% of the typical ${typical} activities per open deal.`, { typical }), evidence, segmentsChecked: segments, facts };
     return {
       outcome: "issue",
       title: said`Some reps are logging far less than their peers`,
@@ -289,7 +289,7 @@ const unlinkedTasks: Rule = {
     if (data.tasks.length === 0) return { outcome: "not_measurable", reason: said`No tasks were logged in the last year, so we can't tell a clean record from an unused one.`, evidence };
     const result = segmentRate(data.tasks, (t) => t.WhatId === null && t.WhoId === null, { rep: (t) => ctx.userLabel(t.OwnerId), "task type": (t) => t.TaskSubtype ?? "No type" }, { segmentLimit: UNLINKED_SEGMENT_LIMIT, minSegment: MIN_GROUP_EVENTS });
     const facts = { hits: result.hits, n: result.n, rate: result.rate };
-    if (result.rate <= UNLINKED_LIMIT && result.hotspots.length === 0) return { outcome: "pass", summary: said`Tasks linked to no record: ${result.hits} of ${result.n} (${result.rate}%), with no rep above ${UNLINKED_SEGMENT_LIMIT}%.`, evidence, segmentsChecked: result.segmentsChecked, facts };
+    if (result.rate <= UNLINKED_LIMIT && result.hotspots.length === 0) return { outcome: "pass", summary: named(said`Tasks linked to no record: ${result.hits} of ${result.n} (${result.rate}%), with no rep above ${UNLINKED_SEGMENT_LIMIT}%.`, { hits: result.hits, n: result.n, rate: [result.rate, "percent"], unlinkedSegmentLimit: [UNLINKED_SEGMENT_LIMIT, "percent"] }), evidence, segmentsChecked: result.segmentsChecked, facts };
     const worst = result.hotspots[0];
     return {
       outcome: "issue",
@@ -335,7 +335,7 @@ function activityMetrics(ctx: Ctx): Metric[] {
     return { date: last, value: thin ? null : Math.round((rows.filter((e) => e.WhatId !== null).length / rows.length) * 1000) / 10, n: rows.length, notMeasurableReason: thin ? `${rows.length} events is below the calibrated minimum of ${minSample}` : null };
   });
   const latest = series.filter((p) => p.value !== null).at(-1);
-  if (!latest) metrics.push({ ...definitions.linked, ...common, status: "not_measurable", reason: said`No whole month has ${minSample} events.` });
+  if (!latest) metrics.push({ ...definitions.linked, ...common, status: "not_measurable", reason: named(said`No whole month has ${minSample} events.`, { minSample }) });
   else metrics.push({ ...definitions.linked, ...common, status: "measured", value: latest.value!, n: data.events.length, dateRange: { from: data.from, to: ctx.window.to }, segments: [], segmentExemptReason: "Shown by month. Team and rep cuts are in the event link check.", series, stats: {} });
 
   const touches = touchesByDeal(data);
@@ -347,7 +347,7 @@ function activityMetrics(ctx: Ctx): Metric[] {
     const rows = deals.filter((d) => d.category === category);
     // Lost leaves no decision out (DECISIONS.md 600).
     if (unsplit && category === "lost") metrics.push({ ...definition, ...common, status: "not_measurable", reason: unsplit });
-    else if (rows.length < minSample) metrics.push({ ...definition, ...common, status: "not_measurable", reason: said`${rows.length} ${category} deals is below the calibrated minimum of ${minSample}.` });
+    else if (rows.length < minSample) metrics.push({ ...definition, ...common, status: "not_measurable", reason: named(said`${rows.length} ${category} deals is below the calibrated minimum of ${minSample}.`, { rows: rows.length, minSample }) });
     else metrics.push({ ...definition, ...common, status: "measured", value: median(rows.map(count)), n: rows.length, dateRange: { from: data.from, to: ctx.window.to }, segments: segment(rows, dims, minSample, (group) => median(group.map(count))), segmentExemptReason: null, series: [], stats: {} });
   }
   return metrics;

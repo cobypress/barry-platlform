@@ -35,7 +35,7 @@ type Ctx = Omit<RuleContext, "metrics">;
 type InUse = NotMeasurableResult & { inUse: false };
 
 /** Why a figure can't come from a forecast read cut off at its row limit. */
-const cutOff = (read: number): Said => said`The forecast read stopped at its row limit after ${grouped(read)} rows, so the rest of this period's forecast wasn't read.`;
+const cutOff = (read: number): Said => named(said`The forecast read stopped at its row limit after ${grouped(read)} rows, so the rest of this period's forecast wasn't read.`, { read });
 
 /** Forecasting counts as in use only if the org has an active revenue type and forecast rows for today. */
 function forecastInUse(ctx: Ctx): { inUse: true; typeId: string; items: ForecastItemRow[] } | InUse {
@@ -69,7 +69,7 @@ const inUseRule: Rule = {
     const cut = items.status === "ok" && items.truncated;
     return {
       outcome: "pass",
-      summary: said`Collaborative Forecasts is in use: ${cut ? "at least " : ""}${rows.length} forecast rows for ${cut ? "at least " : ""}${plural(new Set(rows.map((r) => r.OwnerId)).size, "person", "people")} in the current period.${cut ? " The read stopped at its row limit." : ""}`,
+      summary: named(said`Collaborative Forecasts is in use: ${cut ? "at least " : ""}${rows.length} forecast rows for ${cut ? "at least " : ""}${plural(new Set(rows.map((r) => r.OwnerId)).size, "person", "people")} in the current period.${cut ? " The read stopped at its row limit." : ""}`, { rows: rows.length }),
       evidence: [ctx.ev(items.source, { count: rows.length })],
       segmentsChecked: [{ dimension: "forecast owner", segments: new Set(rows.map((r) => r.OwnerId)).size }, { dimension: "forecast category", segments: new Set(rows.map((r) => r.ForecastCategoryName ?? "None")).size }],
       facts: { rows: rows.length },
@@ -124,7 +124,7 @@ const adjustmentsRule: Rule = {
     return {
       outcome: "issue",
       title: said`Much of the Commit forecast comes from hand adjustments`,
-      summary: said`Hand adjustments move the Commit forecast by ${share}% of its unadjusted amount, across ${plural(facts.adjustedOwners, "person", "people")}. The difference is judgement that isn't backed by a deal in Salesforce.`,
+      summary: named(said`Hand adjustments move the Commit forecast by ${share}% of its unadjusted amount, across ${plural(facts.adjustedOwners, "person", "people")}. The difference is judgement that isn't backed by a deal in Salesforce.`, { share: [share, "percent"], adjustedOwners: facts.adjustedOwners }),
       recommendation: said`Ask for a reason behind each large adjustment, and check whether the deals should be recorded differently.`,
       recommendationType: "investigate",
       severity: "medium",
@@ -165,12 +165,12 @@ const quotaGaps: Rule = {
     if (owners.length === 0) return { outcome: "pass", summary: said`No active user owns an open deal.`, evidence, segmentExemptReason: "There are no owners to segment." };
     const result = segmentRate(owners, (id) => !holders.has(id), { team: (id) => active.get(id)!.UserRole?.Name ?? "No role" }, { segmentLimit: 50, minSegment: MIN_TEAM });
     if (result.rate <= QUOTA_GAP_LIMIT && result.hotspots.length === 0) {
-      return { outcome: "pass", summary: said`Deal owners with no quota this period: ${result.hits} of ${result.n} (${result.rate}%).`, evidence, segmentsChecked: result.segmentsChecked, facts: { hits: result.hits, n: result.n, rate: result.rate } };
+      return { outcome: "pass", summary: named(said`Deal owners with no quota this period: ${result.hits} of ${result.n} (${result.rate}%).`, { hits: result.hits, n: result.n, rate: [result.rate, "percent"] }), evidence, segmentsChecked: result.segmentsChecked, facts: { hits: result.hits, n: result.n, rate: result.rate } };
     }
     return {
       outcome: "issue",
       title: said`Some deal owners have no quota`,
-      summary: said`Active users who own open deals but have no quota this period: ${result.hits} of ${result.n} (${result.rate}%). Their deals count towards the forecast with nothing to measure them against.`,
+      summary: named(said`Active users who own open deals but have no quota this period: ${result.hits} of ${result.n} (${result.rate}%). Their deals count towards the forecast with nothing to measure them against.`, { hits: result.hits, n: result.n, rate: [result.rate, "percent"] }),
       recommendation: said`Load a quota for each person who carries a number, or move their deals to someone who does.`,
       recommendationType: "change",
       severity: "medium",
@@ -209,7 +209,7 @@ function closedSinceTheRun(ctx: Ctx, open: Deal[]): { closed: Deal[]; source: So
   const { closedSinceTheRun: read } = ctx.data(forecastExtractor);
   if (read.status !== "ok") return { reason: `Deals closed since this run's date couldn't be read: ${read.reason}`, evidence: [ctx.ev(read.source, { count: null })] };
   // A part of the list would quietly miss a deal closed since (DECISIONS.md 467).
-  if (read.truncated) return { reason: said`The read of deals closed since this run's date stopped at its row limit after ${grouped(read.data.length)} rows, so the rest weren't read.`, evidence: [ctx.ev(read.source, { count: read.data.length })] };
+  if (read.truncated) return { reason: named(said`The read of deals closed since this run's date stopped at its row limit after ${grouped(read.data.length)} rows, so the rest weren't read.`, { data: read.data.length }), evidence: [ctx.ev(read.source, { count: read.data.length })] };
   const ids = new Set(read.data);
   // The list goes by Salesforce's flag, not the calibration's open. A deal it
   // already flagged closed at the run's date can't have closed since: an edit
@@ -231,7 +231,7 @@ function commitScope(ctx: RuleContext, open: Deal[], isHit: (d: Deal) => boolean
     deals: result.commit.filter((d) => !closed.has(d.Id)),
     isHit,
     evidence: result.evidence,
-    exclusions: [said`${plural(left, "deal")} closed since this run's date, whose forecast category then can't be read`],
+    exclusions: [named(said`${plural(left, "deal")} closed since this run's date, whose forecast category then can't be read`, { left })],
     leftOut: said`${left === 1 ? "One deal open at this run's date and closed since is" : said`${left} deals open at this run's date and closed since are`} left out, as we can't read the forecast category ${left === 1 ? "it" : "they"} had then.`,
   };
 }
@@ -272,7 +272,7 @@ const earlyStageCommits = shareRule({
     return commitScope(ctx, open, (d) => early.has(d.StageName));
   },
   issueTitle: said`Early-stage deals are being counted as Commit`,
-  sentence: (hits, n, rate) => said`Deals in Commit that are still in the first ${EARLY_STAGES} open stages: ${hits} of ${n} (${rate}%).`,
+  sentence: (hits, n, rate) => named(said`Deals in Commit that are still in the first ${EARLY_STAGES} open stages: ${hits} of ${n} (${rate}%).`, { earlyStages: EARLY_STAGES, hits, n, rate: [rate, "percent"] }),
   recommendation: said`Check whether these are real commitments. If they are, the stage is out of date. If not, take them out of Commit.`,
   owner: "Sales operations",
   sized: true,
@@ -307,7 +307,7 @@ function forecastMetrics(ctx: Ctx): Metric[] {
   const holders = new Set(covered.reps.map((r) => r.owner));
   const unread = since.closed.filter((d) => holders.has(d.OwnerId)).length;
   if (unread > 0) {
-    const reason = unread === 1 ? said`One deal open at this run's date has closed since, so its forecast category then can't be read.` : said`${unread} deals open at this run's date have closed since, so their forecast category then can't be read.`;
+    const reason = unread === 1 ? said`One deal open at this run's date has closed since, so its forecast category then can't be read.` : named(said`${unread} deals open at this run's date have closed since, so their forecast category then can't be read.`, { unread });
     return [notMeasurable(reason, [ctx.ev(since.source, { count: unread, note: "Deals open at this run's date, owned by people with a quota, and closed since" })])];
   }
   const committed = new Set(facts.data.filter((f) => f.ForecastCategoryName === COMMIT).map((f) => f.OpportunityId));

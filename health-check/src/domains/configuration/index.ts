@@ -1,4 +1,5 @@
 import { metadataExtractor, apexExtractor } from "../../extract/automation.ts";
+import { FIELD_RECENT_MONTHS } from "../../extract/configuration.ts";
 import { each, named as valued } from "../../engine/named.ts";
 import { componentChangesExtractor } from "../../extract/component-changes.ts";
 import {
@@ -72,7 +73,7 @@ const customFieldSprawl: Rule = {
         outcome: "issue",
         title: said`Core objects carry a heavy custom field load`,
         // The objects are our own fixed four, named by API name.
-        summary: valued(said`${joinSaid(over.map(([o, n]) => said`${o} has ${n} custom fields`), "; ")}. We use ${FIELD_SPRAWL_LIMIT} as a working limit: past it, page layouts and reports get harder to keep clean and users stop filling fields in.`, { fieldLimit: FIELD_SPRAWL_LIMIT }),
+        summary: valued(said`${joinSaid(over.map(([o, n]) => valued(said`${o} has ${n} custom fields`, { n })), "; ")}. We use ${FIELD_SPRAWL_LIMIT} as a working limit: past it, page layouts and reports get harder to keep clean and users stop filling fields in.`, { fieldLimit: FIELD_SPRAWL_LIMIT }),
         recommendation: said`Review these objects with the field usage findings and agree which fields still earn their place.`,
         recommendationType: "investigate",
         severity: "medium",
@@ -87,7 +88,7 @@ const customFieldSprawl: Rule = {
     } else if (counts.length > 0) {
       results.push({
         outcome: "pass",
-        summary: said`All ${counts.length} core objects are under ${FIELD_SPRAWL_LIMIT} custom fields.`,
+        summary: valued(said`All ${counts.length} core objects are under ${FIELD_SPRAWL_LIMIT} custom fields.`, { counts: counts.length, fieldSprawlLimit: FIELD_SPRAWL_LIMIT }),
         evidence,
         segmentsChecked: [{ dimension: "object", segments: counts.length }],
         facts: Object.fromEntries(counts),
@@ -122,7 +123,7 @@ const unusedCustomFields: Rule = {
       const range = { from: scan.data.recentFrom, to: ctx.window.to };
       const exclusions = [`Not scanned, because their type can't be counted: ${scan.data.notScanned.length} fields`, "Packaged and formula fields"];
       if (scan.data.fields.length > 0 && total < MIN_RECORDS_FOR_UNUSED) {
-        results.push({ outcome: "not_measurable", key: object, reason: said`${org(named)} has ${total} records, below the ${MIN_RECORDS_FOR_UNUSED} needed to call a field unused.`, evidence: [ctx.ev(scan.source, { count: total, exclusions })] });
+        results.push({ outcome: "not_measurable", key: object, reason: valued(said`${org(named)} has ${total} records, below the ${MIN_RECORDS_FOR_UNUSED} needed to call a field unused.`, { total, minRecordsForUnused: MIN_RECORDS_FOR_UNUSED }), evidence: [ctx.ev(scan.source, { count: total, exclusions })] });
         continue;
       }
       // Both tests must agree: a field empty overall but filling up this year is a new field.
@@ -137,9 +138,9 @@ const unusedCustomFields: Rule = {
         outcome: "issue",
         key: object,
         title: said`Custom fields on ${org(named)} are almost never filled in`,
-        summary: valued(said`Of ${plural(scan.data.fields.length, "scanned custom field")} on ${org(named)}, ${unused.length} ${unused.length === 1 ? "is" : "are"} filled on under ${UNUSED_FILL_LIMIT}% of records, both overall and on records from the last 12 months.`, { fillPct: UNUSED_FILL_LIMIT }),
-        recommendation: said`Remove ${plural(unused.length, "field")} from ${org(named)} once the data is archived.`,
-        blockedRecommendation: said`Review ${plural(unused.length, "field")} with the people who own ${org(named)}. We aren't recommending removal, because not every dependency check could pass.`,
+        summary: valued(said`Of ${plural(scan.data.fields.length, "scanned custom field")} on ${org(named)}, ${unused.length} ${unused.length === 1 ? "is" : "are"} filled on under ${UNUSED_FILL_LIMIT}% of records, both overall and on records from the last 12 months.`, { fillPct: UNUSED_FILL_LIMIT, recentMonths: FIELD_RECENT_MONTHS }),
+        recommendation: valued(said`Remove ${plural(unused.length, "field")} from ${org(named)} once the data is archived.`, { unused: unused.length }),
+        blockedRecommendation: valued(said`Review ${plural(unused.length, "field")} with the people who own ${org(named)}. We aren't recommending removal, because not every dependency check could pass.`, { unused: unused.length }),
         recommendationType: "remove",
         // Hours of upkeep when the calibration agrees a time: with none agreed and
         // a guard blocking, it's the guard that keeps a figure off (DECISIONS.md 498).
@@ -175,11 +176,11 @@ const unassignedLayouts: Rule = {
     const unused = layouts.data.filter((l) => !assigned.has(l.Id));
     const objects = new Set(layouts.data.map((l) => l.EntityDefinitionId));
     const evidence = [ctx.ev(layouts.source, { count: layouts.data.length }), ctx.ev(assignments.source, { count: assigned.size })];
-    if (unused.length === 0) return { outcome: "pass", summary: said`All ${layouts.data.length} page layouts are assigned to a profile.`, evidence, segmentsChecked: [{ dimension: "object", segments: objects.size }] };
+    if (unused.length === 0) return { outcome: "pass", summary: valued(said`All ${layouts.data.length} page layouts are assigned to a profile.`, { data: layouts.data.length }), evidence, segmentsChecked: [{ dimension: "object", segments: objects.size }] };
     return {
       outcome: "issue",
       title: said`Some page layouts aren't assigned to any profile`,
-      summary: said`Of ${plural(layouts.data.length, "page layout")}, ${unused.length} ${unused.length === 1 ? "isn't" : "aren't"} assigned to any profile, so nobody sees ${unused.length === 1 ? "it" : "them"}.`,
+      summary: valued(said`Of ${plural(layouts.data.length, "page layout")}, ${unused.length} ${unused.length === 1 ? "isn't" : "aren't"} assigned to any profile, so nobody sees ${unused.length === 1 ? "it" : "them"}.`, { data: layouts.data.length, unused: unused.length }),
       recommendation: said`Review the unassigned layouts and retire the ones nobody needs.`,
       recommendationType: "investigate",
       severity: "low",
@@ -214,13 +215,13 @@ const undocumentedFields: Rule = {
     const rate = pct(bare.length, fields.length);
     const noHelp = fields.filter((f) => !f.helpText).length;
     const facts = { fields: fields.length, bare: bare.length, rate, noHelpText: noHelp };
-    if (rate <= UNDOCUMENTED_FIELD_LIMIT) return { outcome: "pass", summary: said`Custom fields with neither help text nor a description: ${bare.length} of ${fields.length} (${rate}%).`, evidence, segmentsChecked: segments, facts };
+    if (rate <= UNDOCUMENTED_FIELD_LIMIT) return { outcome: "pass", summary: valued(said`Custom fields with neither help text nor a description: ${bare.length} of ${fields.length} (${rate}%).`, { bare: bare.length, fields: fields.length, rate: [rate, "percent"] }), evidence, segmentsChecked: segments, facts };
     const byObject = [...objects].map((o) => ({ o, n: bare.filter((f) => f.object === o).length })).filter((x) => x.n > 0).sort((a, b) => b.n - a.n || a.o.localeCompare(b.o));
     const labels = labelsOf(ctx);
     return {
       outcome: "issue",
       title: said`Most custom fields don't say what they're for`,
-      summary: valued(said`Custom fields with neither help text nor a description: ${bare.length} of ${fields.length} (${rate}%), most on ${joinSaid(byObject.slice(0, 3).map((x) => said`${org(labels.object(x.o))} (${x.n})`), ", ")}. Users see no explanation when they fill these in, and whoever maintains the org can't tell what each one is for.`, each(byObject.slice(0, 3), (x) => ({ bare: x.n }))),
+      summary: valued(said`Custom fields with neither help text nor a description: ${bare.length} of ${fields.length} (${rate}%), most on ${joinSaid(byObject.slice(0, 3).map((x) => valued(said`${org(labels.object(x.o))} (${x.n})`, { n: x.n })), ", ")}. Users see no explanation when they fill these in, and whoever maintains the org can't tell what each one is for.`, each(byObject.slice(0, 3), (x) => ({ bare: x.n }))),
       recommendation: said`Add help text to the fields people fill in and a description to every field you keep, and retire the ones nobody can explain.`,
       recommendationType: "change",
       severity: "low",
@@ -253,10 +254,10 @@ const stageSprawl: Rule = {
     const evidence = [ctx.ev(stages.source, { count: active.length }), ctx.ev(history.source, { count: history.data.length, dateRange: ctx.window })];
     const segments = [{ dimension: "stage", segments: active.length }];
     if (active.length <= STAGE_LIMIT && unused.length === 0) {
-      return { outcome: "pass", summary: said`${active.length} active stages, all used in the analysis window.`, evidence, segmentsChecked: segments, facts: { activeStages: active.length } };
+      return { outcome: "pass", summary: valued(said`${active.length} active stages, all used in the analysis window.`, { active: active.length }), evidence, segmentsChecked: segments, facts: { activeStages: active.length } };
     }
     const tooMany = active.length > STAGE_LIMIT ? valued(said`${plural(active.length, "active stage")}, against our working limit of ${STAGE_LIMIT}`, { activeStages: active.length, stageLimit: STAGE_LIMIT }) : null;
-    const idle = unused.length > 0 ? said`${plural(unused.length, "active stage")} with no deals in the analysis window` : null;
+    const idle = unused.length > 0 ? valued(said`${plural(unused.length, "active stage")} with no deals in the analysis window`, { unused: unused.length }) : null;
     // The one or two parts, joined with ", and" as before.
     const parts = tooMany && idle ? said`${tooMany}, and ${idle}` : (tooMany ?? idle ?? said``);
     return {
@@ -301,11 +302,11 @@ const picklistSprawl: Rule = {
     if (sized.length === 0) return { outcome: "not_measurable", reason: said`None of the picklists we check could be read.`, evidence: [ctx.ev(schema.Lead!.source, { count: null })] };
     const over = sized.filter((p) => p.n > PICKLIST_LIMIT);
     const segments = [{ dimension: "picklist", segments: sized.length }];
-    if (over.length === 0) return { outcome: "pass", summary: said`All ${sized.length} picklists we check are at or under ${PICKLIST_LIMIT} values.`, evidence, segmentsChecked: segments };
+    if (over.length === 0) return { outcome: "pass", summary: valued(said`All ${sized.length} picklists we check are at or under ${PICKLIST_LIMIT} values.`, { sized: sized.length, picklistLimit: PICKLIST_LIMIT }), evidence, segmentsChecked: segments };
     return {
       outcome: "issue",
       title: said`Reporting picklists have grown too long`,
-      summary: said`${joinSaid(over.map((p) => said`${p.words} has ${p.n} active values`), "; ")}. Long lists split the same answer across several values, which weakens every report built on them.`,
+      summary: said`${joinSaid(over.map((p) => valued(said`${p.words} has ${p.n} active values`, { n: p.n })), "; ")}. Long lists split the same answer across several values, which weakens every report built on them.`,
       recommendation: said`Consolidate these lists and move old values out of use.`,
       recommendationType: "change",
       severity: "low",
@@ -339,22 +340,22 @@ const setupChangeConcentration: Rule = {
     const people = Object.keys(configChangesByUser);
     const segments = [{ dimension: "user", segments: people.length }, { dimension: "section", segments: Object.keys(audit.data.bySection).length }];
     if (changes < MIN_CHANGES_FOR_CONCENTRATION) {
-      return { outcome: "not_measurable", reason: said`Only ${changes} setup changes in the period, below the ${MIN_CHANGES_FOR_CONCENTRATION} needed to judge who makes them.`, evidence };
+      return { outcome: "not_measurable", reason: valued(said`Only ${changes} setup changes in the period, below the ${MIN_CHANGES_FOR_CONCENTRATION} needed to judge who makes them.`, { changes, minChangesForConcentration: MIN_CHANGES_FOR_CONCENTRATION }), evidence };
     }
     const inactive = new Set(users.data.filter((u) => !u.IsActive).map((u) => u.Id));
     const byInactive = people.filter((id) => inactive.has(id)).reduce((sum, id) => sum + configChangesByUser[id]!, 0);
     const [topUser, topCount] = Object.entries(configChangesByUser).sort(([, a], [, b]) => b - a)[0]!;
     const topShare = pct(topCount, changes);
     if (topShare < CONCENTRATION_SHARE && byInactive === 0) {
-      return { outcome: "pass", summary: said`${people.length} people made the ${changes} setup changes in the period, and the busiest made ${topShare}%.`, evidence, segmentsChecked: segments, facts: { changes, topShare } };
+      return { outcome: "pass", summary: valued(said`${people.length} people made the ${changes} setup changes in the period, and the busiest made ${topShare}%.`, { people: people.length, changes, topShare: [topShare, "percent"] }), evidence, segmentsChecked: segments, facts: { changes, topShare } };
     }
     return {
       outcome: "issue",
       title: said`Org knowledge is concentrated`,
       summary:
         topShare >= CONCENTRATION_SHARE
-          ? said`${org(ctx.userLabel(topUser))} made ${topShare}% of ${changes} setup changes in the period, so what they know about the org isn't shared.`
-          : said`${byInactive} of ${changes} setup changes in the period were made by users who are now inactive.`,
+          ? valued(said`${org(ctx.userLabel(topUser))} made ${topShare}% of ${changes} setup changes in the period, so what they know about the org isn't shared.`, { topShare: [topShare, "percent"], changes })
+          : valued(said`${byInactive} of ${changes} setup changes in the period were made by users who are now inactive.`, { byInactive, changes }),
       recommendation: said`Document how the org is changed, and make sure a second person can do the work.`,
       recommendationType: "change",
       severity: "medium",

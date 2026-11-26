@@ -17,6 +17,8 @@ const SIGNED_OFF: string[] = [
   "src/domains/automation/index.ts: plural(active.length, \"active Workflow Rule\")",
   "src/domains/automation/index.ts: plural(missing, \"element\")",
   "src/domains/automation/index.ts: plural(objects, \"object\")",
+  // The end-of-support day, from SUPPORT_ENDED_ON, the module's own constant, in fixed month names (DECISIONS.md 772).
+  "src/domains/automation/notes.ts: onDay(SUPPORT_ENDED_ON)",
   "src/domains/automation/shared.ts: plural(count, \"active Apex trigger\")",
   // plural's own words: its first overload holds both nouns to literal types, so nothing here is the org's (DECISIONS.md 657).
   "src/engine/rule.ts: `${n} ${n === 1 ? one : many}`",

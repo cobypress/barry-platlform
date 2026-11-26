@@ -3,7 +3,7 @@ import { named } from "../../engine/named.ts";
 import { componentChangesExtractor } from "../../extract/component-changes.ts";
 import { customObjectsExtractor, recordCountsExtractor } from "../../extract/configuration.ts";
 import { notSized, plural, type Rule, type RuleResult } from "../../engine/rule.ts";
-import { MIGRATE_TO_FLOW_NOTE, END_OF_SUPPORT } from "./notes.ts";
+import { MIGRATE_TO_FLOW_NOTE, END_OF_SUPPORT, SUPPORT_ENDED_ON } from "./notes.ts";
 import { apexGap, apexReason, groupCount, metadataOr, NO_OWN_APEX, ownApex, UNNAMED, unnamedNote } from "./shared.ts";
 import { labelsOf } from "../labels.ts";
 import { labelsExtractor } from "../../extract/labels.ts";
@@ -41,7 +41,7 @@ const legacyWorkflowRules: Rule = {
     return {
       outcome: "issue",
       title: said`Automation still runs on Workflow Rules`,
-      summary: said`${eng(plural(active.length, "active Workflow Rule"))} across ${eng(plural(objects, "object"))}. ${END_OF_SUPPORT}`,
+      summary: named(said`${eng(plural(active.length, "active Workflow Rule"))} across ${eng(plural(objects, "object"))}. ${END_OF_SUPPORT}`, { supportEnded: [SUPPORT_ENDED_ON, "date"] }),
       recommendation: said`Plan the move from Workflow Rules to Flow, starting with the objects that have the most rules. ${MIGRATE_TO_FLOW_NOTE}`,
       recommendationType: "change",
       severity: "high",
@@ -75,7 +75,7 @@ const legacyProcessBuilder: Rule = {
     return {
       outcome: "issue",
       title: said`Automation still runs on Process Builder`,
-      summary: said`${eng(plural(active.length, "active Process Builder"))}. ${END_OF_SUPPORT}`,
+      summary: named(said`${eng(plural(active.length, "active Process Builder"))}. ${END_OF_SUPPORT}`, { supportEnded: [SUPPORT_ENDED_ON, "date"] }),
       recommendation: said`Move each Process Builder to Flow in the same piece of work as any Workflow Rules on its object, so each object is migrated once. ${MIGRATE_TO_FLOW_NOTE}`,
       recommendationType: "change",
       severity: "high",
@@ -131,7 +131,7 @@ const mixedAutomation: Rule = {
       ctx.ev(ids.source, { count: ids.status === "ok" ? ids.data.length : null, note: "Names the custom objects triggers refer to by id" }),
     ];
     const segments = [{ dimension: "object", segments: tools.size }];
-    if (mixed.length === 0) return { outcome: "pass", summary: said`No object runs ${MIXED_AUTOMATION_LIMIT} or more automation tools.${note}`, evidence, segmentsChecked: segments, facts: { unnamedTriggers: unnamed } };
+    if (mixed.length === 0) return { outcome: "pass", summary: named(said`No object runs ${MIXED_AUTOMATION_LIMIT} or more automation tools.${note}`, { mixedAutomationLimit: MIXED_AUTOMATION_LIMIT }), evidence, segmentsChecked: segments, facts: { unnamedTriggers: unnamed } };
     return {
       outcome: "issue",
       title: said`Automation on some objects is split across several tools`,
@@ -164,11 +164,11 @@ const hardcodedIds: Rule = {
     const affected = active.filter((f) => f.hardcodedUserIds + f.hardcodedOtherIds + f.hardcodedEmails > 0);
     const evidence = [ctx.ev({ kind: "metadata", path: "flows/*.flow" }, { count: affected.length, exclusions: ["Inactive versions"] })];
     const segments = [{ dimension: "flow", segments: active.length }];
-    if (affected.length === 0) return { outcome: "pass", summary: said`None of the ${active.length} active flows contain hardcoded ids or emails.`, evidence, segmentsChecked: segments };
+    if (affected.length === 0) return { outcome: "pass", summary: named(said`None of the ${active.length} active flows contain hardcoded ids or emails.`, { active: active.length }), evidence, segmentsChecked: segments };
     return {
       outcome: "issue",
       title: said`Flows depend on hardcoded ids or email addresses`,
-      summary: said`Of ${eng(plural(active.length, "active flow"))}, ${affected.length} ${affected.length === 1 ? "contains" : "contain"} hardcoded user ids, record ids or email addresses. These break when someone leaves or when the flow moves between orgs.`,
+      summary: named(said`Of ${eng(plural(active.length, "active flow"))}, ${affected.length} ${affected.length === 1 ? "contains" : "contain"} hardcoded user ids, record ids or email addresses. These break when someone leaves or when the flow moves between orgs.`, { affected: affected.length }),
       recommendation: said`Replace them with custom metadata, custom labels or queue lookups.`,
       recommendationType: "change",
       severity: "high",
@@ -198,11 +198,11 @@ const missingFaultPaths: Rule = {
     const missing = affected.reduce((sum, f) => sum + (f.dmlOrActions - f.withFault), 0);
     const evidence = [ctx.ev({ kind: "metadata", path: "flows/*.flow" }, { count: affected.length, exclusions: ["Inactive versions", "Process Builders, which have no fault paths"] })];
     const segments = [{ dimension: "flow", segments: active.length }];
-    if (affected.length === 0) return { outcome: "pass", summary: said`All ${active.length} active flows that write data have fault paths.`, evidence, segmentsChecked: segments };
+    if (affected.length === 0) return { outcome: "pass", summary: named(said`All ${active.length} active flows that write data have fault paths.`, { active: active.length }), evidence, segmentsChecked: segments };
     return {
       outcome: "issue",
       title: said`Flow failures aren't handled`,
-      summary: said`Of ${eng(plural(active.length, "active flow"))} that write data, ${affected.length} ${affected.length === 1 ? "is" : "are"} missing fault paths on ${eng(plural(missing, "element"))}. When one of those fails, the user sees a generic error and the failure isn't logged anywhere useful.`,
+      summary: named(said`Of ${eng(plural(active.length, "active flow"))} that write data, ${affected.length} ${affected.length === 1 ? "is" : "are"} missing fault paths on ${eng(plural(missing, "element"))}. When one of those fails, the user sees a generic error and the failure isn't logged anywhere useful.`, { affected: affected.length }),
       recommendation: said`Add a fault path to each element, with a shared way of logging failures.`,
       recommendationType: "change",
       severity: "medium",
@@ -259,12 +259,12 @@ const undocumentedAutomation: Rule = {
     // The kinds are our own fixed names.
     const breakdown = joinSaid(present.map((g) => named(said`${eng(g.kind)}: ${g.missing} of ${g.total}`, { missing: g.missing, of: g.total })), ", ");
     if (rate <= UNDOCUMENTED_LIMIT && worst.missing / worst.total <= 0.8) {
-      return { outcome: "pass", summary: said`Automation with no description or comment: ${missing} of ${total} (${rate}%). ${breakdown}.`, evidence, segmentsChecked: segments, facts };
+      return { outcome: "pass", summary: named(said`Automation with no description or comment: ${missing} of ${total} (${rate}%). ${breakdown}.`, { missing, total, rate: [rate, "percent"] }), evidence, segmentsChecked: segments, facts };
     }
     return {
       outcome: "issue",
       title: said`Most automation has no description of what it does`,
-      summary: said`Active automation with no description or comment: ${missing} of ${total} (${rate}%). ${breakdown}. Without one, anyone new has to read each component to learn what it does and why, and changing it safely depends on whoever built it.`,
+      summary: named(said`Active automation with no description or comment: ${missing} of ${total} (${rate}%). ${breakdown}. Without one, anyone new has to read each component to learn what it does and why, and changing it safely depends on whoever built it.`, { missing, total, rate: [rate, "percent"] }),
       recommendation: said`Describe what each flow, rule and class does and why, starting with your busiest objects, and require it for anything new.`,
       recommendationType: "change",
       severity: "medium",

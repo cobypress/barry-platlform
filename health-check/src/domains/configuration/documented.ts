@@ -1,4 +1,5 @@
 import { editionIsWhy } from "../../salesforce/refusal-words.ts";
+import { named as valued } from "../../engine/named.ts";
 import { passedOn, said, type Said } from "../../engine/org-words.ts";
 import { apexExtractor, metadataExtractor, type ApexTriggerRow } from "../../extract/automation.ts";
 import { userKinds } from "../user-kinds.ts";
@@ -205,7 +206,7 @@ function automation(ctx: Ctx): Metric {
       }
       for (const step of triggerSteps(t)) items.push({ object, step, name: t.Name, active: t.Status === "Active", described: t.commented });
     }
-    if (unnamed) exclusions.push(said`${unnamed} Apex triggers on custom objects we couldn't name`);
+    if (unnamed) exclusions.push(valued(said`${unnamed} Apex triggers on custom objects we couldn't name`, { unnamed }));
   } else exclusions.push(editionIsWhy(triggers.reason) ? "Apex triggers, which Professional Edition doesn't allow the org to have of its own" : `Apex triggers, which couldn't be read: ${triggers.reason}`);
   if (duplicates.status === "ok") for (const d of duplicates.data) items.push({ object: d.SobjectType, step: "duplicate", name: d.DeveloperName, active: d.IsActive, described: null });
   else exclusions.push(`Duplicate rules, which couldn't be read: ${duplicates.reason}`);

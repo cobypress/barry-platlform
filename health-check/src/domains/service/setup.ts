@@ -1,4 +1,5 @@
 import { notSized, pct, plural, segmentRate, type Rule, type RuleContext, type RuleResult } from "../../engine/rule.ts";
+import { named as valued } from "../../engine/named.ts";
 import { aiSignalsExtractor, SETTINGS_SOURCE } from "../../extract/ai.ts";
 import { orgExtractor } from "../../extract/configuration.ts";
 import { escalationRulesExtractor, serviceActivityExtractor, serviceCasesExtractor, serviceSetupExtractor, type ArticleRow, type EscalationRule, type ServiceSetup } from "../../extract/service.ts";
@@ -67,12 +68,12 @@ const escalation: Rule = {
     if (rules.status !== "ok") {
       // Entitlement processes escalate too, so with one active the gap doesn't matter.
       // Not read because the edition has no Metadata API (DECISIONS.md 710): said in our words whole, so the summary is known as ours.
-      if (activeSla.length && editionIsWhy(rules.reason)) return { outcome: "pass", summary: said`Escalation rules weren't read, because Professional Edition only opens the Metadata API to security-reviewed apps, but ${plural(activeSla.length, "entitlement process")} for cases ${isAre(activeSla.length)} active, which can escalate cases.`, evidence, segmentExemptReason: single, facts: { processes: activeSla.length } };
-      if (activeSla.length) return { outcome: "pass", summary: said`Escalation rules couldn't be read (${passedOn(rules.reason)}), but ${plural(activeSla.length, "entitlement process")} for cases ${isAre(activeSla.length)} active, which can escalate cases.`, evidence, segmentExemptReason: single, facts: { processes: activeSla.length } };
+      if (activeSla.length && editionIsWhy(rules.reason)) return { outcome: "pass", summary: valued(said`Escalation rules weren't read, because Professional Edition only opens the Metadata API to security-reviewed apps, but ${plural(activeSla.length, "entitlement process")} for cases ${isAre(activeSla.length)} active, which can escalate cases.`, { activeSla: activeSla.length }), evidence, segmentExemptReason: single, facts: { processes: activeSla.length } };
+      if (activeSla.length) return { outcome: "pass", summary: valued(said`Escalation rules couldn't be read (${passedOn(rules.reason)}), but ${plural(activeSla.length, "entitlement process")} for cases ${isAre(activeSla.length)} active, which can escalate cases.`, { activeSla: activeSla.length }), evidence, segmentExemptReason: single, facts: { processes: activeSla.length } };
       return nm(`Escalation rules couldn't be read: ${rules.reason}`, evidence);
     }
     const active = rules.data.filter((r) => r.active);
-    if (active.length || activeSla.length) return { outcome: "pass", summary: said`${plural(active.length, "escalation rule")} and ${plural(activeSla.length, "entitlement process")} for cases ${isAre(active.length + activeSla.length)} active.`, evidence, segmentExemptReason: single, facts: { active: active.length, processes: activeSla.length } };
+    if (active.length || activeSla.length) return { outcome: "pass", summary: valued(said`${plural(active.length, "escalation rule")} and ${plural(activeSla.length, "entitlement process")} for cases ${isAre(active.length + activeSla.length)} active.`, { active: active.length, activeSla: activeSla.length }), evidence, segmentExemptReason: single, facts: { active: active.length, processes: activeSla.length } };
     if (sla.status !== "ok" && !/isn't available/.test(sla.reason)) return nm(`No escalation rule is active, and entitlement processes couldn't be read: ${sla.reason}`, evidence);
     return {
       outcome: "issue",
@@ -108,11 +109,11 @@ const escalationTargets: Rule = {
     if (!activeUsers || !staffedQueues) return nm(said`Users or queues couldn't be read, so we can't tell whether escalation targets can act.`, evidence);
     const dead = actions.filter((a) => (a.assignedToType === "Queue" ? !staffedQueues.has(a.assignedTo!.toLowerCase()) : !activeUsers.has(a.assignedTo!.toLowerCase())));
     const segmentsChecked: SegmentCheck[] = [{ dimension: "assigned to", segments: new Set(actions.map((a) => a.assignedToType ?? "User")).size }];
-    if (!dead.length) return { outcome: "pass", summary: said`All ${actions.length} escalation actions in active rules go to an active user or a queue with members.`, evidence, segmentsChecked, facts: { actions: actions.length } };
+    if (!dead.length) return { outcome: "pass", summary: valued(said`All ${actions.length} escalation actions in active rules go to an active user or a queue with members.`, { actions: actions.length }), evidence, segmentsChecked, facts: { actions: actions.length } };
     return {
       outcome: "issue",
       title: said`Escalations go to people who can't act on them`,
-      summary: said`${dead.length} of ${actions.length} escalation actions in active rules assign cases to an inactive user or a queue with no members, so an escalated case lands where nobody will see it.`,
+      summary: valued(said`${dead.length} of ${actions.length} escalation actions in active rules assign cases to an inactive user or a queue with no members, so an escalated case lands where nobody will see it.`, { dead: dead.length, actions: actions.length }),
       recommendation: said`Point each escalation at a queue with members, not a named person, and add escalation targets to your leaver checklist.`,
       recommendationType: "change",
       severity: "high",
@@ -150,8 +151,8 @@ const queueSprawl: Rule = {
     const spread = [...perAgent.values()].filter((n) => n > QUEUES_PER_AGENT).length;
     const segmentsChecked: SegmentCheck[] = [{ dimension: "queue", segments: queues.length }, { dimension: "agent", segments: perAgent.size }];
     const facts = { queues: queues.length, empty: empty.length, agents: perAgent.size, spread, limit: QUEUES_PER_AGENT };
-    if (!empty.length && !spread) return { outcome: "pass", summary: said`All ${queues.length} case queues have members, and no agent is in more than ${QUEUES_PER_AGENT}.`, evidence, segmentsChecked, facts };
-    const parts: Said[] = [...(empty.length ? [said`${empty.length} of ${queues.length} case queues ${hasHave(empty.length)} no members, so cases routed there wait for nobody`] : []), ...(spread ? [said`${plural(spread, "agent")} ${isAre(spread)} in more than ${QUEUES_PER_AGENT} case queues, too many to watch`] : [])];
+    if (!empty.length && !spread) return { outcome: "pass", summary: valued(said`All ${queues.length} case queues have members, and no agent is in more than ${QUEUES_PER_AGENT}.`, { queues: queues.length, queuesPerAgent: QUEUES_PER_AGENT }), evidence, segmentsChecked, facts };
+    const parts: Said[] = [...(empty.length ? [valued(said`${empty.length} of ${queues.length} case queues ${hasHave(empty.length)} no members, so cases routed there wait for nobody`, { empty: empty.length, queues: queues.length })] : []), ...(spread ? [valued(said`${plural(spread, "agent")} ${isAre(spread)} in more than ${QUEUES_PER_AGENT} case queues, too many to watch`, { spread, queuesPerAgent: QUEUES_PER_AGENT })] : [])];
     return {
       outcome: "issue",
       title: empty.length ? said`Some case queues have nobody in them` : said`Agents are spread across too many queues`,
@@ -197,12 +198,12 @@ const omniRouting: Rule = {
     if (routingConfigs.status === "ok") evidence.push(ctx.ev(routingConfigs.source, { count: configs.length }));
     // Some queues routed and some not: cases in the rest wait to be picked by hand.
     if (routed.length === 0 || unrouted.length === 0) {
-      return { outcome: "pass", summary: routed.length ? said`All ${routed.length} case queues have a routing configuration.${noTimeout ? said` ${noTimeout} of the configurations in use ${noTimeout === 1 ? "has" : "have"} no push timeout.` : ""}` : said`Omni-Channel has a service channel for cases, but routes none of the ${queues.length} case queues: cases are picked by hand.`, evidence, segmentsChecked, facts };
+      return { outcome: "pass", summary: routed.length ? valued(said`All ${routed.length} case queues have a routing configuration.${noTimeout ? said` ${noTimeout} of the configurations in use ${noTimeout === 1 ? "has" : "have"} no push timeout.` : ""}`, { routed: routed.length }) : valued(said`Omni-Channel has a service channel for cases, but routes none of the ${queues.length} case queues: cases are picked by hand.`, { queues: queues.length }), evidence, segmentsChecked, facts };
     }
     return {
       outcome: "issue",
       title: said`Omni-Channel routes some case queues and not others`,
-      summary: said`${unrouted.length} of ${queues.length} case queues ${hasHave(unrouted.length)} no routing configuration while ${routed.length} ${routed.length === 1 ? "does" : "do"}, so cases in those queues wait to be picked by hand while the rest are pushed to agents.${unused ? said` ${plural(unused, "routing configuration")} ${unused === 1 ? "isn't" : "aren't"} used by any queue.` : ""}`,
+      summary: valued(said`${unrouted.length} of ${queues.length} case queues ${hasHave(unrouted.length)} no routing configuration while ${routed.length} ${routed.length === 1 ? "does" : "do"}, so cases in those queues wait to be picked by hand while the rest are pushed to agents.${unused ? said` ${plural(unused, "routing configuration")} ${unused === 1 ? "isn't" : "aren't"} used by any queue.` : ""}`, { unrouted: unrouted.length, queues: queues.length, routed: routed.length }),
       recommendation: said`Give every case queue a routing configuration, or take the queues nobody should be pushed work from out of Omni-Channel on purpose. Remove configurations no queue uses.`,
       recommendationType: "change",
       severity: "medium",
@@ -257,19 +258,19 @@ const agentLicences: Rule = {
     const segmentsChecked: SegmentCheck[] = [{ dimension: "licence", segments: new Set(users.map(licenceOf)).size }];
     const facts = { users: users.length, dormant: dormant.length, idle: idle.length, days: dormantDays, ...(newcomers ? { newcomers } : {}) };
     if (!wasted) {
-      const who = newcomers ? said`${users.length - newcomers} Service Cloud users set up more than ${dormantDays} days ago` : said`${users.length} Service Cloud users`;
-      return { outcome: "pass", summary: said`All ${who} logged in within ${dormantDays} days${ctx.scope !== "essentials" ? " and worked a case" : ""}.`, evidence, segmentsChecked, facts };
+      const who = newcomers ? valued(said`${users.length - newcomers} Service Cloud users set up more than ${dormantDays} days ago`, { dormantDays: [dormantDays, "day"] }) : valued(said`${users.length} Service Cloud users`, { users: users.length });
+      return { outcome: "pass", summary: valued(said`All ${who} logged in within ${dormantDays} days${ctx.scope !== "essentials" ? " and worked a case" : ""}.`, { dormantDays: [dormantDays, "day"] }), evidence, segmentsChecked, facts };
     }
     const org = ctx.data(orgExtractor);
     const edition = org.status === "ok" ? (org.data[0]?.OrganizationType ?? null) : null;
     const price = costPerSeat(SERVICE_SEAT, { calibration: ctx.calibration, edition, now: ctx.now });
     const value: Value = isPriced(price)
-      ? { kind: "licence_cost", amount: Math.round(price.annual * wasted), unit: price.currency, period: "per year", assumptions: [said`${plural(wasted, "Service Cloud seat")} at ${price.note}`] }
+      ? { kind: "licence_cost", amount: Math.round(price.annual * wasted), unit: price.currency, period: "per year", assumptions: [valued(said`${plural(wasted, "Service Cloud seat")} at ${price.note}`, { wasted })] }
       : notSized(said`A Service Cloud seat has no price: ${price.reason}`);
     return {
       outcome: "issue",
       title: said`Some Service Cloud licences aren't being used`,
-      summary: said`Of ${users.length} Service Cloud users, ${andList([...(dormant.length ? [said`${dormant.length} ${hasHave(dormant.length)}n't logged in for ${dormantDays} days`] : []), ...(idle.length ? [said`${idle.length} log${idle.length === 1 ? "s" : ""} in but ${hasHave(idle.length)}n't owned or been routed a case in that time`] : [])])}. That's ${plural(wasted, "seat")} held for nobody's casework.`,
+      summary: valued(said`Of ${users.length} Service Cloud users, ${andList([...(dormant.length ? [said`${dormant.length} ${hasHave(dormant.length)}n't logged in for ${dormantDays} days`] : []), ...(idle.length ? [said`${idle.length} log${idle.length === 1 ? "s" : ""} in but ${hasHave(idle.length)}n't owned or been routed a case in that time`] : [])])}. That's ${plural(wasted, "seat")} held for nobody's casework.`, { users: users.length, wasted }),
       recommendation: said`Confirm with each user's manager, then remove the Service Cloud licence from those who don't work cases, or move them to a licence that fits what they do.`,
       recommendationType: "change",
       severity: "medium",
@@ -319,7 +320,7 @@ const knowledgeUse: Rule = {
   evaluate(ctx) {
     const read = publishedArticles(ctx);
     if ("outcome" in read) return read;
-    if (read.rows.length < MIN_ARTICLES) return nm(said`Only ${plural(read.rows.length, "article")} ${isAre(read.rows.length)} published, fewer than the ${MIN_ARTICLES} it takes for use to mean something.`, read.evidence);
+    if (read.rows.length < MIN_ARTICLES) return nm(valued(said`Only ${plural(read.rows.length, "article")} ${isAre(read.rows.length)} published, fewer than the ${MIN_ARTICLES} it takes for use to mean something.`, { rows: read.rows.length, minArticles: MIN_ARTICLES }), read.evidence);
     const cases = ctx.data(serviceCasesExtractor);
     const { caseArticles } = ctx.data(serviceActivityExtractor);
     if (cases.closedCases.status !== "ok") return nm(`Closed cases couldn't be read: ${cases.closedCases.reason}`, unavailableEvidence(ctx, cases.closedCases.source));
@@ -330,11 +331,11 @@ const knowledgeUse: Rule = {
     if (closed.length === 0) return { outcome: "pass", summary: said`No case was closed in the last year, so there's no use to check.`, evidence, segmentExemptReason: "There are no closed cases" };
     const result = segmentRate(closed, (c) => withArticle.has(c.Id), { priority: priorityOf, ...byOrigin(cases.closedCases) }, { segmentLimit: 100, minSegment: MIN_SEGMENT });
     const facts = { attached: result.hits, closed: result.n, rate: result.rate, articles: read.rows.length, limit: ATTACH_SHARE };
-    if (result.rate >= ATTACH_SHARE) return { outcome: "pass", summary: said`${result.hits} of ${result.n} cases closed in the last year (${result.rate}%) have an article attached.`, evidence, segmentsChecked: result.segmentsChecked, facts };
+    if (result.rate >= ATTACH_SHARE) return { outcome: "pass", summary: valued(said`${result.hits} of ${result.n} cases closed in the last year (${result.rate}%) have an article attached.`, { hits: result.hits, n: result.n, rate: [result.rate, "percent"] }), evidence, segmentsChecked: result.segmentsChecked, facts };
     return {
       outcome: "issue",
       title: said`Agents rarely attach knowledge articles to cases`,
-      summary: said`Only ${result.hits} of ${result.n} cases closed in the last year (${result.rate}%) have an article attached, though ${read.rows.length} articles are published. Either the articles don't answer what customers ask, or agents don't use them.`,
+      summary: valued(said`Only ${result.hits} of ${result.n} cases closed in the last year (${result.rate}%) have an article attached, though ${read.rows.length} articles are published. Either the articles don't answer what customers ask, or agents don't use them.`, { hits: result.hits, n: result.n, rate: [result.rate, "percent"], rows: read.rows.length }),
       recommendation: said`Put the Knowledge component on the case page, ask agents to attach the article that solved each case, and write articles for the case types that come up most.`,
       recommendationType: "change",
       severity: "low",
@@ -372,11 +373,11 @@ const knowledgeCurrent: Rule = {
     const facts = { stale: stale.length, articles: read.rows.length, rate: share, months, limit: STALE_SHARE, ...(unread === null ? {} : { unread }) };
     const evidence = articleViews.status === "ok" ? [...read.evidence, ctx.ev(articleViews.source, { count: articleViews.data.length })] : read.evidence;
     const exempt = "Articles aren't grouped in a way we can read";
-    if (share <= STALE_SHARE) return { outcome: "pass", summary: said`${stale.length} of ${read.rows.length} published articles (${share}%) haven't been republished in ${months} months.`, evidence, segmentExemptReason: exempt, facts };
+    if (share <= STALE_SHARE) return { outcome: "pass", summary: valued(said`${stale.length} of ${read.rows.length} published articles (${share}%) haven't been republished in ${months} months.`, { stale: stale.length, rows: read.rows.length, share: [share, "percent"], months: [months, "month"] }), evidence, segmentExemptReason: exempt, facts };
     return {
       outcome: "issue",
       title: said`Most knowledge articles haven't been reviewed in a year`,
-      summary: said`${stale.length} of ${read.rows.length} published articles (${share}%) haven't been republished in ${months} months.${unread !== null ? said` ${unread} ${hasHave(unread)} never been viewed.` : ""} Out-of-date answers cost agents' and customers' trust in the rest.`,
+      summary: valued(said`${stale.length} of ${read.rows.length} published articles (${share}%) haven't been republished in ${months} months.${unread !== null ? said` ${unread} ${hasHave(unread)} never been viewed.` : ""} Out-of-date answers cost agents' and customers' trust in the rest.`, { stale: stale.length, rows: read.rows.length, share: [share, "percent"], months: [months, "month"] }),
       recommendation: said`Give each article an owner and a review date, archive what nobody reads, and update the articles behind your most common case types first.`,
       recommendationType: "change",
       severity: "low",
@@ -413,12 +414,12 @@ const macros: Rule = {
     const segmentsChecked: SegmentCheck[] = [{ dimension: "kind", segments: 1 + (quickText.status === "ok" ? 1 : 0) }];
     const cluttered = unusedShare !== null && list.data.length >= MIN_MACROS && unusedShare > UNUSED_SHARE;
     if (!cluttered && classic === 0) {
-      return { outcome: "pass", summary: said`${list.data.length} macros, ${unusedMacros === null ? "with use we couldn't read" : said`${unusedMacros} unused in ${months} months`}, and none that work only in Classic.`, evidence, segmentsChecked, facts };
+      return { outcome: "pass", summary: valued(said`${list.data.length} macros, ${unusedMacros === null ? "with use we couldn't read" : said`${unusedMacros} unused in ${months} months`}, and none that work only in Classic.`, { data: list.data.length }), evidence, segmentsChecked, facts };
     }
     const parts: Said[] = [
-      ...(cluttered ? [said`${unusedMacros!} of ${list.data.length} macros (${unusedShare!}%) ${unusedMacros === 1 ? "wasn't" : "weren't"} used in ${months} months`] : []),
-      ...(classic ? [said`${classic} ${classic === 1 ? "macro works" : "macros work"} only in Classic`] : []),
-      ...(unusedText !== null && quickText.status === "ok" && unusedText ? [said`${unusedText} of ${quickText.data.length} quick text entries ${unusedText === 1 ? "wasn't" : "weren't"} used`] : []),
+      ...(cluttered ? [valued(said`${unusedMacros!} of ${list.data.length} macros (${unusedShare!}%) ${unusedMacros === 1 ? "wasn't" : "weren't"} used in ${months} months`, { unusedMacros: unusedMacros!, data: list.data.length, unusedShare: [unusedShare!, "percent"], months: [months, "month"] })] : []),
+      ...(classic ? [valued(said`${classic} ${classic === 1 ? "macro works" : "macros work"} only in Classic`, { classic })] : []),
+      ...(unusedText !== null && quickText.status === "ok" && unusedText ? [valued(said`${unusedText} of ${quickText.data.length} quick text entries ${unusedText === 1 ? "wasn't" : "weren't"} used`, { unusedText, data: quickText.data.length })] : []),
     ];
     return {
       outcome: "issue",
@@ -464,7 +465,7 @@ const caseRoutingOverlap: Rule = {
     return {
       outcome: "issue",
       title: said`Cases are routed by two systems at once`,
-      summary: said`An active case assignment rule and Omni-Channel routing on ${plural(routedQueues, "case queue")} both decide where cases go. When the two disagree, a case can be moved after an agent has picked it up, or land in a queue Omni-Channel doesn't watch.`,
+      summary: valued(said`An active case assignment rule and Omni-Channel routing on ${plural(routedQueues, "case queue")} both decide where cases go. When the two disagree, a case can be moved after an agent has picked it up, or land in a queue Omni-Channel doesn't watch.`, { routedQueues }),
       recommendation: said`Choose one: let assignment rules only put cases into queues, and Omni-Channel push them from those queues to agents. Check no rule assigns cases straight to people.`,
       recommendationType: "change",
       severity: "medium",
