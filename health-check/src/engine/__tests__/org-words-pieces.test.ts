@@ -412,6 +412,19 @@ const SIGNED_OFF: string[] = [
   "src/domains/activity/index.ts: dimensionWords(worst.dimension)",
   "src/domains/current-pipeline/index.ts: dimensionWords(worst!.dimension)",
   "src/domains/current-pipeline/index.ts: dimensionWords(worst.dimension)",
+  // cur.stuck-in-stage 4 (HC_STUCK_UNSCORED, DECISIONS.md 778), each read in review: version 2's counts and the
+  // calibration's minimum (typed numbers), its lead and left-out sentences (said made), plural over our literal noun.
+  "src/domains/current-pipeline/index.ts: ctx.calibration.minSample",
+  "src/domains/current-pipeline/index.ts: lead",
+  "src/domains/current-pipeline/index.ts: lead",
+  "src/domains/current-pipeline/index.ts: left",
+  "src/domains/current-pipeline/index.ts: leftOut",
+  "src/domains/current-pipeline/index.ts: leftOut",
+  "src/domains/current-pipeline/index.ts: plural(noEntry, \"deal\")",
+  "src/domains/current-pipeline/index.ts: plural(noLine, \"deal\")",
+  "src/domains/current-pipeline/index.ts: read.hits",
+  "src/domains/current-pipeline/index.ts: read.n",
+  "src/domains/current-pipeline/index.ts: read.rate",
   // cur.stuck-in-stage 3 (HC_STUCK_EXPECTED, DECISIONS.md 777), each read in review: typed numbers the rule works out
   // (counts, rounded shares, the calibration's minimum), sentences said made (the lead, left-out, total and segment
   // sentences and their helpers, the scope label), plural over our literal noun, and the dimension's name as version 2's.

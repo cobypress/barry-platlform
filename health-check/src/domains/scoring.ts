@@ -66,7 +66,15 @@ const idleAdditions = (findings: Finding[]): Set<string> => {
   for (const f of findings) if (f.status !== "not_measurable") idle.delete(f.ruleId);
   return idle;
 };
-const notScored = (ruleId: string): boolean => SETUP_RULES.has(ruleId) || UNSCORED_RULES.has(ruleId) || INSIGHT_RULES.has(ruleId);
+/**
+ * Rule versions shown and never scored (DECISIONS.md 778): cur.stuck-in-stage 4, behind HC_STUCK_UNSCORED, keeps
+ * version 2's figure and deal list as an observation. Read by the score as UNSCORED_RULES are, by version, so
+ * version 2 scores as before. Kept apart from UNSCORED_RULES, which a re-check reads as the code checker's groups.
+ */
+export const UNSCORED_VERSIONS: Readonly<Record<string, readonly number[]>> = { "cur.stuck-in-stage": [4] };
+/** Whether a finding's rule version is one the score leaves out. */
+export const unscoredVersion = (f: { ruleId: string; ruleVersion: number }): boolean => Object.hasOwn(UNSCORED_VERSIONS, f.ruleId) && UNSCORED_VERSIONS[f.ruleId]!.includes(f.ruleVersion);
+const notScored = (f: Finding): boolean => SETUP_RULES.has(f.ruleId) || UNSCORED_RULES.has(f.ruleId) || INSIGHT_RULES.has(f.ruleId) || unscoredVersion(f);
 
 const WEIGHTS: Record<string, number> = {
   ruleMaximum: RULE_MAXIMUM,
@@ -112,7 +120,7 @@ export type AreaReasonPart = { text: string; findingIds: string[] };
 export function areaReasonParts(domain: string, findings: Finding[], today: string): AreaReasonPart[] | null {
   const rules = new Map<string, Finding[]>();
   const idle = idleAdditions(findings);
-  for (const f of findings) if (f.domain === domain && !notScored(f.ruleId) && !idle.has(f.ruleId)) rules.set(f.ruleId, [...(rules.get(f.ruleId) ?? []), f]);
+  for (const f of findings) if (f.domain === domain && !notScored(f) && !idle.has(f.ruleId)) rules.set(f.ruleId, [...(rules.get(f.ruleId) ?? []), f]);
   const open = [...rules.values()].filter((group) => group.every((f) => f.status === "not_measurable"));
   const tally = new Map<string, { checks: number; first: number; findingIds: string[] }>();
   open.forEach((group, i) => {
@@ -163,7 +171,7 @@ function areaReasonOf(parts: AreaReasonPart[]): string {
 export function scoreDomain(domain: string, findings: Finding[], ruleSetVersion: string = RULE_SET_VERSION, options: ScoreOptions = {}): Score {
   const notMeasurable = (reason: string): Score => Score.parse({ status: "not_measurable", domain, ruleSetVersion, reason });
   const idle = idleAdditions(findings);
-  const own = findings.filter((f) => f.domain === domain && !notScored(f.ruleId) && !idle.has(f.ruleId));
+  const own = findings.filter((f) => f.domain === domain && !notScored(f) && !idle.has(f.ruleId));
   if (own.length === 0) return notMeasurable("We couldn't assess this area.");
   const rules = new Map<string, Finding[]>();
   for (const finding of own) rules.set(finding.ruleId, [...(rules.get(finding.ruleId) ?? []), finding]);
@@ -272,7 +280,7 @@ export function overallScore(scores: Score[], findings: Finding[]): OverallScore
   const scoredWeight = areas.reduce((sum, a) => sum + a.weight, 0);
   if (areas.length < MIN_AREAS_SCORED || scoredWeight * 2 < totalWeight) return { status: "not_measurable", reason: "Too few areas could be scored to give the org one score fairly." };
   const uncapped = Math.round(areas.reduce((sum, a) => sum + a.score * a.weight, 0) / scoredWeight);
-  const capped = findings.some((f) => f.status === "issue" && f.severity === "critical" && !notScored(f.ruleId)) && uncapped > CRITICAL_CAP;
+  const capped = findings.some((f) => f.status === "issue" && f.severity === "critical" && !notScored(f)) && uncapped > CRITICAL_CAP;
   const score = capped ? CRITICAL_CAP : uncapped;
   const { grade, word } = gradeOf(score);
   return { status: "measured", score, grade, word, uncapped, capped, areas };

@@ -748,3 +748,73 @@ export const currentPipelineExpectedModule: DomainModule = {
 
 /** The modules a run analyses with the switch on: current pipeline swapped for its version 3's, and nothing else touched. */
 export const withStuckExpected = (modules: DomainModule[]): DomainModule[] => modules.map((m) => (m === currentPipelineModule ? currentPipelineExpectedModule : m));
+
+/**
+ * cur.stuck-in-stage version 4, behind HC_STUCK_UNSCORED (DECISIONS.md 778): version 2's line, count and deal list,
+ * shown and never scored. A snapshot of open deals over-samples long stays (777), so the share past the line says
+ * nothing on its own about a problem; the list is for pipeline reviews. Served as an observation: an issue of
+ * severity info, as the code checker's groups are shown and not scored (673), so the deal list and the figure reach
+ * the customer, and a version the score leaves out (UNSCORED_VERSIONS in scoring.ts) never moves an area, the
+ * overall score or the headline, and is never counted in an area's coverage. No deal past the line: a pass.
+ */
+const stuckInStageUnscored: Rule = {
+  id: "cur.stuck-in-stage",
+  version: 4,
+  domain: DOMAIN,
+  title: "Open deals that have waited longest in their stage",
+  evaluate(ctx): RuleResult | RuleResult[] {
+    const loaded = openDeals(ctx);
+    if ("outcome" in loaded) return loaded;
+    const { data, deals: open } = loaded;
+    const base = { ...data.evidence[0]!, dateRange: { from: ctx.window.to, to: ctx.window.to } };
+    const lines = stageLines(ctx, data);
+    if (lines.size === 0) return { outcome: "not_measurable", reason: named(said`No open stage has ${ctx.calibration.minSample} won deals to compare with.`, { minSample: ctx.calibration.minSample }), evidence: [{ ...base, count: null }] };
+    const deals = open.filter((d) => lines.has(d.StageName) && enteredCurrentStage(d));
+    const noLine = open.filter((d) => !lines.has(d.StageName)).length;
+    const noEntry = open.filter((d) => lines.has(d.StageName) && !enteredCurrentStage(d)).length;
+    const exclusions = [...(noLine ? [named(said`${plural(noLine, "deal")} in stages with too few won deals to compare`, { noLine })] : []), ...(noEntry ? [named(said`${plural(noEntry, "deal")} whose history doesn't show when they entered this stage`, { noEntry })] : [])];
+    const evidence: Evidence[] = [{ ...base, count: deals.length, exclusions: [...data.exclusions, ...exclusions], note: said`open deals with a stage to compare` }];
+    const left = leftOutSentence(noLine, noEntry);
+    const leftOut = left ? said` ${left}` : said``;
+    if (deals.length === 0) return { outcome: "pass", summary: said`There are no open deals with a stage to compare to check.`, evidence, segmentExemptReason: "There are no deals to segment." };
+    const days = (d: Deal): number => daysSince(enteredCurrentStage(d)!, ctx.now);
+    const isPast = (d: Deal): boolean => days(d) > lines.get(d.StageName)!;
+    // Version 2's own reading, every segment of ten or more, for the judges between runs (loosened.ts, stuckBefore3).
+    const read = segmentRate(deals, isPast, dimensions(ctx), { segmentLimit: -Infinity, minSegment: MIN_SEGMENT });
+    const facts = { hits: read.hits, n: read.n, rate: read.rate, wonLineRate: read.rate, ...(read.hotspots[0] ? { wonLineWorstSegmentRate: read.hotspots[0].rate } : {}) };
+    const lead = named(said`Open deals that have been in their stage longer than three quarters of your won deals took: ${read.hits} of ${read.n} (${read.rate}%).`, { wonWithinPct: STUCK_PCT, hits: read.hits, n: read.n, rate: [read.rate, "percent"] });
+    if (read.hits === 0) return { outcome: "pass", summary: said`${lead}${leftOut}`, evidence, segmentsChecked: read.segmentsChecked, facts };
+    // Each deal's days against its line on one basis: days down, the line up, to one decimal, and only where they read apart.
+    const shownDays = (d: Deal): number => Math.floor(days(d) * 10) / 10;
+    const shownLine = (d: Deal): number => Math.ceil(lines.get(d.StageName)! * 10) / 10;
+    const text = (x: number): string => (Number.isInteger(x) ? `${x}` : x.toFixed(1));
+    const unit = (x: number): string => (x === 1 ? "day" : "days");
+    const listed = deals.filter((d) => isPast(d) && shownDays(d) > shownLine(d));
+    return {
+      outcome: "issue",
+      title: said`Open deals that have waited longest in their stage`,
+      summary: said`${lead}${leftOut} Some open deals are always past this point, because the deals still open at any moment are the slower ones, so this share on its own doesn't show a problem. The list is for your pipeline reviews.`,
+      recommendation: said`In pipeline reviews, go through the deals that have waited longest in each stage, and agree a next step or a decision for each.`,
+      recommendationType: "investigate",
+      severity: "info",
+      confidence: "high",
+      evidence,
+      value: notSized(said`Some open deals are past this point in any pipeline, so the Amount on them doesn't show money at risk, and we don't put a figure on it.`),
+      effort: { size: "S" },
+      owner: "Head of sales",
+      segmentsChecked: read.segmentsChecked,
+      subjects: [],
+      facts,
+      ...(listed.length ? { records: { object: "Opportunity" as const, rows: listed.map((d) => ({ id: d.Id, problem: `In ${d.StageName} for ${text(shownDays(d))} ${unit(shownDays(d))}, where three quarters of won deals moved on within ${text(shownLine(d))} ${unit(shownLine(d))}` })), fix: "Agree a next step or a decision for it" } } : {}),
+    };
+  },
+};
+
+/** Current pipeline with HC_STUCK_UNSCORED on (DECISIONS.md 778): cur.stuck-in-stage at version 4, in version 2's place. */
+export const currentPipelineUnscoredModule: DomainModule = {
+  ...currentPipelineModule,
+  rules: currentPipelineModule.rules.map((r) => (r === stuckInStage ? stuckInStageUnscored : r)),
+};
+
+/** The modules a run analyses with HC_STUCK_UNSCORED on and HC_STUCK_EXPECTED off: current pipeline swapped for version 4's. */
+export const withStuckUnscored = (modules: DomainModule[]): DomainModule[] => modules.map((m) => (m === currentPipelineModule ? currentPipelineUnscoredModule : m));

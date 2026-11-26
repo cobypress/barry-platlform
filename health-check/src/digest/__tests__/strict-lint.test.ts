@@ -71,6 +71,9 @@ async function runs(): Promise<Record<string, StrictShadow>> {
     // Stuck-in-stage version 3 on (HC_STUCK_EXPECTED, DECISIONS.md 777): its sentences are counted, both review modes.
     "stuckExpected/consultant": { stuckExpected: true },
     "stuckExpected/automatic": { calibration: auto, answers: [], reviewMode: "automatic", transport: new Simulator(), stuckExpected: true },
+    // Stuck-in-stage shown unscored (HC_STUCK_UNSCORED, DECISIONS.md 778): its sentences are counted, both review modes.
+    "stuckUnscored/consultant": { stuckUnscored: true },
+    "stuckUnscored/automatic": { calibration: auto, answers: [], reviewMode: "automatic", transport: new Simulator(), stuckUnscored: true },
     "leadJourney/quick": { calibration: auto, answers: [], reviewMode: "automatic", transport: new Simulator({ records: journeyOrg(journeyRecords(richSpecs().map((x) => (x.outcome ? { ...x, convertedAfter: 1, closedAfter: 5 } : x)))) }), leadJourney: true },
     // The case status paths on (HC_CASE_PATHS, DECISIONS.md 776): consultant-led runs with Service Cloud, the only runs it reaches.
     "casePaths/synthetic": { modules: ALL_MODULES, casePaths: true },
