@@ -46,10 +46,10 @@ export const FACTORS: Factor[] = [
 ];
 
 // Short, because the deck's definitions page prints it. The factors are listed in the assumptions.
-const DEFINITION = named(
-  "Won and lost deals that closed in the window after being open, compared on things we can read for every deal: for each, the win rate with it and without it, and the gap in points. A gap of 10 points or more is a driver. It shows how often things went together, not that one caused the other. The value is the win rate of all these deals.",
-  { gapPoints: DRIVER_GAP },
-);
+const DEFINITION =
+  "Won and lost deals that closed in the window after being open, compared on things we can read for every deal: for each, the win rate with it and without it, and the gap in points. A gap of 10 points or more is a driver. It shows how often things went together, not that one caused the other. The value is the win rate of all these deals.";
+// The gap it writes, named for the strict check (DECISIONS.md 768); the text stays a constant.
+named(DEFINITION, { gapPoints: DRIVER_GAP });
 const FACTOR_NOTE = `The factors: ${FACTORS.map((f) => f.label.toLowerCase()).join("; ")}. Win rate is won deals as a share of won and lost deals, as in the headline win rate, so no decision deals are left out`;
 
 const isWon = (d: Deal): boolean => d.category === "won";
