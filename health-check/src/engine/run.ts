@@ -9,7 +9,7 @@ import { shareRepeatedValues } from "./share-values.ts";
 import { modulesFor } from "../domains/scope.ts";
 import { ALL_MODULES } from "../domains/index.ts";
 import { withLeadJourney } from "../domains/lead-funnel/index.ts";
-import { withStuckExpected } from "../domains/current-pipeline/index.ts";
+import { withStuckExpected, withStuckUnscored } from "../domains/current-pipeline/index.ts";
 import { withCasePaths } from "../domains/service/index.ts";
 import { RULES_FILE, rulesOf } from "./rules-run.ts";
 import { scoreDomains } from "../domains/scoring.ts";
@@ -103,6 +103,8 @@ export type RunOptions = {
   casePaths?: boolean;
   /** HC_STUCK_EXPECTED on (DECISIONS.md 777): cur.stuck-in-stage at version 3. Off or absent, version 2 exactly as before. */
   stuckExpected?: boolean;
+  /** HC_STUCK_UNSCORED on (DECISIONS.md 778): cur.stuck-in-stage at version 4, shown and not scored. HC_STUCK_EXPECTED on wins. */
+  stuckUnscored?: boolean;
   /** The run this one re-checks: its first health check, whose findings the report compares against. */
   baselineRunId?: string | null;
   /**
@@ -494,7 +496,7 @@ async function runHealthCheckWithin(options: RunOptions): Promise<RunResult> {
   if (options.areaReasons === true) run.areaReasons = true;
   else delete run.areaReasons;
   await saveRun();
-  const output = analyseRun(dir, run, calibration, modules, extracts, options.answers ?? [], options.knownModules ?? ALL_MODULES, options.gated === true, options.stageNames === true, options.stageNamesModel === true, options.areaReasons === true, options.leadJourney === true, options.casePaths === true, options.stuckExpected === true);
+  const output = analyseRun(dir, run, calibration, modules, extracts, options.answers ?? [], options.knownModules ?? ALL_MODULES, options.gated === true, options.stageNames === true, options.stageNamesModel === true, options.areaReasons === true, options.leadJourney === true, options.casePaths === true, options.stuckExpected === true, options.stuckUnscored === true);
   // Each issue's records by name, for the action lists. Beside the pseudonym map, not in checkpoints/.
   writeJson(join(dir, ACTION_LISTS_FILE), buildActionLists(output.records, extracts, client.instanceUrl));
   run.status = output.manualSteps.some((s) => s.status === "pending") ? "awaiting_manual" : "in_review";
@@ -534,12 +536,13 @@ export function keepSkipped(run: Run, skipped: SkippedRead[], log: (message: str
   }
 }
 
-function analyseRun(dir: string, run: Run, calibration: Calibration, modules: DomainModule[], extracts: Map<string, unknown>, answers: ManualAnswer[], known: DomainModule[], gated = false, stageNames = false, stageNamesModel = false, areaReasons = false, leadJourney = false, casePaths = false, stuckExpected = false): AnalysisOutput {
+function analyseRun(dir: string, run: Run, calibration: Calibration, modules: DomainModule[], extracts: Map<string, unknown>, answers: ManualAnswer[], known: DomainModule[], gated = false, stageNames = false, stageNamesModel = false, areaReasons = false, leadJourney = false, casePaths = false, stuckExpected = false, stuckUnscored = false): AnalysisOutput {
   // HC_LEAD_JOURNEY, HC_CASE_PATHS and HC_STUCK_EXPECTED each swap one module for their own (DECISIONS.md 770, 776, 777); off, the modules are the ones given.
   const switched = (list: DomainModule[]): DomainModule[] => {
     const journeyed = leadJourney ? withLeadJourney(list) : list;
     const pathed = casePaths ? withCasePaths(journeyed) : journeyed;
-    return stuckExpected ? withStuckExpected(pathed) : pathed;
+    // Version 3 wins over version 4 when both switches are on (DECISIONS.md 778).
+    return stuckExpected ? withStuckExpected(pathed) : stuckUnscored ? withStuckUnscored(pathed) : pathed;
   };
   const pseudonyms = loadPseudonyms(dir);
   const users = extracts.get(usersExtractor.id) as { status: string; data?: UserRow[] } | undefined;

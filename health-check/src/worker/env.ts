@@ -56,6 +56,7 @@ export const WORKER_ENV = {
     HC_LEAD_JOURNEY: "on, exactly, to add the lead journey to the lead funnel (DECISIONS.md 770): the days from a lead to a won deal, the share of leads that became won deals, a check of lead sources whose deals are won more or less often than they convert, and a stored insight that isn't served; and to read whether Salesforce kept the leads' Status history, so first-response checks on an org that doesn't keep it say they couldn't be measured. It changes findings, metrics and lead funnel scores. Anything else, or unset, is off: every result is as before",
     HC_CASE_PATHS: "on, exactly, to add the case status paths to service operations (DECISIONS.md 776): two checks, of the time reopened cases spend after their first close and of cases closed straight from the status they started in, and, stored and never served, a table of the paths cases take and two insights (open cases sitting in a status longer than usual, and cases sent back to an earlier status). It reaches only a health check that includes Service Cloud, which today only a consultant-led run can. It changes findings, metrics and service operations scores. Anything else, or unset, is off: every result is as before",
     HC_STUCK_EXPECTED: "on, exactly, to run version 3 of the check for open deals stuck in their stage (DECISIONS.md 777): the share past the line is compared with the share the same entries would show at the pace every stay in the stage, finished or still running, shows; a stage the history we read doesn't cover is said so; a stage nobody enters any more and deals in their stage since before the read are raised in their own words. It changes that check's findings, sentences and fix prompt, and the current pipeline score. Anything else, or unset, is off: version 2, exactly as before",
+    HC_STUCK_UNSCORED: "on, exactly, to show the check for open deals stuck in their stage without scoring it (DECISIONS.md 778): version 2's line, count and deal list, as an observation that moves no score, with no exposure figure and words that don't call it a problem. With HC_STUCK_EXPECTED also on, version 3 wins and this has no effect. Anything else, or unset, is off: version 2, scored, exactly as before",
     RENDER_GIT_COMMIT: "Set by Render, not by hand: the commit the worker was built from. Each run records it, and which of the switches above were on, for staff on the run's page (DECISIONS.md 774). Anything that isn't 7 to 40 hex characters is taken as not given",
     HC_DOCUMENTS_KEY: "Seals the portal's documents: 32 bytes, base64 (openssl rand -base64 32), the same value as the console's, and different from HC_CONNECT_KEY, HC_TOKEN_KEY and HC_MICROSITE_KEY. Missing or wrong, the worker still starts and every portal request is refused, with nothing made",
   },
@@ -121,6 +122,8 @@ export type WorkerConfig = {
   casePaths: boolean;
   /** HC_STUCK_EXPECTED=on, exactly: cur.stuck-in-stage runs at version 3 (DECISIONS.md 777). */
   stuckExpected: boolean;
+  /** HC_STUCK_UNSCORED=on, exactly: cur.stuck-in-stage at version 4, shown and not scored, unless stuckExpected (DECISIONS.md 778). */
+  stuckUnscored: boolean;
   /** RENDER_GIT_COMMIT when it reads as a commit, lower case, or null (DECISIONS.md 774). */
   build: string | null;
 };
@@ -246,6 +249,7 @@ export function readWorkerEnv(env: NodeJS.ProcessEnv): { ok: true; config: Worke
       leadJourney: env.HC_LEAD_JOURNEY === "on",
       casePaths: env.HC_CASE_PATHS === "on",
       stuckExpected: env.HC_STUCK_EXPECTED === "on",
+      stuckUnscored: env.HC_STUCK_UNSCORED === "on",
       // Only ever hex, so nothing else from the environment can ride into a run's row as its build.
       build: BUILD_COMMIT.test(get("RENDER_GIT_COMMIT").toLowerCase()) ? get("RENDER_GIT_COMMIT").toLowerCase() : null,
     },
@@ -272,3 +276,10 @@ export const stuckExpectedStartLine = (on: boolean): string =>
   on
     ? "Stuck-in-stage version 3 is on: open deals past the line are compared with the share the same entries would show at the pace every stay in the stage shows."
     : "Stuck-in-stage version 3 is off: HC_STUCK_EXPECTED isn't on, so the check runs at version 2 exactly as before.";
+/** What the worker says at start about stuck-in-stage shown unscored (DECISIONS.md 778), and which wins with version 3. */
+export const stuckUnscoredStartLine = (on: boolean, expected: boolean): string =>
+  !on
+    ? "Stuck-in-stage shown unscored is off: HC_STUCK_UNSCORED isn't on, so the check is scored as before."
+    : expected
+      ? "Stuck-in-stage shown unscored is set, but HC_STUCK_EXPECTED is on too and version 3 wins, so it has no effect."
+      : "Stuck-in-stage shown unscored is on: the check shows version 2's figure and deal list as an observation and moves no score.";
