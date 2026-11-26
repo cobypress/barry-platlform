@@ -134,11 +134,20 @@ export function issueUnder(f: { ruleId: string; ruleVersion: number; status: str
  * from rule-where.json and the digest (its portal/history.ts).
  */
 export function passedOnlyByChange(ruleId: string, issueVersion: number | undefined, passVersion: number | undefined, under: readonly number[] | undefined): boolean {
+  // A pass under an older version than the issue's (a switch turned back off, DECISIONS.md 777): the check changed
+  // back, so nothing shows the org fixed it. Any rule, declared or not.
+  if (wentBack(issueVersion, passVersion)) return true;
   const between = loosenings(ruleId).filter((l) => (issueVersion === undefined || (l.version > issueVersion && l.from.includes(issueVersion))) && (passVersion === undefined || l.version <= passVersion));
   if (!between.length) return false;
   if (under === undefined) return true;
   return issueVersion === undefined ? under.length > 0 : under.includes(issueVersion);
 }
+
+/**
+ * Whether a later run read a rule at an older version than an earlier run did (DECISIONS.md 777): a version behind a
+ * worker switch, with the switch turned off again. Only when both versions are known.
+ */
+export const wentBack = (earlier: number | undefined, later: number | undefined): boolean => earlier !== undefined && later !== undefined && later < earlier;
 
 /**
  * What is wrong with a table of loosenings against the rules' current versions,
@@ -272,6 +281,9 @@ export function passedUnder(f: { ruleId: string; ruleVersion: number; status: st
  * rule-where.json and the digest.
  */
 export function foundByStricter(ruleId: string, passVersion: number | undefined, issueVersion: number | undefined, under: readonly number[] | undefined): boolean {
+  // An issue under an older version than the pass's (a switch turned back off, DECISIONS.md 777): the check changed
+  // back, so nothing shows the org got worse. Open, never new. Any rule, declared or not.
+  if (wentBack(passVersion, issueVersion)) return true;
   const between = tightenings(ruleId).filter((t) => (passVersion === undefined || (t.version > passVersion && t.from.includes(passVersion))) && (issueVersion === undefined || t.version <= issueVersion));
   if (!between.length) return false;
   if (under === undefined) return true;

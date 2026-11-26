@@ -2,7 +2,7 @@ import { test, describe } from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { LATEST_RULE_VERSIONS } from "../../domains/index.ts";
-import { issueUnder, LOOSENED, loosenedFrom, loosenedProblems, passedOnlyByChange } from "../loosened.ts";
+import { foundByStricter, issueUnder, LOOSENED, loosenedFrom, loosenedProblems, passedOnlyByChange, wentBack } from "../loosened.ts";
 import { buildDigest } from "../../digest/build.ts";
 import { buildReport } from "../../narrative/sections.ts";
 import { loadRun } from "../../render/render-run.ts";
@@ -32,6 +32,22 @@ describe("the declarations (decision 732)", () => {
     assert.match(loosenedProblems(at(3, [2, 1]), versions).join(), /ascending/);
     assert.match(loosenedProblems({ "no.such-rule": [{ version: 2, from: [1], on: "2026-11-25" }] }, versions).join(), /no rule has this id/);
     assert.match(loosenedProblems(at(3, [1, 2], "25 November"), versions).join(), /isn't a day/);
+  });
+});
+
+describe("a version that went back, for any rule (decision 777)", () => {
+  test("a later run reading a rule at an older version than an earlier run: never fixed, never new", () => {
+    // tech.storage-use declares nothing: the rule holds for every rule, a switch turned off again being the usual cause.
+    assert.equal(wentBack(3, 2), true);
+    assert.equal(wentBack(2, 3), false);
+    assert.equal(wentBack(2, 2), false);
+    assert.equal(wentBack(undefined, 2), false, "an unknown version is judged as before");
+    assert.equal(passedOnlyByChange("tech.storage-use", 3, 2, undefined), true, "an issue under 3, a pass under 2: the check changed back");
+    assert.equal(passedOnlyByChange("tech.storage-use", 2, 2, undefined), false, "the same version: a real fix");
+    assert.equal(passedOnlyByChange("tech.storage-use", 2, 3, undefined), false, "a newer version, nothing declared: a real fix, as before");
+    assert.equal(foundByStricter("tech.storage-use", 3, 2, undefined), true, "a pass under 3, an issue under 2: open, never new");
+    assert.equal(foundByStricter("tech.storage-use", 2, 2, undefined), false, "the same version: new");
+    assert.equal(foundByStricter("tech.storage-use", 2, 3, undefined), false, "a newer version, nothing declared: new, as before");
   });
 });
 
