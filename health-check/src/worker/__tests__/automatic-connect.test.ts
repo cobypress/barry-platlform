@@ -20,6 +20,7 @@ import { CALIBRATION_WRITE, calibrationFromRow, calibrationRow, HOLD_RUN_SQL, Po
 import { ORG_SETTINGS_ON_CONSULTANT_RUN } from "../run-job.ts";
 import { ORG_AWAITING_CONNECT } from "../types.ts";
 import { createJobHandler } from "../worker.ts";
+import { answerAll, fakeStageModel, reply, sentStages } from "../../testing/stage-model-fake.ts";
 import { baseDeps, consoleRun, INTAKE, oauthClient, RUN_ID, runInput, syntheticConnection } from "./helpers.ts";
 
 // An automatic full check is calibrated from the org's own stages and currency
@@ -874,5 +875,52 @@ describe("the customer's closed stages, and the name rule, at connect (DECISIONS
     await g.handle(g.job, once);
     assert.deepEqual(g.queued, [RUN_ID]);
     assert.ok(g.deps.lines.includes(`Automatic run ${RUN_ID}'s customer's answer about its closed stages isn't in a shape we read, so it was ignored.`));
+  });
+});
+
+describe("a model reading what the word list can't, at connect (DECISIONS.md 766)", () => {
+  // "Quokka Lost label" holds an outcome and a word beside it, so the word list leaves it undecided.
+  test("both switches on: only the undecided closed stage's label and API name go, read as the model says, marked so, and queued", async () => {
+    const f = await flow();
+    const model = fakeStageModel(answerAll("lost"));
+    Object.assign(f.deps, { stageNames: true, stageNamesModel: true, narrative: model });
+    const outcome = await f.handle(f.job, once);
+    assert.equal(model.requests.length, 1);
+    assert.deepEqual(sentStages(model.requests[0]!), [{ id: "s1", label: "Quokka Lost label", apiName: "Quokka Lost" }]);
+    const c = f.deps.store.runs.get(RUN_ID)!.calibration!;
+    assert.deepEqual(c.stages.filter((s) => s.from).map(({ labelKey: _k, ...s }) => s), [{ name: "Quokka Lost", category: "lost", from: "model" }]);
+    assert.deepEqual(f.queued, [RUN_ID]);
+    noStageNames(f, outcome.detail);
+  });
+
+  test("the model's switch off, HC_STAGE_NAMES off, or a consultant-led run: no call, calibrated as before", async () => {
+    const before = await flow();
+    before.deps.stageNames = true;
+    await before.handle(before.job, once);
+    const asBefore = before.deps.store.runs.get(RUN_ID)!.calibration!;
+    for (const [why, set, options] of [
+      ["the model's switch off", { stageNames: true, stageNamesModel: false }, {}],
+      ["HC_STAGE_NAMES off", { stageNames: false, stageNamesModel: true }, {}],
+      ["a consultant-led run", { stageNames: true, stageNamesModel: true }, { reviewMode: "consultant" }],
+    ] as const) {
+      const f = await flow(options as { reviewMode?: Run["reviewMode"] });
+      const model = fakeStageModel(answerAll("lost"));
+      Object.assign(f.deps, set, { narrative: model });
+      await f.handle(f.job, once);
+      assert.equal(model.requests.length, 0, why);
+      if (why === "the model's switch off") assert.deepEqual(f.deps.store.runs.get(RUN_ID)!.calibration, asBefore, why);
+    }
+  });
+
+  test("a model that throws, refuses or answers nonsense: calibrated and queued as without it, the stage undecided", async () => {
+    for (const model of [fakeStageModel(() => { throw new Error("Quokka Lost"); }), fakeStageModel(() => reply("", "refusal")), fakeStageModel(() => reply("{"))]) {
+      const f = await flow();
+      Object.assign(f.deps, { stageNames: true, stageNamesModel: true, narrative: model });
+      const outcome = await f.handle(f.job, once);
+      assert.equal(outcome.outcome, "connected");
+      assert.ok(f.deps.store.runs.get(RUN_ID)!.calibration!.stages.every((s) => s.name !== "Quokka Lost"));
+      assert.deepEqual(f.queued, [RUN_ID]);
+      noStageNames(f, outcome.detail);
+    }
   });
 });

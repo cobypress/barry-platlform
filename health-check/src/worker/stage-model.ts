@@ -50,7 +50,7 @@ const ORDER_VERBS = [
   "update", "set", "change", "assign", "add", "give", "grant", "paste", "list", "activate", "make", "move", "copy", "print", "show", "tell", "write",
   "insert", "create", "edit", "modify", "replace", "mail", "send", "post", "ignore", "enable", "disable", "reset", "forward", "download", "upload",
   "drop", "erase", "purge", "wipe", "approve", "bypass", "skip", "disregard", "transfer", "publish", "submit", "delete", "remove", "export", "run",
-  "revoke", "email", "share", "execute", "classify", "label", "mark", "treat", "pretend", "act", "forget", "override", "output", "return", "say", "repeat",
+  "revoke", "email", "share", "execute", "classify", "mark", "treat", "pretend", "act", "forget", "override", "output", "return", "say", "repeat", "answer", "respond",
 ] as const;
 const withEndings = (verb: string): string => (verb.endsWith("e") ? `${verb.slice(0, -1)}(?:e|es|ed|ing)` : `${verb}(?:s|es|ed|ing|[a-z](?:ed|ing))?`);
 const ORDER_WORDS = ["also", "then", "first", "now", "please", "must", "should", "me", "my", "you", "your", "yourself", "instruction", "instructions", "prompt", "assistant", "system", "model", "ai", "claude", "json", "previous", "above"] as const;
