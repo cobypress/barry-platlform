@@ -350,7 +350,7 @@ function sharing(ctx: Ctx): Metric {
   const doc = ctx.data(orgDocumentationExtractor);
   const org = ctx.data(orgExtractor);
   const evidence = [ctx.ev(doc.sharing.source, { count: doc.sharing.status === "ok" ? doc.sharing.data.length : null }), ctx.ev(org.source, { count: org.status === "ok" ? org.data.length : null })];
-  const exclusions = ["Sharing rules, which can't be counted through a read-only connection (QUESTIONS.md)"];
+  const exclusions = ["Sharing rules, which can't be counted through a read-only connection"];
   let rows: Array<{ object: string; internal: string | null; external: string | null }>;
   if (doc.sharing.status === "ok") rows = doc.sharing.data;
   else if (org.status === "ok" && org.data[0]) {
@@ -367,7 +367,7 @@ function sharing(ctx: Ctx): Metric {
   const order = new Map(doc.objects.map((o, i) => [o, i]));
   rows = rows.filter((r) => r.internal || r.external).sort((a, b) => (order.get(a.object) ?? 99) - (order.get(b.object) ?? 99) || a.object.localeCompare(b.object));
   const segments = [...rows.flatMap((r) => [...(r.internal ? [seg("internal", `${r.object}${SEP}${r.internal}`, 1)] : []), ...(r.external ? [seg("external", `${r.object}${SEP}${r.external}`, 1)] : [])]), ...labelSegments(rows.map((r) => [r.object, labelsOf(ctx).object(r.object)]))];
-  return measured(DEFINITIONS.sharing, evidence, rows.length, segments, { exclusions, assumptions: ["Salesforce reports a private default as None, which we show as Private (QUESTIONS.md)"] });
+  return measured(DEFINITIONS.sharing, evidence, rows.length, segments, { exclusions, assumptions: ["Salesforce reports a private default as None, which we show as Private"] });
 }
 
 export function documentedMetrics(ctx: Ctx): Metric[] {
