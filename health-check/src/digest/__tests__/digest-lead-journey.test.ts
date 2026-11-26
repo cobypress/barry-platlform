@@ -22,8 +22,8 @@ import { AS_OF, CONNECTED_USER } from "../../testing/synthetic-org.ts";
 
 const MADE_AT = "2026-11-26T09:00:00.000Z";
 const calibration = await automaticSyntheticCalibration();
-const automatic = async (transport: Transport, leadJourney = true) => {
-  const run = await runHealthCheck({ provider: syntheticProvider, calibration, modules: SALES_CLOUD_MODULES, outDir: tempDir(), now: new Date(AS_OF), transport, connectedUser: CONNECTED_USER, log: () => {}, reviewMode: "automatic", leadJourney });
+const automatic = async (transport: Transport, leadJourney = true, areaReasons = false) => {
+  const run = await runHealthCheck({ provider: syntheticProvider, calibration, modules: SALES_CLOUD_MODULES, outDir: tempDir(), now: new Date(AS_OF), transport, connectedUser: CONNECTED_USER, log: () => {}, reviewMode: "automatic", leadJourney, ...(areaReasons ? { areaReasons } : {}) });
   const { input, pseudonyms } = loadRun(run.dir);
   return { dir: run.dir, input, checked: checkedDigest({ input, pseudonyms, inventory: null, madeAt: MADE_AT }) };
 };
@@ -62,6 +62,14 @@ describe("an automatic run with the lead journey on", () => {
   }
 
   test("on the replayed synthetic org too", async () => released((await automatic(new AutomaticReplay())).checked, "replay"));
+
+  test("with the areas' own reasons on too (HC_AREA_REASONS, 769): released on every connection and the constructed orgs", async () => {
+    for (const [name, options] of VARIANTS) {
+      const off = (await automatic(new Simulator(options), false, true)).checked;
+      released((await automatic(new Simulator(options), true, true)).checked, `${name}, with area reasons`, off.masks);
+    }
+    released((await automatic(new AutomaticReplay(), true, true)).checked, "replay, with area reasons");
+  });
 
   test("the source check's finding is served, the source marked as the org's, whole, even a hostile one", async () => {
     const specs = richSpecs().map((s) => (s.source === "Webinar" ? { ...s, source: HOSTILE } : s));
