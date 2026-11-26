@@ -21,8 +21,10 @@ import { allowedStageWord } from "./stage-vocabulary.ts";
 // overrides a person, Salesforce, the customer or the word rule, and in doubt
 // the stage stays undecided.
 //
-// What goes: a stage is sent only if every word of both its label and its API
-// name, normalised as the word rule normalises them, is on the fixed vocabulary
+// What goes: a stage is sent only if every word of both its label (split on
+// spaces and punctuation only, and none with a capital inside it, which is a
+// brand or a name) and its API name (camel case split, as the word rule
+// normalises it) is on the fixed vocabulary
 // in stage-vocabulary.ts (or a number from 0 to 99, or a year from 2000 to
 // 2099), the name is at most 80 characters and 10 words, holds no character
 // but letters, digits, spaces and - – _ & ( ) , . ' / + :, and the guard would
@@ -65,11 +67,22 @@ export const stageLabelKey = (s: Pick<OrgStage, "apiName" | "label">): string =>
 /** Letters, digits, spaces and the punctuation stage names are written with; anything else (markup, quotes, symbols, currency signs) keeps a name home. */
 const PLAIN = /^[\p{L}\p{N} \-\u2013\u2014_&(),.'\u2019/+:]+$/u;
 
-/** Whether one label or API name may go to the model: every word on the vocabulary. Fails closed. */
-export function sendableStageName(name: string): boolean {
+/** A label's words as written: split on spaces and the allowed punctuation only, never at a capital. */
+const LABEL_SPLIT = /[\s\-\u2013\u2014_&(),.'\u2019/+:]+/u;
+/** A capital after a word's first letter in a word that isn't all capitals ("ServiceNow", "BigChange", "iPhone"): a name. */
+const INTERNAL_CAPITAL = (word: string): boolean => /^.+\p{Lu}/u.test(word) && word !== word.toUpperCase();
+
+/**
+ * Whether one label or API name may go to the model: every word on the
+ * vocabulary. A label is read as written: a word with a capital inside it is a
+ * name, and the stage stays home; an API name is an identifier, camel case
+ * split as the word rule splits it. Fails closed.
+ */
+export function sendableStageName(name: string, kind: "label" | "apiName" = "label"): boolean {
   if (name.length === 0 || name.length > STAGE_MODEL_LIMITS.maxNameChars) return false;
   if (!PLAIN.test(name)) return false;
-  const words = normaliseStageName(name).split(" ").filter(Boolean);
+  if (kind === "label" && name.split(LABEL_SPLIT).some((w) => w && INTERNAL_CAPITAL(w))) return false;
+  const words = (kind === "label" ? name.toLowerCase().split(LABEL_SPLIT) : normaliseStageName(name).split(" ")).filter(Boolean);
   if (words.length === 0 || words.length > STAGE_MODEL_LIMITS.maxWords) return false;
   if (!words.every(allowedStageWord)) return false;
   // Whatever the guard would change on its way out isn't sent either.
@@ -166,7 +179,8 @@ async function readStages(o: StageModelInput): Promise<ModelRead> {
     const before = earlier.get(s.apiName);
     if (before && before.labelKey === key) read.set(s.apiName, { name: s.apiName, category: before.category, from: "model", labelKey: key });
     else if (unsureBefore.has(key)) (unsure.add(key), wasUnsure++);
-    else if (sendableStageName(s.label) && sendableStageName(s.apiName)) ask.push(s);
+    // Both must pass: a label withheld keeps the stage home whatever its API name.
+    else if (sendableStageName(s.label, "label") && sendableStageName(s.apiName, "apiName")) ask.push(s);
     else notSent++;
   }
   const reused = read.size;

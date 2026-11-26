@@ -10,10 +10,12 @@
 // month names are left out for that reason (April, June, August, May), as are
 // surnames that are also business words (Cross, Day, House, Little, Park, Small).
 // Kept on purpose, though also surnames, because no stage list reads without
-// them: close, deal, price, sale.
+// them: close, deal, price, sale. "general" and "channel" are left out as
+// parts of company names (Legal & General, Channel 4).
 // English only. A test snapshots the list.
 
-export const STAGE_VOCABULARY: ReadonlySet<string> = new Set([
+/** The list as written, each word once (a test holds that). */
+export const STAGE_WORDS: readonly string[] = [
   // Outcomes and stage states
   "closed", "close", "closing", "lost", "lose", "loss", "losses", "won", "win", "wins", "open", "opened", "reopen", "reopened", "parked", 
   "hold", "held", "pending", "paused", "pause", "stalled", "stall", "stuck", "abandoned", "dead", "inactive", "active", "cold", "warm", "dormant",
@@ -36,13 +38,13 @@ export const STAGE_VOCABULARY: ReadonlySet<string> = new Set([
   "competitor", "competitors", "competition", "competitive", "status", "quo",
   // People by role, never by name
   "champion", "sponsor", "stakeholder", "stakeholders", "executive", "exec", "buyer", "buyers", "customer", "customers", "client", "clients",
-  "prospect", "prospects", "lead", "leads", "account", "accounts", "contact", "contacts", "decision", "maker", "makers", "owner", "board",
+  "prospect", "prospects", "lead", "leads", "account", "accounts", "contact", "contacts", "maker", "makers", "owner", "board",
   "management", "leadership", "team", "teams", "user", "users", "partner", "partners", "vendor", "vendors", "supplier", "suppliers", "reseller",
-  "resellers", "distributor", "channel", "direct", "indirect", "sales", "sale", "sold", "marketing", "ops", "operations", "it", "hr", "admin",
+  "resellers", "distributor", "direct", "indirect", "sales", "sale", "sold", "marketing", "ops", "operations", "it", "hr", "admin",
   // The sale's steps
   "trial", "pilot", "poc", "demo", "demos", "proposal", "proposals", "quote", "quoted", "quotes", "negotiation", "negotiating", "negotiate",
   "verbal", "signed", "signature", "sign", "unsigned", "order", "ordered", "purchase", "purchased", "deal", "deals", "opportunity",
-  "opportunities", "opp", "opps", "pipeline", "stage", "stages", "process", "project", "projects", "follow", "followup", "up", "nurture",
+  "opportunities", "opp", "opps", "pipeline", "stage", "stages", "process", "project", "projects", "follow", "followup", "up", 
   "evaluation", "evaluating", "assessment", "discovery", "onboarding", "implementation", "rollout", "upsell", "new", "existing",
   "business", "logo", "expansion", "downgrade", "upgrade", "migration",
   // Time
@@ -53,8 +55,10 @@ export const STAGE_VOCABULARY: ReadonlySet<string> = new Set([
   "a", "an", "the", "to", "of", "for", "by", "on", "in", "at", "with", "from", "into", "out", "off", "over", "under", "after", "before",
   "due", "per", "via", "and", "or", "but", "nor", "as", "is", "was", "are", "were", "be", "been", "being", "has", "had", "have", "all", "any",
   "some", "other", "others", "more", "less", "than", "then", "until", "yet", "still", "only", "just", "so", "because", "if", "when", "no",
-  "not", "none", "never", "non", "yes", "tbd", "na", "other", "misc", "general", "unknown", "reason", "reasons", "see", "notes",
-]);
+  "not", "none", "never", "non", "yes", "tbd", "na", "misc", "unknown", "reason", "reasons", "see", "notes",
+];
+
+export const STAGE_VOCABULARY: ReadonlySet<string> = new Set(STAGE_WORDS);
 
 /** Whether one normalised word may go: on the list, a number from 0 to 99, or a year from 2000 to 2099. */
 export const allowedStageWord = (word: string): boolean => STAGE_VOCABULARY.has(word) || /^\d{1,2}$/.test(word) || /^20\d\d$/.test(word);
