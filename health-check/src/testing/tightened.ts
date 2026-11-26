@@ -1,7 +1,7 @@
 import { LOOSENED, TIGHTENED, type Loosening, type Tightening } from "../engine/loosened.ts";
 
-// Tests only (DECISIONS.md 754): no rule has been tightened, so the tests declare
-// one for as long as a callback runs and take it away after, however it ends. A
+// Tests only (DECISIONS.md 754): the one rule tightened (cur.stuck-in-stage 3,
+// 777) runs only behind a switch, so the tests declare their own for as long as a callback runs and take it away after, however it ends. A
 // real declaration is written in src/engine/loosened.ts, never through this.
 
 type Tables = { tightened?: Record<string, readonly Tightening[]>; loosened?: Record<string, readonly Loosening[]> };

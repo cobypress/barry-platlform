@@ -2,7 +2,7 @@ import { buildDataset, checkNumbers, scopeDataset, SOURCE, type FigureSet } from
 import type { DatasetFigure } from "../numbercheck/dataset.ts";
 import { orgFree } from "../numbercheck/dataset.ts";
 import { countOf } from "../fix/hours.ts";
-import { FIX_TABLE } from "../fix/table.ts";
+import { fixRuleOf } from "../fix/table.ts";
 import { assembleMarked } from "../fix/prompt.ts";
 import { PROSE_SOURCES, type BuiltReport } from "../narrative/sections.ts";
 import { ONE_PERSON, peopleRewritten } from "../narrative/select.ts";
@@ -122,7 +122,7 @@ export const RUN_DATES = "run#dates";
  * range, and the units covered and left. Nothing read from the basis itself.
  */
 function hoursFigures(f: Finding): DatasetFigure[] {
-  const rule = FIX_TABLE[f.ruleId]?.hours;
+  const rule = fixRuleOf(f.ruleId, f.ruleVersion)?.hours;
   if (!rule) return [];
   const source = `${f.id}${HOURS}`;
   const out: DatasetFigure[] = [];
@@ -228,14 +228,14 @@ export function strictDataset(report: BuiltReport, set: FigureSet, named: NamedV
   }
   // The fix prompt's fixed text, its rule's (src/fix/table.ts), put together with none of the finding's sentences in it.
   const prompts = findings.flatMap((f) => {
-    const rule = FIX_TABLE[f.ruleId]?.prompt;
+    const rule = fixRuleOf(f.ruleId, f.ruleVersion)?.prompt;
     if (!rule || !f.fixPrompt) return [];
     const fixed = assembleMarked({ ...f, title: "", summary: "", recommendation: "", orgWords: undefined }, rule);
     return [{ source: `${f.id}${PROMPT}`, text: fixed.text, orgWords: fixed.spans }];
   });
   // And the hours' fixed words (what a unit is, the bulk reason, a fixed basis), the fix table's own, beside its numbers.
   const hoursWords = findings.flatMap((f) => {
-    const rule = FIX_TABLE[f.ruleId]?.hours;
+    const rule = fixRuleOf(f.ruleId, f.ruleVersion)?.hours;
     if (!rule || !f.effortHours) return [];
     return [{ source: `${f.id}${HOURS}`, text: rule.kind === "fixed" ? rule.basis : [rule.one, rule.many, rule.bulk ?? ""].join("\n") }];
   });

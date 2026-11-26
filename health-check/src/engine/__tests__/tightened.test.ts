@@ -2,7 +2,7 @@ import { test, describe } from "node:test";
 import assert from "node:assert/strict";
 import { cpSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { ALL_MODULES, SALES_CLOUD_MODULES } from "../../domains/index.ts";
+import { ALL_MODULES, LATEST_RULE_VERSIONS, SALES_CLOUD_MODULES } from "../../domains/index.ts";
 import { foundByStricter, passedUnder, TIGHTENED, tightenedFrom, tightenedOn, tightenedProblems, type Tightening } from "../loosened.ts";
 import { compareWithBaseline, progressFigures, stricterHeading, stricterNote, type Progress, type ProgressSide } from "../../progress/compare.ts";
 import { buildDigest } from "../../digest/build.ts";
@@ -27,11 +27,13 @@ import { AS_OF, CONNECTED_USER } from "../../testing/synthetic-org.ts";
 import { withDeclared } from "../../testing/tightened.ts";
 import type { Finding } from "../../schemas/index.ts";
 
-// Rule versions that tightened a rule (DECISIONS.md 754), the mirror of 732. No rule
-// has been tightened, so every test that needs one declares it here for the test
-// alone (withDeclared), never in src/engine/loosened.ts.
+// Rule versions that tightened a rule (DECISIONS.md 754), the mirror of 732. The one
+// rule tightened, cur.stuck-in-stage 3 (777), runs only behind HC_STUCK_EXPECTED, so
+// every test here that needs one declares its own for the test alone (withDeclared),
+// never in src/engine/loosened.ts; 777's own stories are in stuck-expected.test.ts.
 
-const versions = new Map(ALL_MODULES.flatMap((m) => m.rules).map((r) => [r.id, r.version]));
+// With the versions behind a switch (DECISIONS.md 777): cur.stuck-in-stage 3 runs only with HC_STUCK_EXPECTED on.
+const versions = LATEST_RULE_VERSIONS;
 /** Raised by the synthetic org at version 2 on a check, a pulse and an automatic check: 110 of 500 open leads, 22%. */
 const RULE = "dq.stale-leads";
 /** Version 2 raised the line, say, from 30% to 20%: a share under 30% passed under version 1. */
@@ -73,9 +75,10 @@ const deck = (r: BuiltReport, loaded: ReturnType<typeof loadRun>): string => pro
 const consultant = (await runFromRecording({ answers: loadAnswers() })).dir;
 
 describe("the declarations (decision 754)", () => {
-  test("none is declared: the table is empty, rule-where.json carries no tightening, and no digest finding carries passedUnder", () => {
-    assert.deepEqual(TIGHTENED, {});
-    assert.ok(Object.values(ruleWhere()).every((e) => !("tightenedFrom" in e) && !("tightenedOn" in e)));
+  test("one is declared, cur.stuck-in-stage 3 behind HC_STUCK_EXPECTED (decision 777): rule-where.json carries only it, and with the switch off no digest finding carries passedUnder", () => {
+    assert.deepEqual(Object.keys(TIGHTENED), ["cur.stuck-in-stage"]);
+    assert.deepEqual(tightenedProblems(TIGHTENED, versions), []);
+    assert.deepEqual(Object.entries(ruleWhere()).filter(([, e]) => "tightenedFrom" in e || "tightenedOn" in e).map(([id]) => id), ["cur.stuck-in-stage"]);
     const { built, loaded } = report(consultant);
     const digest = buildDigest({ report: built, pseudonyms: loaded.pseudonyms, inventory: null, madeAt: built.input.run.asOf });
     assert.ok(digest.findings.every((f) => !("passedUnder" in f)));
@@ -345,8 +348,10 @@ describe("a pulse, and an automatic customer's gated pulse (decisions 746, 754)"
     });
   });
 
-  test("test declarations can't overlap: a second call while one is open is refused, and the tables come back empty (review overlap.ts)", async () => {
+  test("test declarations can't overlap: a second call while one is open is refused, and the tables come back as they stood (review overlap.ts)", async () => {
     let inner: unknown;
+    // The tables as they stand: cur.stuck-in-stage 3's real declaration (DECISIONS.md 777) and nothing of a test's.
+    const standing = { ...TIGHTENED };
     const first = withDeclared({ tightened: { b: [] } }, async () => {
       await new Promise((r) => setTimeout(r, 5));
     });
@@ -354,9 +359,9 @@ describe("a pulse, and an automatic customer's gated pulse (decisions 746, 754)"
     await first;
     assert.equal(inner, undefined, "the second never ran");
     await assert.rejects(withDeclared(tightened(judged()), () => withDeclared(tightened(judged()), () => 0)), /already open/, "nested");
-    assert.deepEqual(TIGHTENED, {});
+    assert.deepEqual(TIGHTENED, standing);
     await withDeclared(tightened(judged()), () => assert.ok(RULE in TIGHTENED, "open again after a refusal"));
-    assert.deepEqual(TIGHTENED, {});
+    assert.deepEqual(TIGHTENED, standing);
   });
 
   test("every new sentence is made by said, so an automatic run knows it as ours, with none of the org's words", () => {

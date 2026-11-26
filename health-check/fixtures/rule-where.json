@@ -188,7 +188,25 @@
     "version": 2
   },
   "cur.stuck-in-stage": {
-    "version": 2
+    "version": 2,
+    "loosenedFrom": {
+      "3": [
+        1,
+        2
+      ]
+    },
+    "loosenedOn": {
+      "3": "2026-11-27"
+    },
+    "tightenedFrom": {
+      "3": [
+        1,
+        2
+      ]
+    },
+    "tightenedOn": {
+      "3": "2026-11-27"
+    }
   },
   "dq.contact-completeness": {
     "version": 1

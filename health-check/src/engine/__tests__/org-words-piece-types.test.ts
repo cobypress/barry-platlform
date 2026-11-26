@@ -20,6 +20,9 @@ const LITERAL_PIECES: string[] = [
   "src/domains/adoption/index.ts: x.g.dimension :: \"profile\" | \"role\"",
   "src/domains/current-pipeline/index.ts: dimensionWords(worst!.dimension) :: OrgWords | \"record type\" | \"team\" | \"rep\" | \"stage\"",
   "src/domains/current-pipeline/index.ts: dimensionWords(worst.dimension) :: OrgWords | \"record type\" | \"team\" | \"rep\" | \"stage\"",
+  // cur.stuck-in-stage 3 (DECISIONS.md 777): its worst segment's dimension, twice, as version 2's.
+  "src/domains/current-pipeline/index.ts: dimensionWords(worst.dimension) :: OrgWords | \"record type\" | \"team\" | \"rep\" | \"stage\"",
+  "src/domains/current-pipeline/index.ts: dimensionWords(worst.dimension) :: OrgWords | \"record type\" | \"team\" | \"rep\" | \"stage\"",
   "src/domains/historic-pipeline/index.ts: dimensionWords(dimension) :: OrgWords | \"type\" | \"record type\" | \"team\" | \"rep\" | \"lead source\" | \"closed quarter\"",
   "src/domains/historic-pipeline/process.ts: dimensionWords(h.dimension) :: OrgWords | \"type\" | \"record type\" | \"team\" | \"rep\" | \"lead source\" | \"closed quarter\"",
   "src/domains/service/operations.ts: dimensionWords(worst!.dimension) :: OrgWords | \"priority\" | \"origin\" | \"owner type\" | \"milestone type\" | \"queue\"",

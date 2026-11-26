@@ -68,6 +68,9 @@ async function runs(): Promise<Record<string, StrictShadow>> {
       transport: new Simulator({ records: journeyOrg(journeyRecords(richSpecs(), (leads) => leads.filter((l) => l.CreatedDate >= "2026-01-01").map((l, i) => ({ Id: `017${String(950_000 + i).padStart(12, "0")}AAA`, LeadId: l.Id, CreatedDate: l.CreatedDate })))) }),
       leadJourney: true,
     },
+    // Stuck-in-stage version 3 on (HC_STUCK_EXPECTED, DECISIONS.md 777): its sentences are counted, both review modes.
+    "stuckExpected/consultant": { stuckExpected: true },
+    "stuckExpected/automatic": { calibration: auto, answers: [], reviewMode: "automatic", transport: new Simulator(), stuckExpected: true },
     "leadJourney/quick": { calibration: auto, answers: [], reviewMode: "automatic", transport: new Simulator({ records: journeyOrg(journeyRecords(richSpecs().map((x) => (x.outcome ? { ...x, convertedAfter: 1, closedAfter: 5 } : x)))) }), leadJourney: true },
     // The case status paths on (HC_CASE_PATHS, DECISIONS.md 776): consultant-led runs with Service Cloud, the only runs it reaches.
     "casePaths/synthetic": { modules: ALL_MODULES, casePaths: true },

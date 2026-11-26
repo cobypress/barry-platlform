@@ -26,6 +26,11 @@ const SIGNED_OFF: string[] = [
   "src/engine/said-forms.ts: n.toLocaleString(\"en-GB\")",
   // The quarter's first day, which quarterBounds works out from the run's date and the fiscal start month, a number.
   "src/domains/current-pipeline/index.ts: quarter.from",
+  // cur.stuck-in-stage 3 (DECISIONS.md 777): the day the read starts, from the run's window, and the day of a stage's
+  // last entry, from the history read; each an ISO day the engine makes, none of the org's words.
+  "src/domains/current-pipeline/index.ts: r.since",
+  "src/domains/current-pipeline/index.ts: readFrom",
+  "src/domains/current-pipeline/index.ts: readFrom",
   // A phrase from USER_GUARD_BLOCKERS, our own table of the guards' words; an id it doesn't know goes through org.
   "src/domains/utilisation/index.ts: phrase",
   // The analysis window's two dates, which the engine works out from the run's date: digits and dashes (DECISIONS.md 663).

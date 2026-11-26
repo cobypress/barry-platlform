@@ -42,7 +42,34 @@ export type Loosening = {
 /** int.api-usage's line before version 3: a daily allowance was an issue from 80% used (DECISIONS.md 726). */
 export const API_USAGE_LINE_BEFORE_3 = 80;
 
+/**
+ * cur.stuck-in-stage's limits before version 3 (DECISIONS.md 777): an issue above 40% of compared open deals past
+ * the won deals' line, or above 60% in a segment of at least 10. Versions 1 and 2 decided alike (2 only added the
+ * left-out sentence, DECISIONS.md 388), and version 2 still reads them while HC_STUCK_EXPECTED is off.
+ */
+export const STUCK_LIMITS_BEFORE_3 = { total: 40, segment: 60 } as const;
+
+/**
+ * What versions 1 and 2 would have said of a version 3 reading, from the facts version 3 carries for it: the share
+ * past the won deals' line (`wonLineRate`) and the worst segment's (`wonLineWorstSegmentRate`, absent when no segment
+ * had 10 deals), each the rounded share versions 1 and 2 compared. With no `wonLineRate` (no stage had enough won
+ * deals for a line, so the earlier versions would not have measured it) the verdict is unknown.
+ */
+export function stuckBefore3(facts: Readonly<Record<string, number>>): "raised" | "passed" | "unknown" {
+  const total = facts.wonLineRate;
+  if (total === undefined) return "unknown";
+  const worst = facts.wonLineWorstSegmentRate;
+  return total > STUCK_LIMITS_BEFORE_3.total || (worst !== undefined && worst > STUCK_LIMITS_BEFORE_3.segment) ? "raised" : "passed";
+}
+
+/** The day cur.stuck-in-stage version 3 was first committed, behind HC_STUCK_EXPECTED (DECISIONS.md 777). */
+const STUCK_3_ON = "2026-11-27";
+
 export const LOOSENED: Readonly<Record<string, readonly Loosening[]>> = {
+  // Version 3 compares the share past the line with the share a steady pipeline would have (DECISIONS.md 777), where
+  // 1 and 2 raised above a fixed share: a heavy-tailed org's steady pipeline passes now. Judged on the pass's own
+  // reading against the won deals' line, which 3 carries for it; unknown is taken as still raised, never a fix.
+  "cur.stuck-in-stage": [{ version: 3, on: STUCK_3_ON, from: [1, 2], raisedBefore: (facts) => stuckBefore3(facts) !== "passed" }],
   // Version 3 raised the line from 80% to 95% (DECISIONS.md 726). Versions 1 and 2
   // read the same shares, used over max (726 only caps the printed share at 99.9 with
   // some left, which doesn't move it across 80). But version 3 reads the allowance
@@ -107,11 +134,20 @@ export function issueUnder(f: { ruleId: string; ruleVersion: number; status: str
  * from rule-where.json and the digest (its portal/history.ts).
  */
 export function passedOnlyByChange(ruleId: string, issueVersion: number | undefined, passVersion: number | undefined, under: readonly number[] | undefined): boolean {
+  // A pass under an older version than the issue's (a switch turned back off, DECISIONS.md 777): the check changed
+  // back, so nothing shows the org fixed it. Any rule, declared or not.
+  if (wentBack(issueVersion, passVersion)) return true;
   const between = loosenings(ruleId).filter((l) => (issueVersion === undefined || (l.version > issueVersion && l.from.includes(issueVersion))) && (passVersion === undefined || l.version <= passVersion));
   if (!between.length) return false;
   if (under === undefined) return true;
   return issueVersion === undefined ? under.length > 0 : under.includes(issueVersion);
 }
+
+/**
+ * Whether a later run read a rule at an older version than an earlier run did (DECISIONS.md 777): a version behind a
+ * worker switch, with the switch turned off again. Only when both versions are known.
+ */
+export const wentBack = (earlier: number | undefined, later: number | undefined): boolean => earlier !== undefined && later !== undefined && later < earlier;
 
 /**
  * What is wrong with a table of loosenings against the rules' current versions,
@@ -170,9 +206,10 @@ function changeProblems(table: Readonly<Record<string, readonly { version: numbe
 //
 // A version may loosen some readings and tighten others, so the two tables are
 // apart and a version can be in both: a pass after an issue reads only LOOSENED,
-// an issue after a pass only TIGHTENED. No rule has been tightened since the first
-// real runs, so the table is empty, and nothing anywhere reads differently until a
-// tightening is declared here.
+// an issue after a pass only TIGHTENED. The first rule tightened since the first
+// real runs is cur.stuck-in-stage 3 (DECISIONS.md 777), behind HC_STUCK_EXPECTED:
+// with the switch off the rule stays at 2, and a declaration for 3 reads no
+// version 2 finding differently.
 
 export type Tightening = {
   /** The version that tightened the rule. */
@@ -190,7 +227,12 @@ export type Tightening = {
   passedBefore?: (facts: Readonly<Record<string, number>>, ownCalls: number | undefined, earlier: number) => boolean;
 };
 
-export const TIGHTENED: Readonly<Record<string, readonly Tightening[]>> = {};
+export const TIGHTENED: Readonly<Record<string, readonly Tightening[]>> = {
+  // Version 3 also raises where 1 and 2 passed (DECISIONS.md 777): a light-tailed org's steady share is under 25%,
+  // so a share under 40% can be well above it. Judged on the issue's own reading as LOOSENED's is; unknown is
+  // never "new".
+  "cur.stuck-in-stage": [{ version: 3, on: STUCK_3_ON, from: [1, 2], passedBefore: (facts) => stuckBefore3(facts) !== "raised" }],
+};
 
 const tightenings = (ruleId: string): readonly Tightening[] => (Object.hasOwn(TIGHTENED, ruleId) ? TIGHTENED[ruleId]! : []);
 

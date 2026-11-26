@@ -57,5 +57,7 @@ test("the basis is only ever made from the fix table's rule for the finding", ()
     readdirSync(dir, { withFileTypes: true }).flatMap((e) => (e.isDirectory() ? (e.name === "__tests__" ? [] : files(join(dir, e.name))) : e.name.endsWith(".ts") ? [join(dir, e.name)] : []));
   const calls = files(join(ROOT, "src")).flatMap((p) => [...readFileSync(p, "utf8").matchAll(/\beffortHours\(([^)]*)\)/g)].map((m) => `${relative(ROOT, p)}: ${m[1]}`));
   assert.deepEqual(calls.filter((c) => !c.startsWith("src/fix/hours.ts: rule: HoursRule")), ["src/fix/index.ts: rule.hours, f.facts"]);
-  assert.match(read("src/fix/index.ts"), /const rule = FIX_TABLE\[ruleId\];/);
+  // The fix table's rule, or its own version's where one differs (FIX_BY_VERSION, DECISIONS.md 777), which keeps the hours as given.
+  assert.match(read("src/fix/index.ts"), /const rule = fixRuleOf\(ruleId, version\);/);
+  assert.match(read("src/fix/table.ts"), /export function fixRuleOf\(ruleId: string, version\?: number\): FixRule \| undefined \{\n  const byVersion = Object\.hasOwn\(FIX_BY_VERSION, ruleId\) \? FIX_BY_VERSION\[ruleId\]! : undefined;\n  if \(version !== undefined && byVersion && Object\.hasOwn\(byVersion, version\)\) return byVersion\[version\];\n  return Object\.hasOwn\(FIX_TABLE, ruleId\) \? FIX_TABLE\[ruleId\] : undefined;\n\}/);
 });

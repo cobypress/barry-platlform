@@ -1,8 +1,10 @@
 import { test, describe } from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
-import { ALL_MODULES } from "../../domains/index.ts";
-import { issueUnder, LOOSENED, loosenedFrom, loosenedProblems, passedOnlyByChange } from "../loosened.ts";
+import { LATEST_RULE_VERSIONS } from "../../domains/index.ts";
+import { foundByStricter, issueUnder, LOOSENED, loosenedFrom, loosenedProblems, passedOnlyByChange, wentBack } from "../loosened.ts";
+import { compareWithBaseline, type Progress, type ProgressSide } from "../../progress/compare.ts";
+import type { Finding } from "../../schemas/index.ts";
 import { buildDigest } from "../../digest/build.ts";
 import { buildReport } from "../../narrative/sections.ts";
 import { loadRun } from "../../render/render-run.ts";
@@ -14,7 +16,8 @@ import { join } from "node:path";
 // Rule versions that loosened a rule (DECISIONS.md 732): what the declarations may
 // say, the one rule that judges a pass, and what the digest carries for the console.
 
-const versions = new Map(ALL_MODULES.flatMap((m) => m.rules).map((r) => [r.id, r.version]));
+// With the versions behind a switch (DECISIONS.md 777): cur.stuck-in-stage 3 runs only with HC_STUCK_EXPECTED on.
+const versions = LATEST_RULE_VERSIONS;
 
 describe("the declarations (decision 732)", () => {
   test("every declaration names a real rule, a version it has had and earlier versions that exist", () => {
@@ -31,6 +34,46 @@ describe("the declarations (decision 732)", () => {
     assert.match(loosenedProblems(at(3, [2, 1]), versions).join(), /ascending/);
     assert.match(loosenedProblems({ "no.such-rule": [{ version: 2, from: [1], on: "2026-11-25" }] }, versions).join(), /no rule has this id/);
     assert.match(loosenedProblems(at(3, [1, 2], "25 November"), versions).join(), /isn't a day/);
+  });
+});
+
+describe("a version that went back, for any rule (decision 777)", () => {
+  // tech.storage-use declares nothing: the rule holds for every rule, a worker switch turned off again being the usual cause.
+  const RULE = "tech.storage-use";
+  const f = (status: "issue" | "passed", ruleVersion: number) => ({ id: `f-${status}-${ruleVersion}`, ruleId: RULE, domain: "technical_health", status, ruleVersion, title: "T", facts: {} }) as unknown as Finding;
+  const side = (runId: string, findings: Finding[], carried?: Record<string, number>): ProgressSide =>
+    ({ runId, asOf: "2026-10-31T12:00:00.000Z", findings, scores: [], overall: { status: "not_measurable" }, value: { currency: "GBP", total: { expected: 0 } }, limitsReadAt: null, ...(carried ? { carried } : {}) }) as unknown as ProgressSide;
+  const where = (p: Progress): string[] => (["fixed", "remaining", "added", "unknown", "newlyMeasured", "ruleChanged", "stricter", "changedBack"] as const).filter((k) => (p[k] ?? []).some((c) => c.ruleId === RULE));
+
+  test("the rule: a later run reading a rule at an older version than an earlier run", () => {
+    assert.equal(wentBack(3, 2), true);
+    assert.equal(wentBack(2, 3), false);
+    assert.equal(wentBack(2, 2), false);
+    assert.equal(wentBack(undefined, 2), false, "an unknown version is judged as before");
+    assert.equal(passedOnlyByChange(RULE, 3, 2, undefined), true, "an issue under 3, a pass under 2: the check changed back");
+    assert.equal(passedOnlyByChange(RULE, 2, 2, undefined), false, "the same version: a real fix");
+    assert.equal(passedOnlyByChange(RULE, 2, 3, undefined), false, "a newer version, nothing declared: a real fix, as before");
+    assert.equal(foundByStricter(RULE, 3, 2, undefined), false, "a check that came back is not a stricter one");
+  });
+
+  test("an issue under 3, then a pass under 2: apart, never fixed; then another pass under 2: nothing, as two runs alike", () => {
+    const p1 = compareWithBaseline(side("a", [f("issue", 3)]), side("b", [f("passed", 2)]));
+    assert.deepEqual(where(p1), ["ruleChanged"]);
+    assert.deepEqual(p1.carried, { [RULE]: 3 });
+    const p2 = compareWithBaseline(side("b", [f("passed", 2)], p1.carried), side("c", [f("passed", 2)]));
+    assert.deepEqual(where(p2), [], "the ordinary comparison: a pass after a pass says nothing");
+    assert.equal(p2.carried, undefined);
+    // While the versions still differ it stays apart: a pass under 2 after a baseline whose pass was under another version.
+    const p3 = compareWithBaseline(side("b", [f("passed", 1)], p1.carried), side("c", [f("passed", 2)]));
+    assert.deepEqual(where(p3), ["ruleChanged"]);
+  });
+
+  test("a pass under 3, then an issue under 2: open, never new, and not 'stricter': a list of its own with nothing said", () => {
+    const p = compareWithBaseline(side("a", [f("passed", 3)]), side("b", [f("issue", 2)]));
+    assert.deepEqual(where(p), ["changedBack"]);
+    assert.equal(p.added.length, 0);
+    assert.equal(p.stricter, undefined);
+    assert.equal(compareWithBaseline(side("a", [f("passed", 2)]), side("b", [f("issue", 2)])).added.length, 1, "the same version: new");
   });
 });
 

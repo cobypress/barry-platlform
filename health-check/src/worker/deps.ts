@@ -75,6 +75,8 @@ export type WorkerDeps = {
    * the lead journey to the lead funnel and reads whether the leads' Status history was kept. Off when absent.
    */
   leadJourney?: boolean;
+  /** HC_STUCK_EXPECTED=on, exactly, read once at start in env.ts (DECISIONS.md 777): cur.stuck-in-stage at version 3. Off when absent. */
+  stuckExpected?: boolean;
   /**
    * HC_CASE_PATHS=on, exactly, read once at start in env.ts (DECISIONS.md 776): every analysis the worker makes of a
    * run with Service Cloud adds the case status paths to service operations. Off when absent.

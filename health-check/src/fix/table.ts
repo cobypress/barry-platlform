@@ -899,3 +899,25 @@ export const FIX_TABLE: Readonly<Record<string, FixRule>> = {
     prompt: change("campaign settings", ["In a sandbox, allow influence models from Account Engagement in the campaign influence settings, and check the attribution.", "Propose the model to report on, for marketing to choose, then turn it on in production; it can be turned off again."], ["Opportunities show Account Engagement's attribution."]),
   },
 };
+
+/**
+ * A rule's fix declaration at a later version where it differs from FIX_TABLE's (DECISIONS.md 777), so a finding is
+ * fixed by its own version's words. cur.stuck-in-stage 3 (HC_STUCK_EXPECTED): the hours and complexity are version
+ * 2's; the report is of the same deals, and its test is one that can be met, since a steady pipeline keeps some
+ * deals past the line however well it is run.
+ */
+export const FIX_BY_VERSION: Readonly<Record<string, Readonly<Record<number, FixRule>>>> = {
+  "cur.stuck-in-stage": {
+    3: {
+      ...FIX_TABLE["cur.stuck-in-stage"]!,
+      prompt: change("deals", ["Build a report of open deals in their stage longer than three quarters of stays in that stage last, by stage and owner.", "Add it to the pipeline review, where each owner decides on their own deals."], ["At each review, the share of open deals on the report falls towards the share your stage times would give."]),
+    },
+  },
+};
+
+/** The fix declaration for a rule at a version: its own where FIX_BY_VERSION has one, else FIX_TABLE's. */
+export function fixRuleOf(ruleId: string, version?: number): FixRule | undefined {
+  const byVersion = Object.hasOwn(FIX_BY_VERSION, ruleId) ? FIX_BY_VERSION[ruleId]! : undefined;
+  if (version !== undefined && byVersion && Object.hasOwn(byVersion, version)) return byVersion[version];
+  return Object.hasOwn(FIX_TABLE, ruleId) ? FIX_TABLE[ruleId] : undefined;
+}
