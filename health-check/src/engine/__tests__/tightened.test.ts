@@ -348,8 +348,10 @@ describe("a pulse, and an automatic customer's gated pulse (decisions 746, 754)"
     });
   });
 
-  test("test declarations can't overlap: a second call while one is open is refused, and the tables come back empty (review overlap.ts)", async () => {
+  test("test declarations can't overlap: a second call while one is open is refused, and the tables come back as they stood (review overlap.ts)", async () => {
     let inner: unknown;
+    // The tables as they stand: cur.stuck-in-stage 3's real declaration (DECISIONS.md 777) and nothing of a test's.
+    const standing = { ...TIGHTENED };
     const first = withDeclared({ tightened: { b: [] } }, async () => {
       await new Promise((r) => setTimeout(r, 5));
     });
@@ -357,9 +359,9 @@ describe("a pulse, and an automatic customer's gated pulse (decisions 746, 754)"
     await first;
     assert.equal(inner, undefined, "the second never ran");
     await assert.rejects(withDeclared(tightened(judged()), () => withDeclared(tightened(judged()), () => 0)), /already open/, "nested");
-    assert.deepEqual(TIGHTENED, {});
+    assert.deepEqual(TIGHTENED, standing);
     await withDeclared(tightened(judged()), () => assert.ok(RULE in TIGHTENED, "open again after a refusal"));
-    assert.deepEqual(TIGHTENED, {});
+    assert.deepEqual(TIGHTENED, standing);
   });
 
   test("every new sentence is made by said, so an automatic run knows it as ours, with none of the org's words", () => {
