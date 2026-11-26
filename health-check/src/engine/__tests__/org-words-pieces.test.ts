@@ -427,7 +427,7 @@ const SIGNED_OFF: string[] = [
   "src/domains/current-pipeline/index.ts: plural(left.beyond, \"deal\")",
   "src/domains/current-pipeline/index.ts: r.deals.length",
   "src/domains/current-pipeline/index.ts: share",
-  "src/domains/current-pipeline/index.ts: tail(...retiredWords, manyAncient ? ancientWords : null)",
+  "src/domains/current-pipeline/index.ts: tail(...retiredWords, ancientWords)",
   "src/domains/current-pipeline/index.ts: tail(ancientWords)",
   "src/domains/current-pipeline/index.ts: tail(leftWords ?? null, ancientWords)",
   "src/domains/current-pipeline/index.ts: dimensionWords(worst.dimension)",
