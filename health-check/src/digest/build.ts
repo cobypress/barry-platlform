@@ -162,12 +162,14 @@ type RuleChangeContext = { ownCalls: number; carried: Readonly<Record<string, nu
  * versions its reading would have passed under, so an issue after such a pass is open,
  * not new.
  */
-function ruleChangeOf(f: Finding, change: RuleChangeContext): Pick<DigestFinding, "ruleVersion" | "issueUnder" | "carriedFrom" | "passedUnder"> {
+export function ruleChangeOf(f: Finding, change: RuleChangeContext): Pick<DigestFinding, "ruleVersion" | "issueUnder" | "carriedFrom" | "passedUnder"> {
   const loosened = hasLoosened(f.ruleId);
   const tightened = hasTightened(f.ruleId);
-  if (!loosened && !tightened) return { ruleVersion: f.ruleVersion };
+  // For any rule the comparison keeps apart (a loosening, or a version that went back, DECISIONS.md 777 and 778): the
+  // version of the issue its pass stands apart from, so a reader of two runs sees it. Nothing kept apart: as before.
+  const from = Object.hasOwn(change.carried, f.ruleId) && f.status !== "issue" ? change.carried[f.ruleId] : undefined;
+  if (!loosened && !tightened) return { ruleVersion: f.ruleVersion, ...(from !== undefined ? { carriedFrom: from } : {}) };
   const under = loosened ? issueUnder(f, change.ownCalls) : undefined;
-  const from = loosened && Object.hasOwn(change.carried, f.ruleId) && f.status !== "issue" ? change.carried[f.ruleId] : undefined;
   // For a rule we have tightened, an issue's verdict on the old line (DECISIONS.md 754): the mirror of issueUnder.
   const passed = tightened ? passedUnder(f, change.ownCalls) : undefined;
   return { ruleVersion: f.ruleVersion, ...(under ? { issueUnder: under } : {}), ...(from !== undefined ? { carriedFrom: from } : {}), ...(passed ? { passedUnder: passed } : {}) };

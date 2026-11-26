@@ -3,7 +3,7 @@ import { findingId } from "../engine/evaluate.ts";
 import type { OverallScore } from "../domains/scoring.ts";
 import type { ValueModel } from "../value/model.ts";
 import { apiLimitsExtractor } from "../extract/integrations.ts";
-import { UNSCORED_RULES } from "../domains/scoring.ts";
+import { UNSCORED_RULES, unscoredVersion } from "../domains/scoring.ts";
 import { foundByStricter, issueUnder, passedOnlyByChange, passedUnder, wentBack } from "../engine/loosened.ts";
 import { said, type Said } from "../engine/org-words.ts";
 
@@ -248,7 +248,9 @@ export function compareWithBaseline(baseline: ProgressSide, current: ProgressSid
       carried[ruleId] = Math.min(...thenIssues.map((f) => f.ruleVersion));
       continue;
     }
-    if (nowIssues.length) remaining.push(change(ruleId, nowIssues));
+    // Raised then and scored, an observation now that the score leaves out (778): the check changed, open, nothing said.
+    if (nowIssues.length && nowIssues.every((f) => unscoredVersion(f)) && thenIssues.every((f) => !unscoredVersion(f))) changedBack.push(change(ruleId, nowIssues));
+    else if (nowIssues.length) remaining.push(change(ruleId, nowIssues));
     else if (nowFindings.some((f) => f.status === "passed") && (!MEASURED_LATER.has(ruleId) || fixedAsRead(thenIssues, nowFindings))) fixed.push(change(ruleId, thenIssues));
     else unknown.push({ ...change(ruleId, thenIssues), ...kindNow(nowFindings) });
   }
@@ -267,7 +269,8 @@ export function compareWithBaseline(baseline: ProgressSide, current: ProgressSid
     // New only if the earlier run checked the rule, as the portal's alerts decide (DECISIONS.md 661, 673).
     if ((MEASURED_LATER.has(ruleId) && !then.some((f) => f.status === "passed")) || (current.checkedByCode === true && unsplitThen(then))) newlyMeasured.push(change(ruleId, nowIssues));
     // Passed then under a newer version, raised now under an older one: the check came back, open, never new, nothing said (DECISIONS.md 777).
-    else if (then.length > 0 && then.every((p) => p.status === "passed" && nowIssues.every((i) => wentBack(p.ruleVersion, i.ruleVersion)))) changedBack.push(change(ruleId, nowIssues));
+    // Or raised now only as an observation the score leaves out (UNSCORED_VERSIONS, 778), after a scored reading: the check changed.
+    else if (then.length > 0 && then.every((p) => p.status === "passed" && nowIssues.every((i) => wentBack(p.ruleVersion, i.ruleVersion) || (unscoredVersion(i) && !unscoredVersion(p))))) changedBack.push(change(ruleId, nowIssues));
     // Passed then, raised now only because we tightened the rule since: open, never new (DECISIONS.md 754).
     else if (foundByStricterCheck(then, nowIssues, ruleId, current.ownCalls)) stricter.push(change(ruleId, nowIssues));
     else added.push(change(ruleId, nowIssues));

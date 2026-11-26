@@ -64,12 +64,27 @@ export function stuckBefore3(facts: Readonly<Record<string, number>>): "raised" 
 
 /** The day cur.stuck-in-stage version 3 was first committed, behind HC_STUCK_EXPECTED (DECISIONS.md 777). */
 const STUCK_3_ON = "2026-11-27";
+/** The day version 4 was first committed, behind HC_STUCK_UNSCORED (DECISIONS.md 778). */
+const STUCK_4_ON = "2026-11-27";
+/** The day the lead journey's versions were first committed, behind HC_LEAD_JOURNEY (DECISIONS.md 770). */
+const JOURNEY_ON = "2026-11-26";
 
 export const LOOSENED: Readonly<Record<string, readonly Loosening[]>> = {
   // Version 3 compares the share past the line with the share a steady pipeline would have (DECISIONS.md 777), where
   // 1 and 2 raised above a fixed share: a heavy-tailed org's steady pipeline passes now. Judged on the pass's own
   // reading against the won deals' line, which 3 carries for it; unknown is taken as still raised, never a fix.
-  "cur.stuck-in-stage": [{ version: 3, on: STUCK_3_ON, from: [1, 2], raisedBefore: (facts) => stuckBefore3(facts) !== "passed" }],
+  // Version 4 (HC_STUCK_UNSCORED, DECISIONS.md 778) passes only where no deal is past the line, and carries version
+  // 2's own reading too, so the same judge says whether 1 and 2 would still have raised it.
+  "cur.stuck-in-stage": [
+    { version: 3, on: STUCK_3_ON, from: [1, 2], raisedBefore: (facts) => stuckBefore3(facts) !== "passed" },
+    { version: 4, on: STUCK_4_ON, from: [1, 2], raisedBefore: (facts) => stuckBefore3(facts) !== "passed" },
+  ],
+  // The lead journey's versions (HC_LEAD_JOURNEY, DECISIONS.md 770, declared in 778): reading whether the leads'
+  // Status history was kept can make either check not measurable where it was raised, count a status change as a
+  // response (a pass where 1 raised it) and leave out leads made before the history starts (either way). No fact
+  // either version carries says which, so no judge: a pass across them is never called fixed.
+  "lead.response-time": [{ version: 2, on: JOURNEY_ON, from: [1] }],
+  "lead.no-first-response": [{ version: 3, on: JOURNEY_ON, from: [1, 2] }],
   // Version 3 raised the line from 80% to 95% (DECISIONS.md 726). Versions 1 and 2
   // read the same shares, used over max (726 only caps the printed share at 99.9 with
   // some left, which doesn't move it across 80). But version 3 reads the allowance
@@ -232,6 +247,10 @@ export const TIGHTENED: Readonly<Record<string, readonly Tightening[]>> = {
   // so a share under 40% can be well above it. Judged on the issue's own reading as LOOSENED's is; unknown is
   // never "new".
   "cur.stuck-in-stage": [{ version: 3, on: STUCK_3_ON, from: [1, 2], passedBefore: (facts) => stuckBefore3(facts) !== "raised" }],
+  // The lead journey's versions can raise where the earlier ones passed (leads made before the Status history left
+  // out), with no fact to tell: an issue across them is never called new (DECISIONS.md 778).
+  "lead.response-time": [{ version: 2, on: JOURNEY_ON, from: [1] }],
+  "lead.no-first-response": [{ version: 3, on: JOURNEY_ON, from: [1, 2] }],
 };
 
 const tightenings = (ruleId: string): readonly Tightening[] => (Object.hasOwn(TIGHTENED, ruleId) ? TIGHTENED[ruleId]! : []);

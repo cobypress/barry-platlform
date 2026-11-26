@@ -193,10 +193,15 @@
       "3": [
         1,
         2
+      ],
+      "4": [
+        1,
+        2
       ]
     },
     "loosenedOn": {
-      "3": "2026-11-27"
+      "3": "2026-11-27",
+      "4": "2026-11-27"
     },
     "tightenedFrom": {
       "3": [
@@ -302,10 +307,44 @@
     "version": 1
   },
   "lead.no-first-response": {
-    "version": 2
+    "version": 2,
+    "loosenedFrom": {
+      "3": [
+        1,
+        2
+      ]
+    },
+    "loosenedOn": {
+      "3": "2026-11-26"
+    },
+    "tightenedFrom": {
+      "3": [
+        1,
+        2
+      ]
+    },
+    "tightenedOn": {
+      "3": "2026-11-26"
+    }
   },
   "lead.response-time": {
-    "version": 1
+    "version": 1,
+    "loosenedFrom": {
+      "2": [
+        1
+      ]
+    },
+    "loosenedOn": {
+      "2": "2026-11-26"
+    },
+    "tightenedFrom": {
+      "2": [
+        1
+      ]
+    },
+    "tightenedOn": {
+      "2": "2026-11-26"
+    }
   },
   "lead.source-return": {
     "version": 1

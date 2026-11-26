@@ -75,10 +75,11 @@ const deck = (r: BuiltReport, loaded: ReturnType<typeof loadRun>): string => pro
 const consultant = (await runFromRecording({ answers: loadAnswers() })).dir;
 
 describe("the declarations (decision 754)", () => {
-  test("one is declared, cur.stuck-in-stage 3 behind HC_STUCK_EXPECTED (decision 777): rule-where.json carries only it, and with the switch off no digest finding carries passedUnder", () => {
-    assert.deepEqual(Object.keys(TIGHTENED), ["cur.stuck-in-stage"]);
+  test("those declared are cur.stuck-in-stage 3 behind HC_STUCK_EXPECTED (decision 777) and the lead journey's versions (778): rule-where.json carries only them, and with the switch off no digest finding carries passedUnder", () => {
+    // And the lead journey's versions, behind HC_LEAD_JOURNEY (DECISIONS.md 778).
+    assert.deepEqual(Object.keys(TIGHTENED).sort(), ["cur.stuck-in-stage", "lead.no-first-response", "lead.response-time"]);
     assert.deepEqual(tightenedProblems(TIGHTENED, versions), []);
-    assert.deepEqual(Object.entries(ruleWhere()).filter(([, e]) => "tightenedFrom" in e || "tightenedOn" in e).map(([id]) => id), ["cur.stuck-in-stage"]);
+    assert.deepEqual(Object.entries(ruleWhere()).filter(([, e]) => "tightenedFrom" in e || "tightenedOn" in e).map(([id]) => id), ["cur.stuck-in-stage", "lead.no-first-response", "lead.response-time"]);
     const { built, loaded } = report(consultant);
     const digest = buildDigest({ report: built, pseudonyms: loaded.pseudonyms, inventory: null, madeAt: built.input.run.asOf });
     assert.ok(digest.findings.every((f) => !("passedUnder" in f)));
