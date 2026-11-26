@@ -2,7 +2,9 @@ import { test, describe, before } from "node:test";
 import assert from "node:assert/strict";
 import { analyseExtracts, loadExtracts, runFromRecording } from "../../testing/harness.ts";
 import { journeyRecords, richSpecs, withJourney, type LeadSpec } from "../../testing/lead-journey-org.ts";
-import { daysBetween, FAST_DAYS } from "../lead-funnel/journey.ts";
+import { daysBetween, FAST_DAYS, nearestRank, SEARCH_LIMIT } from "../lead-funnel/journey.ts";
+import { orgExtractor } from "../../extract/configuration.ts";
+import { loadCalibration } from "../../testing/replay.ts";
 import { INSIGHT_RULES, scoreDomains } from "../scoring.ts";
 import { DURATION_MEDIANS } from "../average.ts";
 import { leadFunnelModule, leadJourneyModule, withLeadJourney } from "../lead-funnel/index.ts";
@@ -143,6 +145,32 @@ describe("leads that became won deals (L2's measure)", () => {
     assert.deepEqual(m.dateRange, { from: "2024-10-31", to: "2026-08-12" });
   });
 
+  test("the lag is a nearest rank: at least 90% of the closed journeys really ended within the days the sentences state", () => {
+    // The reviewer's case: 25 closed deals, 22 at 50 days and 3 at 100 (an interpolated 90th percentile gave 81, with 88% within it); and 15.
+    for (const [n, slow, minSample] of [[25, 3, 20], [15, 2, 10]] as const) {
+      const days = Array.from({ length: n }, (_, k) => (k < n - slow ? 50 : 100));
+      const specs = days.map((d, k): LeadSpec => ({ source: "Web", made: 300 + k, owner: (k % 3) + 1, convertedAfter: 1, outcome: k % 2 ? "won" : "lost", closedAfter: d }));
+      const m = measured(metric(on(specs, undefined, { calibration: { ...loadCalibration(), minSample } }), "lead.won_lead_rate"));
+      const lag = m.stats.lagDays!;
+      assert.equal(lag, nearestRank(days, 0.9));
+      assert.ok(days.filter((d) => d <= lag).length / n >= 0.9, `${n}: ${lag}`);
+      assert.ok(m.assumptions.some((a) => a.endsWith(`The period ends ${lag} days before the run: the time 90% of the leads that became closed deals took to get there`)), m.assumptions.join(" | "));
+    }
+  });
+
+  test("every lead read is counted or excluded, in a zone behind UTC, on it and ahead of it", () => {
+    for (const zone of ["America/Los_Angeles", "Europe/London", "Asia/Tokyo"]) {
+      // A lead made at 03:00 UTC on the window's first day: the day before it in Los Angeles.
+      const records = journeyRecords([...richSpecs(), { source: "Web", made: 730, at: "03:00" }, ...Array.from({ length: 10 }, (_, i): LeadSpec => ({ source: "Web", made: 2 + i }))]);
+      const changed = withJourney(extracts, records);
+      (changed.get(orgExtractor.id) as { data: Array<{ TimeZoneSidKey: string }> }).data[0]!.TimeZoneSidKey = zone;
+      const m = measured(metric(analyseExtracts(changed, { leadJourney: true }), "lead.won_lead_rate"));
+      const excluded = m.exclusions.reduce((t, e) => t + Number(/^(\d+) leads? /.exec(e)?.[1] ?? 0), 0);
+      assert.equal(m.n + excluded, records.leads.length, `${zone}: ${m.exclusions.join(" | ")}`);
+      if (zone === "America/Los_Angeles") assert.ok(m.exclusions.includes("1 lead created before 31 October 2024 in your org's time zone, at the very start of what we read"), m.exclusions.join(" | "));
+    }
+  });
+
   test("the lag's floor: journeys quicker than 30 days still end the period 30 days before the run, and the sentences say it is our minimum", () => {
     const quick = richSpecs().map((s) => (s.outcome ? { ...s, convertedAfter: 1, closedAfter: 5 } : s));
     const recent = [...quick, { source: "Web", made: 10 } as LeadSpec];
@@ -262,6 +290,42 @@ describe("sources that convert well and win poorly, or the reverse (L2's check)"
       assert.equal(f[0]!.subjects[0]!.label, low, "the source with 100 closed deals, not the one with 60");
       assert.match(f[0]!.summary!, new RegExp(`from ${low} were converted, against 30% of the 200 from the other source\\. .* closed deals from the other source\\. With two sources, this is one difference seen from one side\\.`));
     }
+  });
+
+  /** Alpha converts 100 of 150 leads and wins 35 of its deals; Beta and Gamma convert 100 of 200 and win 50. */
+  const nearTheBar = (): LeadSpec[] => {
+    const specs: LeadSpec[] = [];
+    const add = (source: string, leads: number, won: number) => {
+      for (let k = 0; k < leads; k++) {
+        const base = { source, made: 100 + ((k * 7) % 600), owner: (k % 3) + 1 };
+        specs.push(k < 100 ? { ...base, convertedAfter: 3, outcome: (k * 37) % 100 < won ? "won" : "lost", closedAfter: 40 } : base);
+      }
+    };
+    add("Alpha", 150, 35);
+    add("Beta", 200, 50);
+    add("Gamma", 200, 50);
+    return specs;
+  };
+
+  test("the bar counts every comparison in every round: a gap that clears the first round's bar but not the bar for all rounds is not raised", () => {
+    const f = one(on(nearTheBar()), "lead.source-win-rate");
+    assert.equal(f.status, "passed", f.title ?? "");
+    // The same org with a wider gap is raised, so the source is compared and only the bar stops it.
+    const wider = nearTheBar().map((x) => (x.source === "Alpha" && x.outcome === "won" && x.made % 5 === 0 ? { ...x, outcome: "lost" as const } : x));
+    assert.equal(one(on(wider), "lead.source-win-rate").status, "issue");
+  });
+
+  test("if the bar never settles within the limit, nothing is raised", () => {
+    const limit = SEARCH_LIMIT.rounds;
+    try {
+      SEARCH_LIMIT.rounds = 0;
+      const f = one(on(richSpecs()), "lead.source-win-rate");
+      assert.equal(f.status, "not_measurable");
+      assert.equal(f.notMeasurableReason, "We couldn't settle how high a gap would have to be to tell it from chance across these sources, so we haven't compared them.");
+    } finally {
+      SEARCH_LIMIT.rounds = limit;
+    }
+    assert.equal(one(on(richSpecs()), "lead.source-win-rate").status, "issue");
   });
 
   test("open deals are counted both ways: a gap that holds only with them lost is not raised", () => {
