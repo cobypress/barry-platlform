@@ -198,7 +198,7 @@ describe("open cases stuck in a status (C1)", () => {
 describe("one of a thing, said in the singular", () => {
   test("one open case past the line, one closed straight, one status compared", () => {
     const stuck = one(on([...quickClosed(300), ANCHOR, { made: 3, steps: [["Working", 0.25]], at: "00:00" }]), "svc.stuck-in-status");
-    assert.match(textOf(stuck), /\. 1 of 1 open case \(100%\) has been in their current status/);
+    assert.match(textOf(stuck), /\. 1 of 1 open case \(100%\) has been in its current status/);
     const straight = one(on([...quick(300), { made: 80, steps: [["Closed", 0.2]] }]), "svc.closed-straight");
     assert.match(textOf(straight), /, 1 \(0.3%\) was closed straight from the status they started in/);
     const compared = one(on(sentBackOrg(15, 20)), "svc.sent-back-cases");

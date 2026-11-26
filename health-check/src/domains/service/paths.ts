@@ -441,7 +441,7 @@ export const stuckInStatus: Rule = {
     const dims: Record<string, (t: Target) => string> = { status: (t) => t.label, priority: (t) => t.priority, ...(c.hasOrigin ? { origin: (t: Target) => t.origin } : {}) };
     const result = segmentRate(targets, (t) => t.days > lines.get(t.status.key)!, dims, { segmentLimit: STUCK_SEGMENT_LIMIT, minSegment: MIN_SEGMENT });
     const { hits, n, rate } = result;
-    const lead = named(said`We set each open case beside the cases made ${periodSaid(c)}. ${hits} of ${n} ${n === 1 ? said`open case` : said`open cases`} (${rate}%) ${hits === 1 ? said`has` : said`have`} been in their current status longer than ${STAY_SHARE}% of those cases' stays in it lasted. Days are calendar days.`, { stayShare: [STAY_SHARE, "percent"], hits, n, rate: [rate, "percent"] });
+    const lead = named(said`We set each open case beside the cases made ${periodSaid(c)}. ${hits} of ${n} ${n === 1 ? said`open case` : said`open cases`} (${rate}%) ${hits === 1 ? said`has been in its` : said`have been in their`} current status longer than ${STAY_SHARE}% of those cases' stays in it lasted. Days are calendar days.`, { stayShare: [STAY_SHARE, "percent"], hits, n, rate: [rate, "percent"] });
     const facts = { hits, n, rate, statusesWithLine: lines.size, stayShare: STAY_SHARE, segmentLimit: STUCK_SEGMENT_LIMIT };
     const over = rate > STUCK_LIMIT;
     if (!over && result.hotspots.length === 0) {
@@ -469,7 +469,8 @@ export const stuckInStatus: Rule = {
       recommendation: said`Go through the open cases that have waited longest in each status and move each one on or close it, then look at why cases wait there.`,
       recommendationType: "change",
       severity: "medium",
-      confidence: "high",
+      // Fewer open cases than the calibrated minimum: true of those cases, said with less confidence.
+      confidence: n < minSample ? "medium" : "high",
       evidence,
       value,
       effort: { size: "S" },
