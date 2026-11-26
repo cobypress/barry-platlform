@@ -108,3 +108,14 @@ export function withMachineStages(calibration: Calibration, org: readonly OrgSta
   const stages = [...kept, ...set.stages];
   return { stages, answered: set.answered, byName: set.stages.length - set.answered, ignored: set.ignored, changed: JSON.stringify(stages) !== JSON.stringify(calibration.stages) };
 }
+
+/**
+ * Where a machine read a stage's meaning from its name, said beside it in the
+ * documents' list of stage meanings (DECISIONS.md 766): ", read from its name"
+ * for the word rule's, ", read from its name by AI" for a model's, and nothing
+ * for any other stage, so a list with neither is as it was.
+ */
+export function readFromNameNote(c: Pick<Calibration, "source">, s: Pick<CalibratedStage, "category" | "from">): string {
+  if (c.source !== "org_settings") return "";
+  return fromName(s) ? ", read from its name" : fromModel(s) ? ", read from its name by AI" : "";
+}

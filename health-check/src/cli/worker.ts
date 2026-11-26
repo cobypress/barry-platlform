@@ -125,6 +125,7 @@ export async function workerCommand(
     portalDocuments: config.portalDocuments,
     stageNames: config.stageNames,
     stageNamesModel: config.stageNamesModel,
+    stageNamesModelConsole: config.stageNamesModelConsole,
     codeLint: "found" in pmd ? { pmd: pmd.found } : { pmd: null, pmdMissing: pmd.missing },
     queueRun: runQueuer(queue),
     narrative,
@@ -166,7 +167,7 @@ export async function workerCommand(
   // The stage-name rule (DECISIONS.md 756), said at every start so turning it on or off shows in the log.
   log(stageNamesStartLine(config.stageNames));
   // And the model's reading of what the rule leaves undecided (DECISIONS.md 766).
-  log(stageModelStartLine(config.stageNames, config.stageNamesModel, narrative !== undefined));
+  log(stageModelStartLine(config.stageNames, config.stageNamesModel, narrative !== undefined, config.stageNamesModelConsole));
   // Said at every start, so a deploy that installs it shows in the log.
   if (lintSwept) log(`Deleted ${lintSwept} temporary ${lintSwept === 1 ? "folder" : "folders"} of Apex code that a PMD run cut short had left.`);
   log("found" in pmd ? `PMD ${PMD_VERSION} checks each health check's Apex code, and its findings are stored beside our own scan's.` : `${pmd.missing} Each health check says PMD didn't run.`);

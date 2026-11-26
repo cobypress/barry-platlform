@@ -1,4 +1,5 @@
 import { compareWithBaseline, limitsReadAt, progressDays, progressFigures, progressTitles, storageSentences, stricterHeading, worthFigures, type Progress } from "../progress/compare.ts";
+import { readFromNameNote } from "../connect/stage-outcomes.ts";
 import { factsText, type FactsSummary } from "../facts/summary.ts";
 import { currencyStanding } from "../engine/currency.ts";
 import { addedByFinding, buildValueModel, valueCurrency, MONEY_FACTS, worthOf, HEADLINE_KINDS, KIND_LABELS, TEAM_TIME_GROUP, UK_HOURLY_BENCHMARK, WORKING_WEEKS, type TeamTime, type ValueModel } from "../value/model.ts";
@@ -273,7 +274,7 @@ function calibrationText(run: Run, c: Calibration, facts: string[] = []): string
     `Analysis window: ${run.analysisWindow.from} to ${run.analysisWindow.to}.`,
     `${calibrationConfirmation(c)}.`,
     `Record types in scope: ${c.scope.recordTypes === "all" ? "all" : c.scope.recordTypes.join(", ")}.`,
-    `Stage meanings: ${c.stages.map((s) => `${s.name} (${s.category})`).join(", ")}.`,
+    `Stage meanings: ${c.stages.map((s) => `${s.name} (${s.category}${readFromNameNote(c, s)})`).join(", ")}.`,
     `A user counts as dormant after ${c.dormantDays} days without logging in.`,
     `A figure needs at least ${c.minSample} deals behind it.`,
     currencyLine(c),

@@ -445,12 +445,14 @@ export class MemoryWorkerStore implements WorkerStore {
   beforeStageWrite?: () => void;
 
   /** As the Postgres store's one guarded statement (DECISIONS.md 756): the stages only. */
-  async answerCalibrationStages(runId: string, was: CalibratedStage[], stages: CalibratedStage[]): Promise<"updated" | "unchanged"> {
+  async answerCalibrationStages(runId: string, was: CalibratedStage[], stages: CalibratedStage[], modelUnsure?: string[]): Promise<"updated" | "unchanged"> {
     this.beforeStageWrite?.();
     if (this.failStageWrite) throw new StoreError("the console's database refused the calibration's stages (SQLSTATE 57014)");
     const c = this.runs.get(runId)?.calibration;
     if (!c || c.source !== "org_settings" || c.confirmedBy !== ORG_SETTINGS_CALIBRATOR || !isDeepStrictEqual(c.stages, was)) return "unchanged";
-    this.runs.get(runId)!.calibration = { ...c, stages: structuredClone(stages) };
+    // With the model's "unsure" answers given (DECISIONS.md 766), they're set beside the stages; otherwise as before.
+    const { modelUnsure: _was, ...rest } = c;
+    this.runs.get(runId)!.calibration = modelUnsure === undefined ? { ...c, stages: structuredClone(stages) } : { ...rest, stages: structuredClone(stages), ...(modelUnsure.length ? { modelUnsure: [...modelUnsure] } : {}) };
     // No detail: the stage names are the org's own.
     this.writes.push({ method: "answerCalibrationStages", id: runId });
     return "updated";

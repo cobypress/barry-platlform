@@ -231,7 +231,9 @@ export const CALIBRATION_SQL = selectSql("HealthCheckCalibration", CALIBRATION, 
 export const CALIBRATION_WRITE: Columns = { runId: "text", ...CALIBRATION, source: "text" };
 export function calibrationRow(runId: string, c: Calibration): Record<string, unknown> {
   // What an automatic run knows of its currency, and the locale's suggestion (DECISIONS.md 700), ride in the "fields" JSON column, so no migration: the console has no column of its own for it.
-  const fields = c.currencyFrom ? { ...c.fields, currencyFrom: c.currencyFrom, ...(c.currencySuggested ? { currencySuggested: c.currencySuggested } : {}) } : c.fields;
+  const withCurrency = c.currencyFrom ? { ...c.fields, currencyFrom: c.currencyFrom, ...(c.currencySuggested ? { currencySuggested: c.currencySuggested } : {}) } : c.fields;
+  // The model's "unsure" answers (DECISIONS.md 766) the same way: hashes only, and only when there are any.
+  const fields = c.modelUnsure?.length ? { ...withCurrency, modelUnsure: c.modelUnsure } : withCurrency;
   return Object.fromEntries(Object.keys(CALIBRATION_WRITE).map((k) => [k, k === "runId" ? runId : k === "fields" ? fields : (c as Record<string, unknown>)[k]]));
 }
 /**
@@ -592,7 +594,10 @@ export function intakeFromRow(row: Record<string, unknown>, run: Run): Intake {
 }
 
 export function calibrationFromRow(row: Record<string, unknown>): Calibration {
-  const read = withoutNulls(row) as Record<string, unknown>;
+  const stored = withoutNulls(row) as Record<string, unknown>;
+  // The model's "unsure" answers ride in "fields" (DECISIONS.md 766): lifted out only on a calibration read from the org's settings, and only as a list of hashes.
+  const unsure = (stored.fields as Record<string, unknown> | undefined)?.modelUnsure;
+  const read = stored.source === "org_settings" && Array.isArray(unsure) && unsure.length > 0 && unsure.length <= 2_000 && unsure.every((k) => typeof k === "string" && /^[0-9a-f]{16}$/.test(k)) ? { ...stored, modelUnsure: unsure } : stored;
   // Lifted out of "fields" (calibrationRow), and only on a calibration read from the org's settings: a person's never carries one.
   const fields = read.fields as Record<string, unknown> | undefined;
   const from = fields?.currencyFrom;
@@ -691,6 +696,13 @@ export const SAVED_ORG_STAGES_SQL = `SELECT "stages" FROM "HealthCheckOrgStages"
  * the row is still the one the run read: the org's settings' with no person's confirmation and exactly those stages,
  * so two deliveries can't both write and a person's save is never written over.
  */
+/**
+ * The same guarded write with the model's "unsure" answers beside the stages (DECISIONS.md 766), in "fields", every
+ * other key of it left as it is. Used only on a run whose model route is on, so every other write is the statement above.
+ */
+export const ANSWER_CALIBRATION_STAGES_UNSURE_SQL =
+  `UPDATE "HealthCheckCalibration" SET "stages" = $2::jsonb, "fields" = ((CASE WHEN jsonb_typeof("fields") = 'object' THEN "fields" ELSE '{}'::jsonb END) - 'modelUnsure') || $5::jsonb ` +
+  `WHERE "runId" = $1 AND "source" = 'org_settings' AND "confirmedBy" = $3 AND "stages"::jsonb = $4::jsonb`;
 export const ANSWER_CALIBRATION_STAGES_SQL =
   `UPDATE "HealthCheckCalibration" SET "stages" = $2::jsonb ` +
   `WHERE "runId" = $1 AND "source" = 'org_settings' AND "confirmedBy" = $3 AND "stages"::jsonb = $4::jsonb`;
@@ -1438,9 +1450,12 @@ export class PostgresWorkerStore implements WorkerStore {
   }
 
   /** DECISIONS.md 756: one guarded statement. */
-  async answerCalibrationStages(runId: string, was: CalibratedStage[], stages: CalibratedStage[]): Promise<"updated" | "unchanged"> {
+  async answerCalibrationStages(runId: string, was: CalibratedStage[], stages: CalibratedStage[], modelUnsure?: string[]): Promise<"updated" | "unchanged"> {
     try {
-      const result = await this.#pool.query(ANSWER_CALIBRATION_STAGES_SQL, [runId, JSON.stringify(stages), ORG_SETTINGS_CALIBRATOR, JSON.stringify(was)]);
+      const result =
+        modelUnsure === undefined
+          ? await this.#pool.query(ANSWER_CALIBRATION_STAGES_SQL, [runId, JSON.stringify(stages), ORG_SETTINGS_CALIBRATOR, JSON.stringify(was)])
+          : await this.#pool.query(ANSWER_CALIBRATION_STAGES_UNSURE_SQL, [runId, JSON.stringify(stages), ORG_SETTINGS_CALIBRATOR, JSON.stringify(was), JSON.stringify(modelUnsure.length ? { modelUnsure } : {})]);
       return result.rowCount === 1 ? "updated" : "unchanged";
     } catch (err) {
       throw new StoreError(`the console's database refused the calibration's stages (SQLSTATE ${sqlState((err as { code?: unknown }).code)})`);

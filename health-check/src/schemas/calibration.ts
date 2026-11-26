@@ -99,6 +99,9 @@ export const Calibration = z
     // The currency the org's default locale suggests, for the question the
     // portal asks. Never printed as the currency and never formats an amount.
     currencySuggested: z.string().regex(/^[A-Z]{3}$/).optional(),
+    // The stages a model answered "unsure" for, by labelKey (DECISIONS.md 766): not asked again until the label
+    // changes. Hashes only, never a name. Rides in the "fields" JSON column, as the currency's standing does.
+    modelUnsure: z.array(z.string().max(64)).max(2_000).optional(),
     // Annual cost per seat by Salesforce licence name. No entry means no sizing, never a guess.
     licenceCosts: z.record(z.string(), z.number().nonnegative()).default({}),
     // Minutes a year per item, by key, as agreed with the customer. Salesforce has

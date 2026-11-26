@@ -26,13 +26,15 @@ export const stageNamesStartLine = (on: boolean): string =>
     : "Closed stages read by name are off: HC_STAGE_NAMES isn't on, so a closed stage that isn't won stays undecided until the customer says which it is.";
 
 /** What the worker says at start about a model reading the stages the rule leaves undecided (DECISIONS.md 766). */
-export const stageModelStartLine = (names: boolean, on: boolean, claude: boolean): string =>
+export const stageModelStartLine = (names: boolean, on: boolean, claude: boolean, consoleReady: boolean): string =>
   !on
     ? "Closed stages read by a model are off: HC_STAGE_NAMES_MODEL isn't on, so no stage name is sent to a model."
-    : !names
+    : !consoleReady
+      ? "Closed stages read by a model: HC_STAGE_NAMES_MODEL is on but ignored: the console doesn't carry model readings yet (HC_STAGE_NAMES_MODEL_CONSOLE isn't ready), so no stage name is sent to a model."
+      : !names
       ? "Closed stages read by a model are switched on, but HC_STAGE_NAMES isn't, so no stage name is sent to a model."
       : claude
-        ? "Closed stages read by a model are on: an automatic calibration sends the label and API name of each closed stage that isn't won and that the word list leaves undecided, and nothing else, to Claude, and says its reading as an assumption."
+        ? "Closed stages read by a model are on: an automatic calibration sends the label and API name of each closed stage that isn't won, that the word list leaves undecided and whose every word is on the fixed vocabulary, one stage a call and nothing else, to Claude, and says its reading as an assumption."
         : "Closed stages read by a model are switched on, but Claude isn't set up, so no stage name is sent and those stages stay undecided.";
 
 /**
@@ -65,18 +67,23 @@ export async function setStagesBeforeRun(o: { runId: string; input: RunJobInput;
   const set = org ? withMachineStages(c, org, answer, byName) : withoutNames(c, byName, byModel);
   if (!org) log(`Automatic run ${runId} has no saved stages to check its closed stages against, so ${set.changed ? "only the readings from stage names were taken out" : "they are left as its calibration has them"}.`);
   // Below every other word, the model reads only what is still undecided, reusing what it read before while the stage's label is unchanged (DECISIONS.md 766).
-  const read = org && byModel ? await modelStages({ runId, org, decided: new Set(set.stages.map((s) => s.name)), previous: c.stages, client: deps.narrative, log }) : [];
+  const model = org && byModel ? await modelStages({ runId, org, decided: new Set(set.stages.map((s) => s.name)), previous: c.stages, previousUnsure: c.modelUnsure, client: deps.narrative, log }) : null;
+  const read = model?.stages ?? [];
   const stages = read.length > 0 ? [...set.stages, ...read] : set.stages;
-  const changed = read.length > 0 ? JSON.stringify(stages) !== JSON.stringify(c.stages) : set.changed;
+  // The model's "unsure" answers ride beside the stages; with the route off, any kept before go with its readings.
+  const unsure = model ? model.unsure : c.modelUnsure?.length ? [] : undefined;
+  const unsureChanged = unsure !== undefined && JSON.stringify(unsure) !== JSON.stringify(c.modelUnsure ?? []);
+  const changed = (read.length > 0 ? JSON.stringify(stages) !== JSON.stringify(c.stages) : set.changed) || unsureChanged;
   if (!changed) return c;
-  const parsed = Calibration.safeParse({ ...c, stages });
+  const { modelUnsure: _kept, ...rest } = c;
+  const parsed = Calibration.safeParse({ ...(unsure === undefined ? c : rest), stages, ...(unsure?.length ? { modelUnsure: unsure } : {}) });
   if (!parsed.success) {
     log(`Automatic run ${runId}'s calibration refused its closed stages as set again, so they are left as they were.`);
     return c;
   }
   let saved: "updated" | "unchanged";
   try {
-    saved = await deps.store.answerCalibrationStages(runId, c.stages, parsed.data.stages);
+    saved = unsure === undefined ? await deps.store.answerCalibrationStages(runId, c.stages, parsed.data.stages) : await deps.store.answerCalibrationStages(runId, c.stages, parsed.data.stages, unsure);
   } catch (err) {
     // The write may have been committed before the error reached us: the row decides.
     log(`Automatic run ${runId}'s closed stages may not have been saved (${err instanceof StoreError ? err.message : "an unexpected error"}), so the run goes on with the calibration as stored.`);
