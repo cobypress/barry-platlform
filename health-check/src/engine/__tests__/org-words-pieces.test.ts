@@ -992,7 +992,13 @@ const SIGNED_OFF: string[] = [
   'src/domains/service/paths.ts: worst.rate',
   'src/domains/service/paths.ts: worst.rate',
   'src/domains/service/paths.ts: worst.rate',
-  'src/domains/service/paths.ts: worstLine',
+  'src/domains/service/paths.ts: STAY_SHARE',
+  'src/domains/service/paths.ts: top.hits',
+  'src/domains/service/paths.ts: top.n',
+  'src/domains/service/paths.ts: top.rate',
+  'src/domains/service/paths.ts: topLine',
+  'src/domains/service/paths.ts: within',
+  'src/domains/service/paths.ts: within',
   // lead funnel (DECISIONS.md 657).
   // Numbers: counts, rates, limits and constants the rule works out (each typed number).
   // The lead journey (DECISIONS.md 770), behind HC_LEAD_JOURNEY. Numbers: counts, rates, days and constants the rules work out, each typed number;

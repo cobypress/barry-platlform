@@ -1,7 +1,7 @@
 import { test, describe, before } from "node:test";
 import assert from "node:assert/strict";
 import { analyseExtracts, loadExtracts, runFromRecording } from "../../testing/harness.ts";
-import { ANCHOR, caseRecords, richCases, withCases, type CaseSpec, type CaseStatus } from "../../testing/case-paths-org.ts";
+import { ANCHOR, CASE_PATH_STATUSES, caseRecords, richCases, withCases, type CaseSpec, type CaseStatus } from "../../testing/case-paths-org.ts";
 import { orgExtractor } from "../../extract/configuration.ts";
 import { serviceCasesExtractor } from "../../extract/service.ts";
 import { loadCalibration } from "../../testing/replay.ts";
@@ -11,7 +11,6 @@ import { casePathsModule, withCasePaths } from "../service/index.ts";
 import { serviceOperationsModule } from "../service/operations.ts";
 import { LEAST_LAG_DAYS } from "../service/paths.ts";
 import { zBar } from "../historic-pipeline/paths/insights.ts";
-import { orgWordsOf, withOrgWords } from "../../engine/org-words.ts";
 import type { AnalysisOutput } from "../../engine/evaluate.ts";
 import type { Finding, Metric } from "../../schemas/index.ts";
 
@@ -303,21 +302,45 @@ describe("the org's words", () => {
     }).concat(Array.from({ length: 30 }, (_, i): CaseSpec => ({ made: 1 + (i % 10), steps: [["Working_9", 0.2], ["Waiting", 0.4]] })));
 
   test("every status in a sentence is marked as the org's, whatever it holds", () => {
-    withOrgWords(() => {
-      const a = on(hostileSpecs(), { statuses: HOSTILE });
-      for (const f of all(a).filter((x) => NEW_RULES.includes(x.ruleId))) {
-        for (const text of [f.title, f.summary, f.recommendation, f.notMeasurableReason].filter((t): t is string => typeof t === "string")) {
-          const spans = orgWordsOf(text) ?? [];
-          for (const s of HOSTILE.map((h) => h.MasterLabel!)) {
-            let at = text.indexOf(s);
-            while (at >= 0) {
-              assert.ok(spans.some((sp) => sp.start <= at && sp.end >= at + s.length), `${f.ruleId}: "${s}" unmarked in ${text}`);
-              at = text.indexOf(s, at + 1);
-            }
+    const a = on(hostileSpecs(), { statuses: HOSTILE });
+    let seen = 0;
+    for (const f of all(a).filter((x) => NEW_RULES.includes(x.ruleId))) {
+      for (const field of ["title", "summary", "recommendation", "notMeasurableReason"] as const) {
+        const text = f[field];
+        if (typeof text !== "string") continue;
+        const marked = f.orgWords?.[field];
+        assert.ok(marked, `${f.ruleId} ${field} carries its marks`);
+        for (const s of HOSTILE.filter((h) => h.ApiName !== "New").map((h) => h.MasterLabel!)) {
+          let at = text.indexOf(s);
+          while (at >= 0) {
+            seen++;
+            assert.ok(marked.spans.some((sp) => sp.start <= at && sp.end >= at + s.length), `${f.ruleId}: "${s}" unmarked in ${text}`);
+            at = text.indexOf(s, at + 1);
           }
         }
       }
-    });
+    }
+    // The test reads something: hostile names are in the sentences.
+    assert.ok(seen > 0);
+  });
+
+  test("each hostile name, as the status the stuck check names, is in its sentence and marked whole", () => {
+    const waiting = Array.from({ length: 30 }, (_, i): CaseSpec => ({ made: 30 + i, priority: ["High", "Medium", "Low"][i % 3]!, origin: ["Email", "Web", "Phone"][Math.floor(i / 3) % 3]!, steps: [["Working", 0.25], ["Waiting", 0.5]] }));
+    const NAMES = ["Stage 9 of 12, 50% done", "Closed", "ask jane.doe@example.com <b>now</b>", "500000000000001", "500000000000001AAA", "Mary Smith", "Mary Smith ".repeat(27).trim(), "<script>x</script> 100%"];
+    for (const name of NAMES) {
+      const statuses = CASE_PATH_STATUSES.map((st) => (st.ApiName === "Waiting" ? { ...st, MasterLabel: name } : st));
+      const f = one(on([...richCases(), ...waiting], { statuses }), "svc.stuck-in-status");
+      const text = f.summary!;
+      if (!text.includes(name)) {
+        // The privacy scrub took part of it out (an email, an id): the sentence then loses its marks, so it can never be served as ours.
+        assert.match(text, /\[\[(email|id|[a-z]+)[^\]]*\]\]/, `${name}: ${text}`);
+        assert.equal(f.orgWords?.summary, undefined, `${name}: a scrubbed sentence keeps no marks`);
+        continue;
+      }
+      const at = text.indexOf(`In ${name}, `) >= 0 ? text.indexOf(`In ${name}, `) + 3 : text.indexOf(`stays in ${name} ended`) + 9;
+      assert.ok(at > 8, `${name}: ${text}`);
+      assert.ok(f.orgWords!.summary!.spans.some((sp) => sp.start === at && sp.end === at + name.length), `${name} marked whole: ${text}`);
+    }
   });
 
   test("a status the org labels \"Closed\" but which isn't closed is read by its flag, never by its name", () => {

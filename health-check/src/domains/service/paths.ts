@@ -70,20 +70,30 @@ const caseOrigin = originOf;
 /** A status as the paths read it: the org's settings row it matches, by API name. */
 type Status = { key: string; label: string; closed: boolean };
 
-/** The org's statuses by every name a value can carry; a name two statuses of different kinds share is left out. */
+/**
+ * The org's statuses by the names a value can carry: its API name exactly
+ * first, then any API name or label ignoring case. A name two statuses of
+ * different kinds share at the same step is left out, so it has no meaning.
+ */
 function statusTable(rows: CaseStatusRow[]): (value: string | null) => Status | null {
-  const byName = new Map<string, Status | null>();
+  const exact = new Map<string, Status | null>();
+  const loose = new Map<string, Status | null>();
+  const add = (map: Map<string, Status | null>, name: string, s: Status): void => {
+    const seen = map.get(name);
+    if (seen === undefined) map.set(name, s);
+    else if (seen !== null && seen.key !== s.key && seen.closed !== s.closed) map.set(name, null);
+  };
   for (const row of rows) {
+    if (!valueOf(row.ApiName)) continue;
     const s: Status = { key: row.ApiName, label: valueOf(row.MasterLabel) ?? row.ApiName, closed: row.IsClosed === true };
-    for (const name of new Set([row.ApiName, row.MasterLabel].flatMap((n) => (valueOf(n) ? [n!.toLowerCase()] : [])))) {
-      const seen = byName.get(name);
-      if (seen === undefined) byName.set(name, s);
-      else if (seen !== null && seen.key !== s.key && seen.closed !== s.closed) byName.set(name, null);
-    }
+    add(exact, row.ApiName, s);
+    for (const name of new Set([row.ApiName, row.MasterLabel].flatMap((n) => (valueOf(n) ? [n!.toLowerCase()] : [])))) add(loose, name, s);
   }
   return (value) => {
     const v = valueOf(value);
-    return v === null ? null : (byName.get(v.toLowerCase()) ?? null);
+    if (v === null) return null;
+    const hit = exact.get(v);
+    return hit !== undefined ? hit : (loose.get(v.toLowerCase()) ?? null);
   };
 }
 
@@ -438,8 +448,15 @@ export const stuckInStatus: Rule = {
       return { outcome: "pass", summary: named(said`${lead} No segment is above ${STUCK_SEGMENT_LIMIT}%.`, { segmentLimit: [STUCK_SEGMENT_LIMIT, "percent"] }), evidence, segmentsChecked: result.segmentsChecked, facts };
     }
     const worst = result.hotspots[0];
-    const worstLine = worst && worst.dimension === "status" ? lines.get(targets.find((t) => t.label === worst.key)!.status.key)! : null;
-    const lineSaid = worst && worstLine !== null ? named(said` ${STAY_SHARE}% of the stays in ${org(worst.key)} ended within ${worstLine} days.`, { stayShare: [STAY_SHARE, "percent"], worstLine: [worstLine, "day"] }) : said``;
+    // The status the note's sentence names: the worst status past the line, with the line it is held to.
+    const top = result.hotspots.find((h) => h.dimension === "status");
+    const topLine = top ? lines.get(targets.find((t) => t.label === top.key)!.status.key)! : 0;
+    const within = topLine === 1 ? said`1 day` : named(said`${topLine} days`, { topLine: [topLine, "day"] });
+    const lineSaid = !top
+      ? said``
+      : top === worst
+        ? named(said` ${STAY_SHARE}% of the stays in ${org(top.key)} ended within ${within}.`, { stayShare: [STAY_SHARE, "percent"] })
+        : named(said` In ${org(top.key)}, ${top.hits} of ${top.n} open cases (${top.rate}%) are past the line: ${STAY_SHARE}% of the stays there ended within ${within}.`, { topHits: top.hits, topN: top.n, topRate: [top.rate, "percent"], stayShare: [STAY_SHARE, "percent"] });
     const hidden = !worst
       ? said``
       : !over

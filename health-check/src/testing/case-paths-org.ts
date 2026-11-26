@@ -162,3 +162,18 @@ export function richCases(seed = 20261127): CaseSpec[] {
   }
   return specs;
 }
+
+/**
+ * Many closed straight: 200 cases New, Working, Closed in two days and 100
+ * closed as duplicates straight from New, made 40 to 339 days before the run,
+ * and one open case.
+ */
+export function straightCases(): CaseSpec[] {
+  const priorities = ["High", "Medium", "Low"];
+  const origins = ["Email", "Web", "Phone"];
+  return [
+    ANCHOR,
+    ...Array.from({ length: 300 }, (_, i): CaseSpec => ({ made: 40 + i, priority: priorities[i % 3]!, origin: origins[Math.floor(i / 3) % 3]!, steps: i % 3 === 1 ? [["Duplicate", 0.2]] : [["Working", 0.5], ["Closed", 2]] })),
+    { made: 3, steps: [["Working", 0.5]] },
+  ];
+}
