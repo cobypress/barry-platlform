@@ -93,6 +93,15 @@ describe("time from a lead to a won deal (L1)", () => {
     assert.equal(after.n, before.n);
   });
 
+  test("a deal that closed before its first lead was made is left out, and said", () => {
+    const specs: LeadSpec[] = [...richSpecs()];
+    // A lead made 300 days ago, converted into a won deal closed 60 days before it.
+    specs.push({ source: "Web", made: 300, convertedAfter: 0, outcome: "won", closedAfter: -60 });
+    const [base, m] = [measured(metric(on(richSpecs()), "lead.days_to_won")), measured(metric(on(specs), "lead.days_to_won"))];
+    assert.deepEqual({ n: m.n, value: m.value }, { n: base.n, value: base.value });
+    assert.ok(m.exclusions.includes("1 lead converted into a deal we couldn't follow: not read, at a stage with no meaning, or closed before the lead was made"), m.exclusions.join(" | "));
+  });
+
   test("too few won deals is not measurable, with the count", () => {
     const specs = richSpecs().map((s) => (s.outcome === "won" ? { ...s, outcome: "lost" as const } : s));
     specs.push(...Array.from({ length: 3 }, (_, i): LeadSpec => ({ source: "Web", made: 200 + i, convertedAfter: 3, outcome: "won", closedAfter: 40 })));
@@ -134,6 +143,37 @@ describe("leads that became won deals (L2's measure)", () => {
     assert.deepEqual(m.dateRange, { from: "2024-10-31", to: "2026-08-12" });
   });
 
+  test("the lag's floor: journeys quicker than 30 days still end the period 30 days before the run, and the sentences say it is our minimum", () => {
+    const quick = richSpecs().map((s) => (s.outcome ? { ...s, convertedAfter: 1, closedAfter: 5 } : s));
+    const recent = [...quick, { source: "Web", made: 10 } as LeadSpec];
+    const m = measured(metric(on(recent), "lead.won_lead_rate"));
+    assert.equal(m.stats.lagDays, 30);
+    assert.deepEqual(m.dateRange, { from: "2024-10-31", to: "2026-10-01" });
+    assert.ok(m.assumptions.includes("Leads made between 31 October 2024 and 1 October 2026 are counted. The period ends 30 days before the run, our minimum, so recent leads have time to close"), m.assumptions.join(" | "));
+    assert.ok(m.exclusions.includes("1 lead created after 1 October 2026, too recent to have had the 30 days we allow at the least for a lead to become a closed deal"), m.exclusions.join(" | "));
+    assert.ok(!JSON.stringify(m).includes("9 in 10"));
+  });
+
+  test("a lead converted into the same deal as an earlier lead of another source is left out, so the share and the comparisons agree", () => {
+    const specs: LeadSpec[] = [...richSpecs()];
+    const firstWon = specs.findIndex((s) => s.source === "Webinar" && s.outcome === "won");
+    // An Event lead made two days after the Webinar lead, converted into the Webinar lead's won deal.
+    specs.push({ source: "Event", made: specs[firstWon]!.made - 2, owner: 1, convertedAfter: 1, sameDealAs: firstWon });
+    const [base, a] = [on(richSpecs()), on(specs)];
+    const [mb, ma] = [measured(metric(base, "lead.won_lead_rate")), measured(metric(a, "lead.won_lead_rate"))];
+    assert.deepEqual(ma.segments.map((x) => [x.key, x.n, x.value]), mb.segments.map((x) => [x.key, x.n, x.value]));
+    assert.deepEqual(ma.stats, mb.stats);
+    assert.ok(ma.exclusions.includes("1 lead converted into the same deal as an earlier lead, which is counted from that lead"), ma.exclusions.join(" | "));
+    assert.deepEqual(one(a, "lead.source-win-rate").facts, one(base, "lead.source-win-rate").facts);
+  });
+
+  test("the quarterly series ends where the judged period ends", () => {
+    const m = measured(metric(on([...richSpecs(), ...Array.from({ length: 40 }, (_, i): LeadSpec => ({ source: "Web", made: 1 + i }))]), "lead.won_lead_rate"));
+    const last = m.series.at(-1)!.date;
+    assert.equal(last, "2026-07-01", "the quarter holding 12 August 2026, the period's end");
+    assert.ok(m.series.every((p) => p.date <= m.dateRange!.to));
+  });
+
   test("too few closed deals is not measurable, with the count", () => {
     const specs = richSpecs().map((s, i) => (i % 40 === 0 ? s : { source: s.source, made: s.made }));
     const a = on(specs);
@@ -167,7 +207,7 @@ describe("sources that convert well and win poorly, or the reverse (L2's check)"
   test("a source converting more often than the rest whose deals are won less often is raised, with both rates and the org's words marked", () => {
     const f = one(on(richSpecs()), "lead.source-win-rate");
     assert.equal(f.status, "issue");
-    assert.equal(f.title, "Leads from Webinar convert well, but their deals are won less often");
+    assert.equal(f.title, "Leads from Webinar convert more often, but their deals are won less often");
     assert.equal(
       f.summary,
       "Of the leads created between 31 October 2024 and 12 August 2026, 50% of the 200 from Webinar were converted, against 30% of the 400 from other sources. Their 100 closed deals were won 20% of the time, against 60% of the 120 closed deals from other sources. The gap pointed the same way in 2 of the 2 teams we could check it in. This shows how often they went together, not that one is the reason for the other.",
@@ -185,10 +225,53 @@ describe("sources that convert well and win poorly, or the reverse (L2's check)"
     assert.equal(f.title, "Leads from Webinar convert less often, but their deals are won more often");
   });
 
-  test("a source that converts poorly and wins poorly says nothing new here, and passes", () => {
-    const specs = richSpecs().map((s) => (s.source === "Webinar" && s.convertedAfter !== undefined && (s.made % 2 === 0) ? { source: s.source, made: s.made, owner: s.owner } : s));
+  /** Web and Event as in the rich org, and Webinar converting 1 in 5 (less than their 3 in 10) and winning 1 in 10 (less than their 6). */
+  const poorAndPoor = (): LeadSpec[] => {
+    const specs = richSpecs().filter((s) => s.source !== "Webinar");
+    for (let k = 0; k < 600; k++) specs.push(k % 5 === 0 ? { source: "Webinar", made: 100 + ((k * 7) % 600), owner: (k % 3) + 1, convertedAfter: 3, outcome: (k / 5) % 10 === 0 ? "won" : "lost", closedAfter: 40 } : { source: "Webinar", made: 100 + ((k * 7) % 600), owner: (k % 3) + 1 });
+    return specs;
+  };
+
+  test("a source that converts less and wins less is compared, set aside, and not raised: it says nothing new here", () => {
+    const a = on(poorAndPoor());
+    const f = finding(a, "lead.source-win-rate");
+    assert.ok(f.every((x) => !x.subjects.some((s) => s.label === "Webinar")), JSON.stringify(f.map((x) => x.title)));
+    // Really compared: the deals from Webinar clear every bar against the rest, so they are set aside, and every finding left says so.
+    for (const x of f.filter((y) => y.status === "issue")) assert.match(x.summary!, /leaving out Webinar, whose deals were won at a clearly different rate from the rest\./);
+    if (f.every((x) => x.status !== "issue")) assert.equal(f[0]!.status, "passed");
+    assert.ok(f.some((x) => x.status === "passed" || x.status === "issue"));
+  });
+
+  test("a source converting exactly as often as the rest, whose deals win less, is not raised under this check", () => {
+    // Webinar converts 3 in 10, as Web and Event do, and wins 1 in 5 against their 6 in 10.
+    const specs = richSpecs().filter((s) => s.source !== "Webinar");
+    let j = 0;
+    for (let k = 0; k < 200; k++) {
+      const base = { source: "Webinar", made: 100 + ((k * 7) % 600), owner: (k % 3) + 1 };
+      specs.push(k % 10 < 3 ? { ...base, convertedAfter: 3, outcome: j++ % 5 === 0 ? "won" : "lost", closedAfter: 40 } : base);
+    }
     const f = finding(on(specs), "lead.source-win-rate");
-    assert.ok(f.every((x) => x.subjects.every((s) => s.label !== "Webinar") || x.status !== "issue"), JSON.stringify(f.map((x) => x.title)));
+    assert.ok(f.every((x) => x.status !== "issue"), JSON.stringify(f.map((x) => x.title)));
+  });
+
+  test("two sources: one difference seen from one side, told from the source with more closed deals whatever the names, to the other source", () => {
+    const two = richSpecs().filter((s) => s.source !== "Event");
+    for (const [low, high] of [["Webinar", "Web"], ["Zzz", "Aaa"]] as const) {
+      const f = finding(on(two.map((s) => ({ ...s, source: s.source === "Webinar" ? low : high }))), "lead.source-win-rate");
+      assert.equal(f.length, 1);
+      assert.equal(f[0]!.subjects[0]!.label, low, "the source with 100 closed deals, not the one with 60");
+      assert.match(f[0]!.summary!, new RegExp(`from ${low} were converted, against 30% of the 200 from the other source\\. .* closed deals from the other source\\. With two sources, this is one difference seen from one side\\.`));
+    }
+  });
+
+  test("open deals are counted both ways: a gap that holds only with them lost is not raised", () => {
+    // Web 120 closed deals, 60% won; Webinar 100 closed, 46 won, and 10 open: lost, it is 41.8% (18 points); won, 50.9% (9).
+    const specs: LeadSpec[] = [];
+    for (let j = 0; j < 120; j++) specs.push({ source: "Web", made: 100 + ((j * 7) % 600), owner: (j % 3) + 1, convertedAfter: 3, outcome: j % 10 < 6 ? "won" : "lost", closedAfter: 40 });
+    for (let j = 0; j < 110; j++) specs.push({ source: "Webinar", made: 100 + ((j * 7) % 600), owner: (j % 3) + 1, convertedAfter: 3, outcome: j < 10 ? "open" : j < 56 ? "won" : "lost", closedAfter: 40 });
+    for (let j = 0; j < 200; j++) specs.push({ source: j % 2 ? "Web" : "Webinar", made: 100 + ((j * 11) % 600), owner: (j % 3) + 1 });
+    const f = one(on(specs), "lead.source-win-rate");
+    assert.equal(f.status, "passed", f.title ?? "");
   });
 
   test("even sources pass, saying how many were compared", () => {
@@ -288,9 +371,44 @@ describe("fast conversion and winning, stored and never served (L3)", () => {
   });
 });
 
+describe("the area's score", () => {
+  test("the new check, not measurable, never takes away a score the area has without it: 3 of 6 checks measured stays scored", () => {
+    const NM = new Set(["lead.source-return", "lead.campaign-return", "lead.converted-no-opportunity"]);
+    const scored = (leadJourney: boolean) => {
+      const a = analyseExtracts(extracts, { leadJourney });
+      const fs = a.findings.map((f) => (NM.has(f.ruleId) ? { ...f, status: "not_measurable" as const, notMeasurableReason: "x", notMeasurableKind: "unreadable" as const } : f));
+      assert.equal(fs.filter((f) => f.ruleId === "lead.source-win-rate").every((f) => f.status === "not_measurable"), true);
+      return scoreDomains(["lead_funnel"], fs)[0]!;
+    };
+    const [off, on] = [scored(false), scored(true)];
+    assert.equal(off.status, "measured");
+    assert.deepEqual(on, off);
+  });
+
+  test("measured, it counts as any other check", () => {
+    const a = on(richSpecs());
+    const f = one(a, "lead.source-win-rate");
+    assert.equal(f.status, "issue");
+    const s = scoreDomains(["lead_funnel"], a.findings)[0]!;
+    assert.ok(s.status === "measured" && s.findingIds.includes(f.id));
+  });
+});
+
+describe("an empty lead source", () => {
+  test("is no source, the same as none, on the lead and on its deal, with the switch off and on (it stopped the run before)", () => {
+    const specs = richSpecs().map((s) => (s.source === "Webinar" ? { ...s, source: "" } : s));
+    for (const leadJourney of [false, true]) {
+      const a = analyseExtracts(withJourney(extracts, journeyRecords(specs)), { leadJourney });
+      const nulls = analyseExtracts(withJourney(extracts, journeyRecords(specs.map((s) => (s.source === "" ? { ...s, source: null } : s)))), { leadJourney });
+      assert.deepEqual(a.findings, nulls.findings);
+      assert.deepEqual(a.metrics, nulls.metrics);
+    }
+  });
+});
+
 describe("Lead Status history not kept (audit risk 10)", () => {
   const RESPONSE = ["lead.response-time", "lead.no-first-response"];
-  const UNTRACKED = /^We couldn't measure first responses: Salesforce isn't keeping a history of your leads' Status field, as none of the \d+ leads converted in the window has a recorded status change\. A lead answered only by a change of status would look unanswered\. Switch on field history tracking for Lead Status, and later runs will measure from that day\.$/;
+  const UNTRACKED = /^We couldn't measure first responses: we found no recorded change to Lead Status on any of the \d+ leads converted in the window\. Either Salesforce isn't keeping a history of that field, or we can't see it\. A lead answered only by a change of status would look unanswered\. Check that field history tracking is on for Lead Status and that the connected user can see the field\. Later runs will measure from the day it's kept\.$/;
 
   test("no Status change at all while leads converted: the first-response checks and measure say they couldn't measure, and what unlocks it", () => {
     const a = on(richSpecs(), () => []);
@@ -309,10 +427,47 @@ describe("Lead Status history not kept (audit risk 10)", () => {
     for (const id of RESPONSE) assert.ok(!UNTRACKED.test(one(a, id).notMeasurableReason ?? ""), id);
   });
 
-  test("a history that starts after a conversion: leads made before it are left out of the first-response checks, and said", () => {
-    const keptFrom = (leads: ReturnType<typeof journeyRecords>["leads"]) => leads.filter((l) => l.CreatedDate >= "2026-01-01").map((l, i) => ({ Id: `017${String(950_000 + i).padStart(12, "0")}AAA`, LeadId: l.Id, CreatedDate: l.CreatedDate }));
-    const a = on(richSpecs(), keptFrom);
+  test("fewer converted leads than the calibrated minimum: nothing is inferred, as on the base", () => {
+    const specs = richSpecs().map((s, i) => (s.convertedAfter !== undefined && i % 40 !== 0 ? { source: s.source, made: s.made, owner: s.owner } : s));
+    assert.ok(specs.filter((s) => s.convertedAfter !== undefined).length < 20);
+    const a = on(specs, () => []);
+    const off = analyseExtracts(withJourney(extracts, journeyRecords(specs, () => [])));
+    for (const id of RESPONSE) assert.deepEqual({ ...one(a, id), ruleVersion: 0 }, { ...off.findings.find((f) => f.ruleId === id)!, ruleVersion: 0 }, id);
+  });
+
+  const keptFrom = (day: string) => (leads: ReturnType<typeof journeyRecords>["leads"]) =>
+    leads.filter((l) => l.CreatedDate >= day).map((l, i) => ({ Id: `017${String(950_000 + i).padStart(12, "0")}AAA`, LeadId: l.Id, CreatedDate: l.CreatedDate }));
+  const DAY = 86_400_000;
+  const NOW = Date.parse("2026-10-31T12:00:00Z");
+  const ms = (l: { CreatedDate: string }) => Date.parse(l.CreatedDate.replace("+0000", "Z"));
+
+  test("changes found only from a day after conversions: leads made before it are left out of the first-response checks, counted, and said", () => {
+    const records = journeyRecords(richSpecs(), keptFrom("2026-01-01"));
+    const start = records.statusChanges.map((c) => c.CreatedDate).sort()[0]!.slice(0, 10);
+    const judged = (afterStart: boolean) => records.leads.filter((l) => ms(l) >= NOW - 365 * DAY && ms(l) < NOW - 7 * DAY && (!afterStart || l.CreatedDate.slice(0, 10) >= start)).length;
+    const a = on(richSpecs(), keptFrom("2026-01-01"));
     const f = one(a, "lead.no-first-response");
-    assert.ok(f.evidence[0]!.exclusions.some((e) => /^Leads created before \d+ \w+ 2026, when Salesforce's history of lead status changes starts$/.test(e)), f.evidence[0]!.exclusions.join(" | "));
+    assert.equal(f.evidence[0]!.count, judged(true));
+    assert.ok(judged(true) < judged(false));
+    const off = analyseExtracts(withJourney(extracts, records)).findings.find((x) => x.ruleId === "lead.no-first-response")!;
+    assert.equal(off.evidence[0]!.count, judged(false));
+    assert.ok(f.evidence[0]!.exclusions.includes(`Leads created before ${Number(start.slice(8))} January 2026, the earliest lead status change we found`), f.evidence[0]!.exclusions.join(" | "));
+    // Every lead after the start has its change, so none is unanswered; before, the leads made earlier looked unanswered.
+    assert.equal(f.facts.hits, 0);
+    assert.ok(off.facts.hits! > 0);
+  });
+
+  test("a first change only a day after a conversion is within ConvertedDate's unverified zone: nothing is inferred", () => {
+    const records = journeyRecords(richSpecs());
+    const first = [...records.leads].filter((l) => l.IsConverted).sort((x, y) => x.CreatedDate.localeCompare(y.CreatedDate))[0]!;
+    first.ConvertedDate = new Date(Date.parse(first.CreatedDate.slice(0, 10)) - DAY).toISOString().slice(0, 10);
+    const f = analyseExtracts(withJourney(extracts, records), { leadJourney: true }).findings.find((x) => x.ruleId === "lead.no-first-response")!;
+    assert.ok(!f.evidence[0]!.exclusions.some((e) => e.includes("the earliest lead status change we found")));
+  });
+
+  test("changes found only in the last days: the thin sample says the history cut it", () => {
+    const a = on(richSpecs(), (leads) => [{ Id: "017000000000999001AAA".slice(0, 18), LeadId: leads[0]!.Id, CreatedDate: "2026-10-20T10:00:00.000+0000" }]);
+    assert.equal(one(a, "lead.no-first-response").notMeasurableReason, "0 leads is below the calibrated minimum of 20. The earliest lead status change we found is on 20 October 2026, so leads made before then are left out.");
+    assert.equal(one(a, "lead.response-time").notMeasurableReason, "0 leads with a response is below the calibrated minimum of 20. The earliest lead status change we found is on 20 October 2026, so leads made before then are left out.");
   });
 });

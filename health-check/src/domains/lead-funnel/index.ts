@@ -102,16 +102,27 @@ function judgeable(ctx: Ctx, data: Ready): Lead[] {
 
 /**
  * The first-response checks with the lead journey's switch on (DECISIONS.md 770):
- * a Status history Salesforce didn't keep makes them not measurable, since a lead
- * answered only by a change of status would look unanswered; one kept from a day
- * inside the window leaves out the leads made before it. Off, nothing is said.
+ * no Status change found at all, with enough leads converted to expect some,
+ * makes them not measurable, since a lead answered only by a change of status
+ * would look unanswered; changes found only from a day inside the window leave
+ * out the leads made before it. Said as what we found, never as Salesforce's
+ * setting, which this doesn't read. Off, nothing is said.
  */
 function untrackedReason(data: Ready): Said | null {
   return data.statusHistory.kind === "untracked"
-    ? said`We couldn't measure first responses: Salesforce isn't keeping a history of your leads' Status field, as none of the ${data.statusHistory.converted} leads converted in the window has a recorded status change. A lead answered only by a change of status would look unanswered. Switch on field history tracking for Lead Status, and later runs will measure from that day.`
+    ? said`We couldn't measure first responses: we found no recorded change to Lead Status on any of the ${data.statusHistory.converted} leads converted in the window. Either Salesforce isn't keeping a history of that field, or we can't see it. A lead answered only by a change of status would look unanswered. Check that field history tracking is on for Lead Status and that the connected user can see the field. Later runs will measure from the day it's kept.`
     : null;
 }
-const historyExclusions = (data: Ready): string[] => (data.statusHistory.kind === "from" ? [said`Leads created before ${daySaid(data.statusHistory.day)}, when Salesforce's history of lead status changes starts`] : []);
+const historyExclusions = (data: Ready): string[] => (data.statusHistory.kind === "from" ? [said`Leads created before ${daySaid(data.statusHistory.day)}, the earliest lead status change we found`] : []);
+/** A thin sample's reason, saying why when the changes found start late: a count alone wouldn't say the history cut it. */
+const thinReason = (data: Ready, n: number, minSample: number, what: "response" | "leads"): Said =>
+  data.statusHistory.kind === "from"
+    ? what === "response"
+      ? said`${n} leads with a response is below the calibrated minimum of ${minSample}. The earliest lead status change we found is on ${daySaid(data.statusHistory.day)}, so leads made before then are left out.`
+      : said`${n} leads is below the calibrated minimum of ${minSample}. The earliest lead status change we found is on ${daySaid(data.statusHistory.day)}, so leads made before then are left out.`
+    : what === "response"
+      ? said`${n} leads with a response is below the calibrated minimum of ${minSample}.`
+      : said`${n} leads is below the calibrated minimum of ${minSample}.`;
 
 const responseTimeRule = (journey: boolean): Rule => ({
   id: "lead.response-time",
@@ -128,7 +139,7 @@ const responseTimeRule = (journey: boolean): Rule => ({
     const { minSample } = ctx.calibration;
     const exclusions = [...data.exclusions, "Leads with no response at all, which the next check covers", `Leads created before the readable year or in the last ${RESPONSE_GRACE_DAYS} days`, ...historyExclusions(data)];
     const evidence = [{ ...data.evidence[0]!, count: touched.length, exclusions, note: "First response is the earliest task, event or status change after creation, on the lead or its converted contact" }];
-    if (touched.length < minSample) return { outcome: "not_measurable", reason: said`${touched.length} leads with a response is below the calibrated minimum of ${minSample}.`, evidence };
+    if (touched.length < minSample) return { outcome: "not_measurable", reason: thinReason(data, touched.length, minSample, "response"), evidence };
     const overall = round1(median(touched.map(hoursToTouch)));
     const dims = dimensions(ctx);
     const hotspots = Object.entries(dims).flatMap(([dimension, keyOf]) =>
@@ -176,7 +187,7 @@ const noResponseRule = (journey: boolean): Rule => ({
     if (untracked) return { outcome: "not_measurable", reason: untracked, evidence: data.evidence };
     const leads = judgeable(ctx, data);
     const evidence = [{ ...data.evidence[0]!, count: leads.length, exclusions: [...data.exclusions, `Leads created before the readable year or in the last ${RESPONSE_GRACE_DAYS} days`, ...historyExclusions(data)] }];
-    if (leads.length < ctx.calibration.minSample) return { outcome: "not_measurable", reason: said`${leads.length} leads is below the calibrated minimum of ${ctx.calibration.minSample}.`, evidence };
+    if (leads.length < ctx.calibration.minSample) return { outcome: "not_measurable", reason: thinReason(data, leads.length, ctx.calibration.minSample, "leads"), evidence };
     const result = segmentRate(leads, (l) => l.firstTouch === null, dimensions(ctx), { segmentLimit: NO_TOUCH_SEGMENT_LIMIT, minSegment: MIN_SEGMENT });
     const facts = { hits: result.hits, n: result.n, rate: result.rate };
     if (result.rate <= NO_TOUCH_LIMIT && result.hotspots.length === 0) return { outcome: "pass", summary: said`Leads with no logged response: ${result.hits} of ${result.n} (${result.rate}%), with no segment above ${NO_TOUCH_SEGMENT_LIMIT}%.`, evidence, segmentsChecked: result.segmentsChecked, facts };
@@ -384,7 +395,7 @@ const funnelMetricsOf = (journey: boolean) => (ctx: Ctx): Metric[] => {
   const untracked = journey ? untrackedReason(data) : null;
   if (!data.activityReadable) metrics.push({ ...definitions.response, evidence, status: "not_measurable", reason: "Activities couldn't be read in full." });
   else if (untracked) metrics.push({ ...definitions.response, evidence, status: "not_measurable", reason: untracked });
-  else if (touched.length < minSample) metrics.push({ ...definitions.response, evidence, status: "not_measurable", reason: said`${touched.length} leads with a response is below the calibrated minimum of ${minSample}.` });
+  else if (touched.length < minSample) metrics.push({ ...definitions.response, evidence, status: "not_measurable", reason: thinReason(data, touched.length, minSample, "response") });
   else {
     const hours = (group: Lead[]): number => round1(median(group.map(hoursToTouch)));
     metrics.push({ ...definitions.response, evidence, status: "measured", value: hours(touched), n: touched.length, segments: cuts(touched, hours), ...rest });

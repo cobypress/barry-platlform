@@ -48,6 +48,18 @@ export const PATH_RELATED_RULES: ReadonlySet<string> = new Set(["pipe.skipped-st
  * held against closed deals, which is no fault to score, kept and not yet shown.
  */
 export const INSIGHT_METRICS: ReadonlySet<string> = new Set(["historic.path_variants", "historic.stage_probability_vs_won"]);
+/**
+ * Checks added to an area that count toward its score only when they measure something (DECISIONS.md 770): not
+ * measurable, they are left out of both sides of the coverage rule below and of the area's reason, so adding one can
+ * never take away a score, or change the reason, an area has without it. Measured, each counts as any other check.
+ */
+export const COUNTED_WHEN_MEASURED: ReadonlySet<string> = new Set(["lead.source-win-rate"]);
+/** The rules of COUNTED_WHEN_MEASURED among these findings with no result at all. */
+const idleAdditions = (findings: Finding[]): Set<string> => {
+  const idle = new Set([...COUNTED_WHEN_MEASURED].filter((id) => findings.some((f) => f.ruleId === id)));
+  for (const f of findings) if (f.status !== "not_measurable") idle.delete(f.ruleId);
+  return idle;
+};
 const notScored = (ruleId: string): boolean => SETUP_RULES.has(ruleId) || UNSCORED_RULES.has(ruleId) || INSIGHT_RULES.has(ruleId);
 
 const WEIGHTS: Record<string, number> = {
@@ -93,7 +105,8 @@ export type AreaReasonPart = { text: string; findingIds: string[] };
  */
 export function areaReasonParts(domain: string, findings: Finding[], today: string): AreaReasonPart[] | null {
   const rules = new Map<string, Finding[]>();
-  for (const f of findings) if (f.domain === domain && !notScored(f.ruleId)) rules.set(f.ruleId, [...(rules.get(f.ruleId) ?? []), f]);
+  const idle = idleAdditions(findings);
+  for (const f of findings) if (f.domain === domain && !notScored(f.ruleId) && !idle.has(f.ruleId)) rules.set(f.ruleId, [...(rules.get(f.ruleId) ?? []), f]);
   const open = [...rules.values()].filter((group) => group.every((f) => f.status === "not_measurable"));
   const tally = new Map<string, { checks: number; first: number; findingIds: string[] }>();
   open.forEach((group, i) => {
@@ -143,7 +156,8 @@ function areaReasonOf(parts: AreaReasonPart[]): string {
 
 export function scoreDomain(domain: string, findings: Finding[], ruleSetVersion: string = RULE_SET_VERSION, options: ScoreOptions = {}): Score {
   const notMeasurable = (reason: string): Score => Score.parse({ status: "not_measurable", domain, ruleSetVersion, reason });
-  const own = findings.filter((f) => f.domain === domain && !notScored(f.ruleId));
+  const idle = idleAdditions(findings);
+  const own = findings.filter((f) => f.domain === domain && !notScored(f.ruleId) && !idle.has(f.ruleId));
   if (own.length === 0) return notMeasurable("We couldn't assess this area.");
   const rules = new Map<string, Finding[]>();
   for (const finding of own) rules.set(finding.ruleId, [...(rules.get(finding.ruleId) ?? []), finding]);

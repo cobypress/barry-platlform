@@ -67,7 +67,7 @@ describe("an automatic run with the lead journey on", () => {
     const specs = richSpecs().map((s) => (s.source === "Webinar" ? { ...s, source: HOSTILE } : s));
     const { checked } = await releasedAsOff({ records: journeyOrg(journeyRecords(specs)) }, "hostile source");
     const d = checked.digest!;
-    const texts = digestTextsAt(d).filter((t) => t.text.includes(`Leads from ${HOSTILE} convert well`) || t.text.includes(`from ${HOSTILE} were converted`));
+    const texts = digestTextsAt(d).filter((t) => t.text.includes(`Leads from ${HOSTILE} convert more often`) || t.text.includes(`from ${HOSTILE} were converted`));
     assert.ok(texts.length >= 2, texts.map((t) => t.path).join(", "));
     for (const t of texts) {
       const spans = marksOf(d, t)!.orgWords.map((s) => t.text.slice(s.start, s.end));

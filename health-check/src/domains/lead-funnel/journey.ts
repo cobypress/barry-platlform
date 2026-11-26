@@ -52,7 +52,7 @@ type JourneyLead = { lead: Lead; outcome: Outcome | null };
 
 export type Cohort =
   | { status: "not_measurable"; reason: string; evidence: Evidence[] }
-  | { status: "ok"; from: string; to: string; lagDays: number; leads: JourneyLead[]; deals: JourneyDeal[]; exclusions: string[]; evidence: Evidence[] };
+  | { status: "ok"; from: string; to: string; lagDays: number; floored: boolean; leads: JourneyLead[]; deals: JourneyDeal[]; exclusions: string[]; evidence: Evidence[] };
 
 /** Whole days from one calendar day to another. */
 export const daysBetween = (from: string, to: string): number => Math.round((Date.parse(`${to}T00:00:00Z`) - Date.parse(`${from}T00:00:00Z`)) / DAY);
@@ -97,7 +97,10 @@ export function journeyOf(ctx: Ctx): Cohort {
   const closedDays = [...followed.values()].flatMap((d) => (d.days === null ? [] : [d.days]));
   const evidence = data.evidence;
   if (closedDays.length < minSample) return { status: "not_measurable", reason: said`${closedDays.length} closed deals from leads is below the calibrated minimum of ${minSample}.`, evidence };
-  const lagDays = Math.max(LEAST_LAG_DAYS, Math.ceil(quantile(closedDays, LAG_QUANTILE)));
+  const percentile = Math.ceil(quantile(closedDays, LAG_QUANTILE));
+  // Under our least time, the period ends that many days before the run instead, and the sentences say so.
+  const floored = percentile < LEAST_LAG_DAYS;
+  const lagDays = Math.max(LEAST_LAG_DAYS, percentile);
   const from = ctx.window.from;
   const to = dayPlus(localDay(ctx.now, zone), -lagDays);
   if (to < from) return { status: "not_measurable", reason: said`Leads here can take ${lagDays} days to become closed deals, so none created since ${daySaid(from)} has had the time yet, and none can be counted.`, evidence };
@@ -106,15 +109,24 @@ export function journeyOf(ctx: Ctx): Cohort {
   const recent = data.leads.filter((l) => dayOf(l) > to).length;
   const dealOfLead = (l: Lead): JourneyDeal | undefined => (l.IsConverted && l.ConvertedOpportunityId ? followed.get(l.ConvertedOpportunityId) : undefined);
   const notFollowed = (l: Lead): boolean => l.IsConverted && l.ConvertedOpportunityId !== null && !dealOfLead(l);
-  const leads: JourneyLead[] = data.leads.filter((l) => inPeriod(l) && !notFollowed(l)).map((lead) => ({ lead, outcome: dealOfLead(lead)?.outcome ?? null }));
+  // A lead converted into a deal another lead came first to: the deal is counted from that lead alone, so this one is
+  // left out everywhere, as the deal is one result (the leads' share, the conversions and the comparisons agree).
+  const notFirst = (l: Lead): boolean => dealOfLead(l) !== undefined && dealOfLead(l)!.lead.Id !== l.Id;
+  const leads: JourneyLead[] = data.leads.filter((l) => inPeriod(l) && !notFollowed(l) && !notFirst(l)).map((lead) => ({ lead, outcome: dealOfLead(lead)?.outcome ?? null }));
   const left = data.leads.filter((l) => inPeriod(l) && notFollowed(l)).length;
+  const second = data.leads.filter((l) => inPeriod(l) && notFirst(l)).length;
   const exclusions = [
     ...data.exclusions,
-    ...(recent ? [said`${plural(recent, "lead")} created after ${daySaid(to)}, too recent to have had the ${lagDays} days that 9 in 10 of the leads that became closed deals took`] : []),
+    ...(recent
+      ? [floored
+          ? said`${plural(recent, "lead")} created after ${daySaid(to)}, too recent to have had the ${lagDays} days we allow at the least for a lead to become a closed deal`
+          : said`${plural(recent, "lead")} created after ${daySaid(to)}, too recent to have had the ${lagDays} days that 9 in 10 of the leads that became closed deals took`]
+      : []),
     ...(left ? [said`${plural(left, "lead")} converted into a deal we couldn't follow: not read, at a stage with no meaning, or closed before the lead was made`] : []),
+    ...(second ? [said`${plural(second, "lead")} converted into the same deal as an earlier lead, which is counted from that lead`] : []),
   ];
   const kept = [...followed.values()].filter((d) => inPeriod(d.lead));
-  return { status: "ok", from, to, lagDays, leads, deals: kept, exclusions, evidence: [{ ...evidence[0]!, count: leads.length, exclusions }] };
+  return { status: "ok", from, to, lagDays, floored, leads, deals: kept, exclusions, evidence: [{ ...evidence[0]!, count: leads.length, exclusions }] };
 }
 
 
@@ -155,7 +167,9 @@ export function journeyMetrics(ctx: Ctx): Metric[] {
   const { minSample } = ctx.calibration;
   const assumptions = [
     zoneNote(ctx),
-    said`Leads made ${periodSaid(c)} are counted. The period ends ${c.lagDays} days before the run: the time 9 in 10 of the leads that became closed deals took to get there`,
+    c.floored
+      ? said`Leads made ${periodSaid(c)} are counted. The period ends ${c.lagDays} days before the run, our minimum, so recent leads have time to close`
+      : said`Leads made ${periodSaid(c)} are counted. The period ends ${c.lagDays} days before the run: the time 9 in 10 of the leads that became closed deals took to get there`,
     said`Days are whole calendar days, from the day a lead was made to the day its deal closed, because Salesforce records the day a lead converted but not the time`,
     said`A deal converted from more than one lead is counted once, from the first of them`,
   ];
@@ -177,7 +191,7 @@ export function journeyMetrics(ctx: Ctx): Metric[] {
   const converted = c.leads.filter((l) => l.lead.IsConverted).length;
   const closed = c.deals.filter((d) => !d.open);
   const stats = { converted, conversionRate: pct(converted, c.leads.length), closedDeals: closed.length, wonDeals: won.length, winRate: pct(won.length, closed.length), openDeals: c.deals.length - closed.length, lagDays: c.lagDays };
-  metrics.push({ ...definitions.won, ...rest, assumptions: [...assumptions, said`Quarters are calendar quarters, by the day each lead was made`], evidence, status: "measured", value: rate(c.leads), n: c.leads.length, segments, series, stats });
+  metrics.push({ ...definitions.won, ...rest, assumptions: [...assumptions, said`Quarters are calendar quarters, by the day each lead was made. The last ends with the period, and its leads have had the least time to close, so it can read a little low`], evidence, status: "measured", value: rate(c.leads), n: c.leads.length, segments, series, stats });
   return metrics;
 }
 
@@ -269,52 +283,90 @@ export const sourceWinRate: Rule = {
     const checked = segmentsOf(c.deals, { source: (d) => d.lead.source, team });
     if (sources.length < 2) return { outcome: "not_measurable", reason: said`Every lead made early enough to judge came from ${org(sources[0]![0])}, so there's no other source to compare with.`, evidence: c.evidence };
     const converted = (group: JourneyLead[]): number => pct(group.filter((l) => l.lead.IsConverted).length, group.length);
-    // Each source against the deals of the sources not yet set aside. A source whose gap clears every bar is set aside,
-    // the widest first, and the rest are tried again without it: otherwise one source far from the rest makes every
-    // other source look far from the rest the other way.
+    // Each source against the deals of the sources not yet set aside. A source whose gap clears every bar is set aside
+    // and the rest are tried again without it: otherwise one source far from the rest makes every other source look
+    // far from the rest the other way.
     const round = (aside: Set<string>) =>
       sources.flatMap(([source, group]) => {
         if (aside.has(source) || group.length < ctx.calibration.minSample) return [];
         const pool = (s: string): boolean => s !== source && !aside.has(s);
         const rest = c.leads.filter((l) => pool(l.lead.source));
         const cmp = compare(ctx, c.from, c.deals.filter((d) => d.lead.source === source), c.deals.filter((d) => pool(d.lead.source)), [team]);
-        return cmp ? [{ source, leads: group.length, otherLeads: rest.length, conversion: converted(group), otherConversion: converted(rest), c: cmp, aside: [...aside].sort() }] : [];
+        const others = new Set(rest.map((l) => l.lead.source)).size;
+        return cmp ? [{ source, leads: group.length, otherLeads: rest.length, others, conversion: converted(group), otherConversion: converted(rest), c: cmp, aside: [...aside].sort() }] : [];
       });
     const tried = round(new Set());
     if (tried.length === 0) {
       return { outcome: "not_measurable", reason: said`No lead source had ${ctx.calibration.minSample} or more leads and closed deals, with ${MIN_EACH_OUTCOME} won and ${MIN_EACH_OUTCOME} lost, to compare with the deals from other sources.`, evidence: c.evidence };
     }
-    // Bonferroni over every source the first round could test.
-    const bar = zBar(tried.length);
-    const aside = new Set<string>();
-    const found: typeof tried = [];
-    for (let now = tried; ; now = round(aside)) {
-      const widest = now.filter((t) => clears(t.c, bar)).sort((a, b) => Math.abs(b.c.gap) - Math.abs(a.c.gap) || a.source.localeCompare(b.source))[0];
-      if (!widest) break;
-      aside.add(widest.source);
-      found.push(widest);
+    type Tried = (typeof tried)[number];
+    // One search at a bar: in each round, of the sources that clear it, those on the side of the pooled rate fewer of
+    // the round's sources are on first (the few far from the many are the story, not the many seen from the few), then
+    // the widest gap; with two sources left, whose gaps are one difference seen from each side, the one with more closed
+    // deals, then by name. Counts every comparison it makes.
+    const search = (bar: number): { found: Tried[]; tests: number } => {
+      const aside = new Set<string>();
+      const found: Tried[] = [];
+      let tests = 0;
+      for (;;) {
+        const now = aside.size === 0 ? tried : round(aside);
+        tests += now.length;
+        const clearing = now.filter((t) => clears(t.c, bar));
+        if (clearing.length === 0) break;
+        const [below, above] = [now.filter((t) => t.c.gap < 0).length, now.filter((t) => t.c.gap > 0).length];
+        const side = below < above ? clearing.filter((t) => t.c.gap < 0) : above < below ? clearing.filter((t) => t.c.gap > 0) : [];
+        const pick = (side.length ? side : clearing).sort((a, b) =>
+          a.others === 1 && b.others === 1 ? b.c.group.n - a.c.group.n || a.source.localeCompare(b.source) : Math.abs(b.c.gap) - Math.abs(a.c.gap) || a.source.localeCompare(b.source),
+        )[0]!;
+        aside.add(pick.source);
+        found.push(pick);
+      }
+      return { found, tests };
+    };
+    // Bonferroni over every comparison made, in every round: the bar is raised until the search it sets makes no more
+    // comparisons than the bar allows for. It only rises, so this ends.
+    let bar = zBar(tried.length);
+    let result = search(bar);
+    for (let i = 0; i < 20; i++) {
+      const next = zBar(result.tests);
+      if (next <= bar) break;
+      bar = next;
+      result = search(bar);
     }
-    // Only the two that say something new: converting at least as well and winning less, or converting less and winning more.
-    const raised = found.filter((t) => (t.c.gap < 0 ? t.conversion >= t.otherConversion : t.conversion < t.otherConversion)).slice(0, MOST_RAISED);
+    // Only the two that say something new: converting more often and winning less, or converting less and winning more.
+    // A source converting exactly as often as the rest says nothing about conversion, so this check leaves it out.
+    const raised = result.found.filter((t) => (t.c.gap < 0 ? t.conversion > t.otherConversion : t.conversion < t.otherConversion)).slice(0, MOST_RAISED);
     if (raised.length === 0) {
       return {
         outcome: "pass",
-        summary: said`We compared the win rate of deals from ${plural(tried.length, "lead source")} that had enough closed deals with the win rate of deals from the other sources. None converted well but won less often, or converted less often but won more, by a gap we could tell from chance.`,
+        summary: said`We compared the win rate of deals from ${plural(tried.length, "lead source")} that had enough closed deals with the win rate of deals from the other sources. None converted more often but won less often, or converted less often but won more, by a gap we could tell from chance.`,
         evidence: c.evidence,
         segmentsChecked: checked,
         facts: { sources: tried.length, leads: c.leads.length, deals: c.deals.length },
       };
     }
-    return raised.map(({ source, leads, otherLeads, conversion, otherConversion, c: cmp, aside: apart }): RuleResult => {
+    const raisedSources = new Set(raised.map((t) => t.source));
+    /** Why each source set aside before this one is left out of "the rest": a finding of its own, or a clearly different win rate. */
+    const leftOut = (apart: string[]): Said => {
+      const own = apart.filter((x) => raisedSources.has(x));
+      const other = apart.filter((x) => !raisedSources.has(x));
+      const names = (xs: string[]): Said => andList(xs.map((x) => said`${org(x)}`));
+      const ownSaid = own.length ? (own.length === 1 ? said`${names(own)}, which has a finding of its own` : said`${names(own)}, which have findings of their own`) : said``;
+      const otherSaid = other.length ? said`${names(other)}, whose deals were won at a clearly different rate from the rest` : said``;
+      return apart.length === 0 ? said`` : own.length && other.length ? said`, leaving out ${ownSaid}, and ${otherSaid}` : said`, leaving out ${ownSaid}${otherSaid}`;
+    };
+    return raised.map(({ source, leads, otherLeads, others, conversion, otherConversion, c: cmp, aside: apart }): RuleResult => {
       const winsLess = cmp.gap < 0;
       const within = cmp.compared
         ? said` The gap pointed the same way in ${cmp.held} of the ${cmp.compared} teams we could check it in.`
         : said` We couldn't check this within teams: these deals couldn't be split into teams big enough to compare on both sides.`;
+      const fromOthers = others === 1 ? said`from the other source` : said`from other sources`;
+      const pair = others === 1 ? said` With two sources, this is one difference seen from one side.` : said``;
       return {
         outcome: "issue",
         key: `source:${source}`,
-        title: winsLess ? said`Leads from ${org(source)} convert well, but their deals are won less often` : said`Leads from ${org(source)} convert less often, but their deals are won more often`,
-        summary: said`Of the leads created ${periodSaid(c)}, ${conversion}% of the ${leads} from ${org(source)} were converted, against ${otherConversion}% of the ${otherLeads} from other sources${apart.length ? said`, leaving out ${andList(apart.map((x) => said`${org(x)}`))}` : said``}. Their ${cmp.group.n} closed deals were won ${cmp.group.rate}% of the time, against ${cmp.other.rate}% of the ${cmp.other.n} closed deals from other sources.${stillOpen(cmp.open)}${within}${NOT_A_CAUSE}`,
+        title: winsLess ? said`Leads from ${org(source)} convert more often, but their deals are won less often` : said`Leads from ${org(source)} convert less often, but their deals are won more often`,
+        summary: said`Of the leads created ${periodSaid(c)}, ${conversion}% of the ${leads} from ${org(source)} were converted, against ${otherConversion}% of the ${otherLeads} ${fromOthers}${leftOut(apart)}. Their ${cmp.group.n} closed deals were won ${cmp.group.rate}% of the time, against ${cmp.other.rate}% of the ${cmp.other.n} closed deals ${fromOthers}.${pair}${stillOpen(cmp.open)}${within}${NOT_A_CAUSE}`,
         recommendation: winsLess
           ? said`Check how leads from ${org(source)} are qualified before they're converted, and whether their deals are a good fit, before putting more into the source.`
           : said`Look at what makes deals from ${org(source)} win, and whether more of its leads are worth converting.`,
