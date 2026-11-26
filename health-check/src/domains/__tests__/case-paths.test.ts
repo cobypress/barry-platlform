@@ -9,7 +9,7 @@ import { COUNTED_WHEN_MEASURED, INSIGHT_METRICS, INSIGHT_RULES, scoreDomains } f
 import { ALL_MODULES, SERVICE_CLOUD_MODULES } from "../index.ts";
 import { casePathsModule, withCasePaths } from "../service/index.ts";
 import { serviceOperationsModule } from "../service/operations.ts";
-import { LEAST_LAG_DAYS, lineSaid, snapshotAt, STUCK_BAR, type SnapCase } from "../service/paths.ts";
+import { LEAST_LAG_DAYS, lineSaid, snapshotAt, steadyShare, STUCK_BAR, type SnapCase } from "../service/paths.ts";
 import { zBar } from "../historic-pipeline/paths/insights.ts";
 import type { AnalysisOutput } from "../../engine/evaluate.ts";
 import type { Finding, Metric } from "../../schemas/index.ts";
@@ -237,16 +237,30 @@ describe("the order of changes and what a change says", () => {
 });
 
 describe("open cases past their status's line, against earlier weeks (C1)", () => {
-  test("a steady org: today is set beside its own earlier weeks, and nothing is raised", () => {
+  test("a steady org: today is set beside a steady queue and its own earlier weeks, and nothing is raised", () => {
     const f = one(on(stuckCases()), "svc.stuck-in-status");
     assert.equal(f.status, "passed", textOf(f));
-    assert.match(textOf(f), /^Today \d+ of \d+ open cases \([\d.]+%\) have been in their status longer than 75% of the stays that began there between 120 and 30 days earlier\. On the same day of the week in the \d+ earlier weeks we could compare, back to .*, the share was a median of [\d.]+%, and 90% of those weeks were at or below [\d.]+%\. Days are calendar days\. We raise this only when today's share is above [\d.]+% and at least \d+ points above [\d.]+%, and it isn't\.$/);
+    assert.match(textOf(f), /^Today \d+ of \d+ open cases \([\d.]+%\) have been in their status longer than 75% of the stays that began there between 120 and 30 days earlier\. With your cases' own stay times, a steady queue would have about [\d.]+% past that point\. On the same day of the week in the \d+ earlier weeks we could compare, back to .*, the share was a median of [\d.]+%, and 90% of those weeks were at or below [\d.]+%\. Days are calendar days\. We raise this only when today's share is above [\d.]+% and at least \d+ points above the median of [\d.]+%, or at least \d+ points above the steady [\d.]+%, and it isn't\.$/);
+    // The steady share, from the stays themselves, is close to what the steady org shows.
+    assert.ok(Math.abs(f.facts!.steady! - f.facts!.rate!) < 5, JSON.stringify(f.facts));
   });
 
-  test("a backlog building in the last month is raised, naming the status, its line rounded up and both lines as ours", () => {
+  test("a backlog building in the last month is raised, naming the status, its line rounded up, which comparison it exceeds, and the lines as ours", () => {
     const f = one(on(stuckCases({ backlog: true, waiting: true })), "svc.stuck-in-status");
     assert.equal(f.status, "issue", textOf(f));
-    assert.match(textOf(f), / In Waiting on Customer, \d+ of \d+ open cases are past that status's line: 75% of the stays that began there between 120 and 30 days earlier ended within [\d.]+ days?\. We raise this when today's share is above [\d.]+% and at least \d+ points above the median of [\d.]+%\. Both lines are ours\.$/);
+    assert.match(textOf(f), / In Waiting on Customer, \d+ of \d+ open cases are past that status's line: 75% of the stays that began there between 120 and 30 days earlier ended within [\d.]+ days?\. That is more than both what was usual in earlier weeks and what a steady queue would have\. We raise this when today's share is above [\d.]+% and at least \d+ points above the median of [\d.]+%, or at least \d+ points above the steady [\d.]+%: these lines are ours\.$/);
+  });
+
+  test("a block of cases left in a status all year reads as usual against earlier weeks, and is raised against a steady queue", () => {
+    const block = Array.from({ length: 30 }, (_, i): CaseSpec => ({ made: 300 + i, priority: ["High", "Medium", "Low"][i % 3]!, origin: ["Email", "Web", "Phone"][i % 3]!, steps: [["Working", 0.04]] }));
+    const f = one(on([...stuckCases(), ...block]), "svc.stuck-in-status");
+    assert.equal(f.status, "issue", textOf(f));
+    assert.match(textOf(f), / That is more than what a steady queue would have\./);
+  });
+
+  test("the steady share is the length-biased share past the line: E[max(0, X - line)] / E[X]", () => {
+    assert.equal(steadyShare([1, 2, 3, 6], 2), (0 + 0 + 1 + 4) / 12);
+    assert.equal(steadyShare([], 1), 0);
   });
 
   test("the line uses only stays that began a gap before the day judged, so a recent backlog doesn't lift its own line", () => {
@@ -279,13 +293,13 @@ describe("open cases past their status's line, against earlier weeks (C1)", () =
     assert.equal(t.since, from);
   });
 
-  test("too few earlier weeks, or too few open cases today, each say so", () => {
-    assert.match(textOf(one(on(stuckCases().filter((x) => x.made < 150)), "svc.stuck-in-status")), /^We could set today's open cases beside (no earlier week|only \d+ earlier weeks?) with 20 or more open cases in a status with a line, and we need 12 to say what is usual for your cases\.$/);
+  test("too few earlier weeks: the steady comparison alone, and said; too few open cases today: not measurable", () => {
+    assert.match(textOf(one(on(stuckCases().filter((x) => x.made < 150)), "svc.stuck-in-status")), / No earlier week had 20 or more open cases with a line to compare with\. Days are calendar days\. We raise this only when today's share is at least \d+ points above the steady [\d.]+%, and it isn't\.$/);
     assert.match(textOf(one(on(stuckCases({ perDay: 2 })), "svc.stuck-in-status")), /^\d+ open cases? (is|are) in a status with a line today, below the calibrated minimum of 20\.$/);
   });
 
   test("the bar: above what 90% of the earlier weeks were at or below, and by a margin the noise probe set", () => {
-    assert.deepEqual(STUCK_BAR, { quantile: 0.9, points: 10, z: 3 });
+    assert.deepEqual(STUCK_BAR, { quantile: 0.9, points: 10, z: 3, mode: "both" });
   });
 });
 

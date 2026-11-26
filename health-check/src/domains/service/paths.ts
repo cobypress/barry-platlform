@@ -68,7 +68,7 @@ export const MIN_SNAPSHOTS = 12;
  * least `points`, and by `z` standard errors of a share of today's open cases at that median: the margin grows as
  * the open cases get fewer (set by the noise probe, DECISIONS.md 776; a test may change it).
  */
-export const STUCK_BAR = { quantile: 0.9, points: 10, z: 3 };
+export const STUCK_BAR: { quantile: number; points: number; z: number; mode: "both" | "weeks" | "steady" } = { quantile: 0.9, points: 10, z: 3, mode: "both" };
 /** Cases closed straight from where they started, overall and in any one segment. */
 const STRAIGHT_LIMIT = 25;
 const STRAIGHT_SEGMENT_LIMIT = 50;
@@ -481,7 +481,18 @@ export function lineSaid(days: number): Said {
 
 /** One open case on a day: its status, since when it was there, and whether it was past that status's line then. */
 export type Target = { id: string; status: Status; since: number; days: number; past: boolean; priority: string; origin: string };
-export type Snapshot = { at: number; lines: Map<string, number>; targets: Target[]; noLine: number; open: number };
+export type Snapshot = { at: number; lines: Map<string, number>; targets: Target[]; noLine: number; open: number; expected: Map<string, number> };
+
+/**
+ * The share of open cases a steady queue would have past a line, from the stays themselves: a case open on a given day
+ * is in a stay with probability in proportion to its length, so the share past the line is E[max(0, X − line)] / E[X]
+ * over the stays X (length bias). A stay not yet ended counts at its length so far, the least it can be.
+ * A shared helper for the deal check's version is being built apart (hc/stuck-expected); the two are to be reconciled.
+ */
+export function steadyShare(stays: number[], line: number): number {
+  const total = stays.reduce((t, x) => t + x, 0);
+  return total > 0 ? stays.reduce((t, x) => t + Math.max(0, x - line), 0) / total : 0;
+}
 
 /**
  * The open cases at an instant and which were past their status's line then.
@@ -496,19 +507,25 @@ export function snapshotAt(cases: SnapCase[], at: number, historyFrom: number, m
   const until = at - GAP_DAYS * DAY;
   const from = until - LOOKBACK_DAYS * DAY;
   const stays = new Map<string, number[]>();
+  const sofar = new Map<string, number[]>();
   for (const x of cases) {
     x.visits.forEach((v, i) => {
       if (v.status.closed || v.start >= until || v.start < from) return;
       // A first stay of a case made before the history starts began at a time we can't see.
       if (i === 0 && x.madeAt < historyFrom) return;
-      stays.set(v.status.key, [...(stays.get(v.status.key) ?? []), v.end !== null && v.end <= at ? daysOf(v.end - v.start) : Infinity]);
+      const ended = v.end !== null && v.end <= at;
+      stays.set(v.status.key, [...(stays.get(v.status.key) ?? []), ended ? daysOf(v.end! - v.start) : Infinity]);
+      sofar.set(v.status.key, [...(sofar.get(v.status.key) ?? []), daysOf((ended ? v.end! : at) - v.start)]);
     });
   }
   const lines = new Map<string, number>();
+  const expected = new Map<string, number>();
   for (const [key, days] of stays) {
     if (days.length < minSample) continue;
     const line = nearestRank(days, STAY_QUANTILE);
-    if (Number.isFinite(line)) lines.set(key, line);
+    if (!Number.isFinite(line)) continue;
+    lines.set(key, line);
+    expected.set(key, steadyShare(sofar.get(key) ?? [], line));
   }
   const targets: Target[] = [];
   let noLine = 0;
@@ -528,7 +545,7 @@ export function snapshotAt(cases: SnapCase[], at: number, historyFrom: number, m
     const days = daysOf(at - since);
     targets.push({ id: x.id, status: v.status, since, days, past: days > line, priority: x.priority, origin: x.origin });
   }
-  return { at, lines, targets, noLine, open };
+  return { at, lines, targets, noLine, open, expected };
 }
 
 /**
@@ -545,7 +562,7 @@ export const stuckInStatus: Rule = {
   id: "svc.stuck-in-status",
   version: 1,
   domain: DOMAIN,
-  title: "Open cases past the usual time in their status, against earlier weeks",
+  title: "Open cases past the usual time in their status",
   records: true,
   evaluate(ctx): RuleResult {
     const c = caseCohortOf(ctx);
@@ -565,6 +582,11 @@ export const stuckInStatus: Rule = {
       const few = n === 1 ? said`1 open case is` : named(said`${n} open cases are`, { n });
       return { outcome: "not_measurable", reason: named(said`${few} in a status with a line today, below the calibrated minimum of ${minSample}.`, { minSample }), evidence };
     }
+    const hits = today.targets.filter((t) => t.past).length;
+    const rate = pct(hits, n);
+    // What a steady queue with these stay times would have past the lines, weighted by today's open cases in each status.
+    const steady = round1((today.targets.reduce((t, x) => t + today.expected.get(x.status.key)!, 0) / n) * 100);
+    const steadyMargin = Math.max(STUCK_BAR.points, Math.ceil(STUCK_BAR.z * Math.sqrt((steady * (100 - steady)) / n)));
     // The earlier weeks: the same weekday and time, back while a whole lookback and gap lie inside what we read.
     const earliest = Math.max(c.yearStart, c.historyFrom) + (LOOKBACK_DAYS + GAP_DAYS) * DAY;
     const weeks: Snapshot[] = [];
@@ -574,29 +596,43 @@ export const stuckInStatus: Rule = {
       if (snap.targets.length >= minSample) weeks.push(snap);
     }
     const counted = weeks.length;
-    if (counted < MIN_SNAPSHOTS) {
+    const useWeeks = STUCK_BAR.mode !== "steady";
+    const useSteady = STUCK_BAR.mode !== "weeks";
+    const shareOf = (snap: Snapshot): number => pct(snap.targets.filter((t) => t.past).length, snap.targets.length);
+    const shares = weeks.map(shareOf);
+    const enoughWeeks = useWeeks && counted >= MIN_SNAPSHOTS;
+    if (!useSteady && !enoughWeeks) {
       const fewWeeks = counted === 0 ? said`no earlier week` : counted === 1 ? said`only 1 earlier week` : named(said`only ${counted} earlier weeks`, { counted });
       return { outcome: "not_measurable", reason: named(said`We could set today's open cases beside ${fewWeeks} with ${minSample} or more open cases in a status with a line, and we need ${MIN_SNAPSHOTS} to say what is usual for your cases.`, { minSample, minSnapshots: MIN_SNAPSHOTS }), evidence };
     }
-    const shareOf = (snap: Snapshot): number => pct(snap.targets.filter((t) => t.past).length, snap.targets.length);
-    const shares = weeks.map(shareOf);
-    const hits = today.targets.filter((t) => t.past).length;
-    const rate = shareOf(today);
-    const usual = nearestRank(shares, STUCK_BAR.quantile);
+    const usual = enoughWeeks ? nearestRank(shares, STUCK_BAR.quantile) : 0;
     const USUAL_SHARE = Math.round(STUCK_BAR.quantile * 100);
-    const middle = round1(median(shares));
-    const firstWeek = localDay(new Date(weeks.at(-1)!.at), zoneOf(ctx));
+    const middle = enoughWeeks ? round1(median(shares)) : 0;
+    // The margin over the weeks: our least points, or the z bar's points at today's count, whichever is more, whole points up.
+    const margin = Math.max(STUCK_BAR.points, Math.ceil(STUCK_BAR.z * Math.sqrt((middle * (100 - middle)) / n)));
     const dims: Record<string, (t: Target) => string> = { status: (t) => t.status.label, priority: (t) => t.priority, ...(c.hasOrigin ? { origin: (t: Target) => t.origin } : {}) };
     const segmentsChecked: SegmentCheck[] = Object.entries(dims).map(([dimension, keyOf]) => ({ dimension, segments: new Set(today.targets.map(keyOf)).size }));
-    const lead = named(
-      said`Today ${hits} of ${n} open cases (${rate}%) ${hits === 1 ? said`has been in its` : said`have been in their`} status longer than ${STAY_SHARE}% of the stays that began there between ${LINE_FROM_DAYS} and ${GAP_DAYS} days earlier. On the same day of the week in the ${counted} earlier weeks we could compare, back to ${daySaid(firstWeek)}, the share was a median of ${middle}%, and ${USUAL_SHARE}% of those weeks were at or below ${usual}%. Days are calendar days.`,
-      { hits, n, rate: [rate, "percent"], stayShare: [STAY_SHARE, "percent"], lineFrom: [LINE_FROM_DAYS, "day"], gap: [GAP_DAYS, "day"], counted, firstWeek: [firstWeek, "date"], middle: [middle, "percent"], usualShare: [USUAL_SHARE, "percent"], usual: [usual, "percent"] },
-    );
-    // The margin: our least points, or the z bar's points at today's count, whichever is more, in whole points up.
-    const margin = Math.max(STUCK_BAR.points, Math.ceil(STUCK_BAR.z * Math.sqrt((middle * (100 - middle)) / n)));
-    const facts = { hits, n, rate, weeks: counted, median: middle, usual, margin, stayShare: STAY_SHARE, lookbackDays: LOOKBACK_DAYS };
-    if (!(rate > usual && rate - middle >= margin)) {
-      return { outcome: "pass", summary: named(said`${lead} We raise this only when today's share is above ${usual}% and at least ${margin} points above ${middle}%, and it isn't.`, { usual: [usual, "percent"], margin: [margin, "points"], middle: [middle, "percent"] }), evidence, segmentsChecked, facts };
+    const todaySaid = named(said`Today ${hits} of ${n} open cases (${rate}%) ${hits === 1 ? said`has been in its` : said`have been in their`} status longer than ${STAY_SHARE}% of the stays that began there between ${LINE_FROM_DAYS} and ${GAP_DAYS} days earlier.`, { hits, n, rate: [rate, "percent"], stayShare: [STAY_SHARE, "percent"], lineFrom: [LINE_FROM_DAYS, "day"], gap: [GAP_DAYS, "day"] });
+    const steadySaid = useSteady ? named(said` With your cases' own stay times, a steady queue would have about ${steady}% past that point.`, { steady: [steady, "percent"] }) : said``;
+    const firstWeek = enoughWeeks ? localDay(new Date(weeks.at(-1)!.at), zoneOf(ctx)) : "";
+    const weeksSaid = !useWeeks
+      ? said``
+      : enoughWeeks
+        ? named(said` On the same day of the week in the ${counted} earlier weeks we could compare, back to ${daySaid(firstWeek)}, the share was a median of ${middle}%, and ${USUAL_SHARE}% of those weeks were at or below ${usual}%.`, { counted, firstWeek: [firstWeek, "date"], middle: [middle, "percent"], usualShare: [USUAL_SHARE, "percent"], usual: [usual, "percent"] })
+        : counted === 0
+          ? named(said` No earlier week had ${minSample} or more open cases with a line to compare with.`, { minSample })
+          : counted === 1
+            ? named(said` Only 1 earlier week had ${minSample} or more open cases with a line, too few to say what is usual.`, { minSample })
+            : named(said` Only ${counted} earlier weeks had ${minSample} or more open cases with a line, too few to say what is usual.`, { counted, minSample });
+    const lead = said`${todaySaid}${steadySaid}${weeksSaid} Days are calendar days.`;
+    const overWeeks = enoughWeeks && rate > usual && rate - middle >= margin;
+    const overSteady = useSteady && rate - steady >= steadyMargin;
+    const weeksLine = named(said`above ${usual}% and at least ${margin} points above the median of ${middle}%`, { usual: [usual, "percent"], margin: [margin, "points"], middle: [middle, "percent"] });
+    const steadyLine = named(said`at least ${steadyMargin} points above the steady ${steady}%`, { steadyMargin: [steadyMargin, "points"], steady: [steady, "percent"] });
+    const lines = enoughWeeks && useSteady ? said`${weeksLine}, or ${steadyLine}` : enoughWeeks ? weeksLine : steadyLine;
+    const facts = { hits, n, rate, steady, steadyMargin, weeks: counted, ...(enoughWeeks ? { median: middle, usual, margin } : {}), stayShare: STAY_SHARE, lookbackDays: LOOKBACK_DAYS };
+    if (!overWeeks && !overSteady) {
+      return { outcome: "pass", summary: said`${lead} We raise this only when today's share is ${lines}, and it isn't.`, evidence, segmentsChecked, facts };
     }
     // The status with the most open cases past its line today, when its name can be written.
     const byStatus = [...groupBy(today.targets.filter((t) => t.past), (t) => t.status.key)].map(([key, ts]) => ({ key, past: ts.length, status: ts[0]!.status, there: today.targets.filter((t) => t.status.key === key).length }));
@@ -604,11 +640,12 @@ export const stuckInStatus: Rule = {
     const statusSaid = top
       ? named(said` In ${org(top.status.label)}, ${top.past} of ${top.there} open ${top.there === 1 ? said`case is` : said`cases are`} past that status's line: ${STAY_SHARE}% of the stays that began there between ${LINE_FROM_DAYS} and ${GAP_DAYS} days earlier ended within ${lineSaid(today.lines.get(top.key)!)}.`, { topPast: top.past, topThere: top.there, stayShare: [STAY_SHARE, "percent"], lineFrom: [LINE_FROM_DAYS, "day"], gap: [GAP_DAYS, "day"] })
       : said``;
+    const which = overWeeks && overSteady ? said`both what was usual in earlier weeks and what a steady queue would have` : overWeeks ? said`what was usual in earlier weeks` : said`what a steady queue would have`;
     return {
       outcome: "issue",
-      title: said`More of your open cases are past the usual time in their status than in most earlier weeks`,
-      summary: named(said`${lead}${statusSaid} We raise this when today's share is above ${usual}% and at least ${margin} points above the median of ${middle}%. Both lines are ours.`, { usual: [usual, "percent"], margin: [margin, "points"], middle: [middle, "percent"] }),
-      recommendation: said`Go through the open cases that have waited longest in each status and move each one on or close it, then look at what changed in the last weeks.`,
+      title: said`More of your open cases are past the usual time in their status than we would expect`,
+      summary: said`${lead}${statusSaid} That is more than ${which}. We raise this when today's share is ${lines}: these lines are ours.`,
+      recommendation: said`Go through the open cases that have waited longest in each status and move each one on or close it, then look at why cases wait there.`,
       recommendationType: "change",
       severity: "medium",
       confidence: n < minSample * 2 ? "medium" : "high",
