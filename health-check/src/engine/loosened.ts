@@ -169,12 +169,17 @@ export const CHANGED: Readonly<Record<string, readonly Change[]>> = {
   "lead.no-first-response": [{ version: 3, on: JOURNEY_ON, from: [1, 2] }],
 };
 
-const changes = (ruleId: string): readonly Change[] => (Object.hasOwn(CHANGED, ruleId) ? CHANGED[ruleId]! : []);
+const changes = (ruleId: string, table: Readonly<Record<string, readonly Change[]>> = CHANGED): readonly Change[] => (Object.hasOwn(table, ruleId) ? table[ruleId]! : []);
 
-/** Whether a declared change lies between an earlier and a later version of a rule. Unknown versions: no. */
-export function changedAcross(ruleId: string, earlier: number | undefined, later: number | undefined): boolean {
-  if (earlier === undefined || later === undefined || later <= earlier) return false;
-  return changes(ruleId).some((c) => c.version > earlier && c.version <= later && c.from.includes(earlier));
+/**
+ * Whether a declared change lies between two versions of a rule, read either way (DECISIONS.md 779): from a version it
+ * changed the rule from up to it or past it, or back again, as a switch turned off reads the older version once more.
+ * Unknown or equal versions: no. `table` is CHANGED unless a test says otherwise.
+ */
+export function changedAcross(ruleId: string, earlier: number | undefined, later: number | undefined, table: Readonly<Record<string, readonly Change[]>> = CHANGED): boolean {
+  if (earlier === undefined || later === undefined || later === earlier) return false;
+  const [low, high] = earlier < later ? [earlier, later] : [later, earlier];
+  return changes(ruleId, table).some((c) => c.version > low && c.version <= high && c.from.includes(low));
 }
 
 /** By version, the earlier versions each changed the rule from, for rule-where.json; undefined for a rule never changed so. */

@@ -63,6 +63,13 @@ export type Progress = {
    */
   changedBack?: RuleChange[];
   /**
+   * Issues the earlier run raised under a rule this run didn't run at all (a switch turned off, a module or step not
+   * run): nothing is said of them, as no sentence has been approved for "not checked this time", and they are in no
+   * count, not even "can't tell", whose reason ("couldn't be measured") would be untrue (DECISIONS.md 779). Kept only
+   * so what the earlier run found still adds up. Only when there are any.
+   */
+  notRunNow?: RuleChange[];
+  /**
    * By rule, the version of the issue each pass in ruleChanged stands apart from,
    * and for a rule this run didn't check that the baseline carried, the baseline's:
    * kept in the run folder, so the next comparison can go on from it (DECISIONS.md
@@ -107,6 +114,12 @@ export type ProgressSide = {
    * consultant-led re-check compares as before 756, which is the owner's open decision.
    */
   checkedByCode?: boolean;
+  /**
+   * The baseline's only: the rules its analysis ran (its rules.json, DECISIONS.md 718), or absent for a run made before
+   * the list. A rule with no finding there that it didn't list as run, or any rule with no finding where there is no
+   * list, was not checked then, so an issue under it now is checked for the first time, never new (779).
+   */
+  rulesRun?: readonly string[];
 };
 
 const byRule = (findings: Finding[]): Map<string, Finding[]> => {
@@ -216,6 +229,7 @@ export function compareWithBaseline(baseline: ProgressSide, current: ProgressSid
   const ruleChanged: RuleChange[] = [];
   const stricter: RuleChange[] = [];
   const changedBack: RuleChange[] = [];
+  const notRunNow: RuleChange[] = [];
   const carried: Record<string, number> = {};
   const carriedThen = baseline.carried ?? {};
   // An issue standing apart in the baseline (DECISIONS.md 732): the baseline passed it only because we loosened the
@@ -242,6 +256,12 @@ export function compareWithBaseline(baseline: ProgressSide, current: ProgressSid
     // PMD's groups exist only on a run that had its step: a pulse, or a run
     // without it, says nothing of them, never "can't tell" (DECISIONS.md 673).
     if (MEASURED_LATER.has(ruleId) && nowFindings.length === 0) continue;
+    // Any other rule this run didn't run: nothing said, never "can't tell" (DECISIONS.md 779). Every rule a run runs
+    // has a finding (718), so no finding is not run.
+    if (nowFindings.length === 0) {
+      notRunNow.push(change(ruleId, thenIssues));
+      continue;
+    }
     const nowIssues = nowFindings.filter((f) => f.status === "issue");
     // Passed now across a version declared as changed (CHANGED, DECISIONS.md 778): "we changed how we check", this once,
     // and nothing carried, so the next run at the same version compares as any.
@@ -266,6 +286,12 @@ export function compareWithBaseline(baseline: ProgressSide, current: ProgressSid
     if (!raised.length) continue;
     const then = before.get(ruleId) ?? [];
     if (then.some((f) => f.status === "issue") || Object.hasOwn(carriedThen, ruleId)) continue;
+    // A check the earlier run didn't make: checked for the first time, never new (DECISIONS.md 779), as the portal
+    // decides it from the same lists (console 720). Without the baseline's list, no finding is not run (718).
+    if (then.length === 0 && !baseline.rulesRun?.includes(ruleId)) {
+      newlyMeasured.push(change(ruleId, raised));
+      continue;
+    }
     // Issues resting on a figure the earlier run couldn't measure for want of the closed stages' meaning (756) stand apart; the rest go on as before.
     const unlocked = unmeasuredThen.length ? raised.filter((f) => restsOnUnmeasured(f, unmeasuredThen, asRead)) : [];
     if (unlocked.length) newlyMeasured.push(change(ruleId, unlocked));
@@ -275,8 +301,9 @@ export function compareWithBaseline(baseline: ProgressSide, current: ProgressSid
     if ((MEASURED_LATER.has(ruleId) && !then.some((f) => f.status === "passed")) || (current.checkedByCode === true && unsplitThen(then))) newlyMeasured.push(change(ruleId, nowIssues));
     // Passed or unmeasured then, raised now across a version declared as changed (778): open, never new, nothing said.
     else if (then.length > 0 && then.every((p) => (p.status === "passed" || p.status === "not_measurable") && nowIssues.every((i) => changedAcross(ruleId, p.ruleVersion, i.ruleVersion)))) changedBack.push(change(ruleId, nowIssues));
-    // Passed then under a newer version, raised now under an older one: the check came back, open, never new, nothing said (DECISIONS.md 777).
-    else if (then.length > 0 && then.every((p) => p.status === "passed" && nowIssues.every((i) => wentBack(p.ruleVersion, i.ruleVersion)))) changedBack.push(change(ruleId, nowIssues));
+    // Passed or unmeasured then under a newer version, raised now under an older one: the check came back, open, never
+    // new, nothing said (DECISIONS.md 777, 779).
+    else if (then.length > 0 && then.every((p) => (p.status === "passed" || p.status === "not_measurable") && nowIssues.every((i) => wentBack(p.ruleVersion, i.ruleVersion)))) changedBack.push(change(ruleId, nowIssues));
     // Passed then, raised now only because we tightened the rule since: open, never new (DECISIONS.md 754).
     else if (foundByStricterCheck(then, nowIssues, ruleId, current.ownCalls)) stricter.push(change(ruleId, nowIssues));
     else added.push(change(ruleId, nowIssues));
@@ -300,6 +327,7 @@ export function compareWithBaseline(baseline: ProgressSide, current: ProgressSid
     ...(ruleChanged.length ? { ruleChanged } : {}),
     ...(stricter.length ? { stricter } : {}),
     ...(changedBack.length ? { changedBack } : {}),
+    ...(notRunNow.length ? { notRunNow } : {}),
     ...(Object.keys(carried).length ? { carried } : {}),
     areas: domains.map((domain) => ({ domain, before: scoreOf(baseline.scores, domain), after: scoreOf(current.scores, domain) })).filter((a) => a.before !== null || a.after !== null),
     storage: compareStorage(baseline, current),

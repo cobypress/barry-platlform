@@ -40,7 +40,7 @@ export function caseStudyDraft(report: BuiltReport): CaseStudy | null {
     found: [
       ...(p.score.before !== null ? [`A Barometer score of ${p.score.before} out of 100.`] : []),
       ...(p.worth ? [`Issues worth about ${m(p.worth.before)} over 12 months.`] : []),
-      `${p.fixed.length + p.remaining.length + p.unknown.length} kinds of issue across their Salesforce.`,
+      `${p.fixed.length + p.remaining.length + p.unknown.length + (p.notRunNow?.length ?? 0)} kinds of issue across their Salesforce.`,
     ],
     changed: [
       ...(scored ? [`The Barometer score went from ${p.score.before} to ${p.score.after}.`] : []),
