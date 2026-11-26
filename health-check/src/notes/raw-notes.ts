@@ -2,6 +2,7 @@ import type { Pseudonymiser } from "../privacy/pseudonymiser.ts";
 import { factsText, type FactsSummary } from "../facts/summary.ts";
 import { calibrationConfirmation, type Calibration, type Evidence, type Finding, type ManualStep, type Metric, type Run, type Score } from "../schemas/index.ts";
 import { domainLabel } from "../narrative/select.ts";
+import { passedOnMerit } from "../domains/scoring.ts";
 import { byKind, hasKinds, kindCounts } from "../narrative/unmeasured.ts";
 import { automationOf, INVENTORY_COLUMNS, inventoryRows, OBJECT_INVENTORY } from "../domains/configuration/inventory.ts";
 import { RETRIEVED_STANDARD_OBJECTS } from "../extract/automation.ts";
@@ -163,7 +164,7 @@ export function renderRawNotes(input: { run: Run; calibration: Calibration; find
     "",
     "## Summary",
     "",
-    `- ${issues.length} issues, ${passed.length} checks passed, ${notMeasurable.length} not measurable${hasKinds(notMeasurable) ? `: ${kindCounts(notMeasurable)}` : ""}`,
+    `- ${issues.length} issues, ${passed.filter(passedOnMerit).length} checks passed, ${notMeasurable.length} not measurable${hasKinds(notMeasurable) ? `: ${kindCounts(notMeasurable)}` : ""}`,
     `- ${manualSteps.filter((s) => s.status === "pending").length} manual steps outstanding`,
     `- ${metrics.filter((m) => m.status === "measured").length} of ${metrics.length} pipeline metrics measured`,
     ...[inventoryLine(metrics.find((m) => m.id === OBJECT_INVENTORY))].flatMap((line) => (line ? [`- ${line}`] : [])),

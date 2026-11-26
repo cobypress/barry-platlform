@@ -169,9 +169,10 @@ export function ruleChangeOf(f: Finding, change: RuleChangeContext): Pick<Digest
   // version of the issue its pass stands apart from, so a reader of two runs sees it. Nothing kept apart: as before.
   const from = Object.hasOwn(change.carried, f.ruleId) && f.status !== "issue" ? change.carried[f.ruleId] : undefined;
   if (!loosened && !tightened) return { ruleVersion: f.ruleVersion, ...(from !== undefined ? { carriedFrom: from } : {}) };
-  const under = loosened ? issueUnder(f, change.ownCalls) : undefined;
+  // Neither verdict on a reading the score leaves out (778, 779): version 4 is always a pass, across neither version
+  // 3's loosening nor its tightening, so it says nothing of what the older lines would have read.
+  const under = loosened && !unscoredVersion(f) ? issueUnder(f, change.ownCalls) : undefined;
   // For a rule we have tightened, an issue's verdict on the old line (DECISIONS.md 754): the mirror of issueUnder.
-  // Never on a reading the score leaves out (778): version 4 is not across version 3's tightening.
   const passed = tightened && !unscoredVersion(f) ? passedUnder(f, change.ownCalls) : undefined;
   return { ruleVersion: f.ruleVersion, ...(under ? { issueUnder: under } : {}), ...(from !== undefined ? { carriedFrom: from } : {}), ...(passed ? { passedUnder: passed } : {}) };
 }
