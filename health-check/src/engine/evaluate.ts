@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { namedIn, withNamedValues } from "./named.ts";
+import { namedFor, namedIn, withNamedValues } from "./named.ts";
 import { stagesExtractor } from "../extract/opportunities.ts";
 import { guardPassedOn, marksOfMetric, orgValuesOf, rewordFinding, rewordMetric } from "./automatic-words.ts";
 import type { DomainModule } from "../domains/types.ts";
@@ -495,15 +495,20 @@ function analyseWithin(input: AnalysisInput): AnalysisOutput {
   let onMetric = new Map<string, string[]>();
   let inBuilder = false;
 
+  // Which builder made each metric, so its texts take only the values named while it ran (DECISIONS.md 768).
+  const builtBy = new Map<string, string>();
+  let builders = 0;
   const metrics = modules
     .flatMap((m) => (m.metrics ?? []).flatMap((build) => {
+      const builder = `metrics#${builders++}`;
       assumed = new Set();
       onMetric = new Map();
       inBuilder = true;
       currencyRead = false;
       let made: Metric[];
       try {
-        made = build(base);
+        made = namedFor(builder, () => build(base));
+        for (const metric of made) builtBy.set(metric.id, builder);
       } finally {
         inBuilder = false;
       }
@@ -528,7 +533,7 @@ function analyseWithin(input: AnalysisInput): AnalysisOutput {
   // The values each metric's own texts were named with (DECISIONS.md 768), before any is reworded.
   const namedValues: Record<string, Record<string, number>> = {};
   for (const m of metrics) {
-    const values = namedIn([m.label, m.definition, ...m.assumptions, ...m.exclusions, m.status === "not_measurable" ? m.reason : null]);
+    const values = namedIn([m.label, m.definition, ...m.assumptions, ...m.exclusions, m.status === "not_measurable" ? m.reason : null], builtBy.get(m.id) ?? "");
     if (values) namedValues[m.id] = values;
   }
   const ctx: RuleContext = { ...base, metrics };
@@ -547,10 +552,10 @@ function analyseWithin(input: AnalysisInput): AnalysisOutput {
       currencyRead = false;
       noted = new Set();
       inRule = true;
-      const made = runRule(rule, ctx, pseudonyms, records, assumed, () => (mode === "none" && currencyRead ? (r) => withoutCurrency(r, noCurrency()) : null), noted);
+      const made = namedFor(`rule:${rule.id}`, () => runRule(rule, ctx, pseudonyms, records, assumed, () => (mode === "none" && currencyRead ? (r) => withoutCurrency(r, noCurrency()) : null), noted));
       // And each finding's, from its own texts as made, before any is reworded (DECISIONS.md 768).
       for (const f of made) {
-        const values = namedIn([f.title, f.summary, f.recommendation, f.notMeasurableReason, ...(f.value.kind === "not_sized" ? [f.value.reason] : [f.value.period, ...f.value.assumptions])]);
+        const values = namedIn([f.title, f.summary, f.recommendation, f.notMeasurableReason, ...(f.value.kind === "not_sized" ? [f.value.reason] : [f.value.period, ...f.value.assumptions])], `rule:${rule.id}`);
         if (values) namedValues[f.id] = values;
       }
       findings.push(...made);

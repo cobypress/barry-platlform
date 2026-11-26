@@ -161,7 +161,7 @@ function winRate(ctx: Ctx, data: Ready): Metric[] {
     const value = valueRate(decided);
     if (value === null) metrics.push(notMeasurable(definitions.value, "Closed deals have no amounts."));
     else {
-      const assumptions = [...definitions.value.assumptions, ...(missingAmount > 0 ? [named(said`${missingAmount} closed deals have no amount and count as zero`, { missingAmount, countedAs: 0 })] : [])];
+      const assumptions = [...definitions.value.assumptions, ...(missingAmount > 0 ? [named(said`${missingAmount} closed deals have no amount and count as zero`, { missingAmount })] : [])];
       metrics.push(measured({ ...definitions.value, assumptions }, { value, n: decided.length, dateRange: ctx.window, segments: segment(decided, dims, minSample, valueRate) }));
     }
   }

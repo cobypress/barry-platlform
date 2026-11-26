@@ -137,7 +137,7 @@ const unusedCustomFields: Rule = {
         outcome: "issue",
         key: object,
         title: said`Custom fields on ${org(named)} are almost never filled in`,
-        summary: valued(said`Of ${plural(scan.data.fields.length, "scanned custom field")} on ${org(named)}, ${unused.length} ${unused.length === 1 ? "is" : "are"} filled on under ${UNUSED_FILL_LIMIT}% of records, both overall and on records from the last 12 months.`, { fillPct: UNUSED_FILL_LIMIT, recentMonths: 12 }),
+        summary: valued(said`Of ${plural(scan.data.fields.length, "scanned custom field")} on ${org(named)}, ${unused.length} ${unused.length === 1 ? "is" : "are"} filled on under ${UNUSED_FILL_LIMIT}% of records, both overall and on records from the last 12 months.`, { fillPct: UNUSED_FILL_LIMIT }),
         recommendation: said`Remove ${plural(unused.length, "field")} from ${org(named)} once the data is archived.`,
         blockedRecommendation: said`Review ${plural(unused.length, "field")} with the people who own ${org(named)}. We aren't recommending removal, because not every dependency check could pass.`,
         recommendationType: "remove",

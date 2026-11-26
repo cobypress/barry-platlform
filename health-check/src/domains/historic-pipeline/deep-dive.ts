@@ -171,7 +171,7 @@ function winSources(ctx: Ctx, data: Ready): Metric[] {
   if (won.length < minSample) return every.map((d) => notMeasurable(d, thinReason(won.length, "won deals", minSample)));
   const blank = won.filter((d) => d.Amount === null).length;
   if (tooManyBlank(won)) return every.map((d) => notMeasurable(d, named(said`${blank} of ${won.length} won deals have no amount, so shares of won value would mislead.`, { blank, won: won.length })));
-  const blankNote = blank > 0 ? [named(said`${blank} won deals with no amount count as zero`, { blank, countedAs: 0 })] : [];
+  const blankNote = blank > 0 ? [named(said`${blank} won deals with no amount count as zero`, { blank })] : [];
   const withAccount = won.filter((d) => d.AccountId);
   const noAccount = won.length - withAccount.length;
   const accountExclusions = noAccount > 0 ? [`${noAccount} won deals with no account`] : [];
@@ -265,7 +265,7 @@ function lostFrom(ctx: Ctx, data: Ready): Metric[] {
   else if (tooManyBlank(lost)) metrics.push(notMeasurable({ ...valueDefinition, exclusions }, said`${lost.filter((d) => d.Amount === null).length} of ${lost.length} lost deals have no amount, so the value lost would mislead.`));
   else {
     const blank = lost.filter((d) => d.Amount === null).length;
-    metrics.push(measured({ ...valueDefinition, exclusions, assumptions: [...valueDefinition.assumptions, ...(blank ? [named(said`${blank} lost deals with no amount count as zero`, { blank, countedAs: 0 })] : [])] }, { value: total(lost), n: lost.length, dateRange: ctx.window, segments: byStage.map(([key, group]) => ({ dimension: "stage left", key, n: group.length, value: total(group), notMeasurableReason: null })) }));
+    metrics.push(measured({ ...valueDefinition, exclusions, assumptions: [...valueDefinition.assumptions, ...(blank ? [named(said`${blank} lost deals with no amount count as zero`, { blank })] : [])] }, { value: total(lost), n: lost.length, dateRange: ctx.window, segments: byStage.map(([key, group]) => ({ dimension: "stage left", key, n: group.length, value: total(group), notMeasurableReason: null })) }));
   }
   return metrics;
 }

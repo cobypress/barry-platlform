@@ -790,6 +790,12 @@ export function keepStrictShadow(dir: string, runId: string, shadow: CheckedDige
     log(shadowLine(runId, shadow.shadow));
     writeFileSync(join(dir, STRICT_SHADOW_FILE), `${JSON.stringify(shadow.shadow, null, 2)}\n`, { mode: 0o600 });
   } catch (err) {
+    // An earlier delivery's file never stands in for this one's.
+    try {
+      rmSync(join(dir, STRICT_SHADOW_FILE), { force: true });
+    } catch {
+      // Nothing more to do: the log says it wasn't kept.
+    }
     log(`Run ${runId}: the strict check (shadow) couldn't be kept (${err instanceof Error ? err.name : typeof err}), and the run went on without it.`);
   }
 }

@@ -119,6 +119,10 @@ const knowsLightning = (u: UserRow): boolean => typeof u.UserPreferencesLightnin
 
 // ─── Metrics ─────────────────────────────────────────────────────────────────
 
+/** The weekly figure's weeks: the last four runs of seven days (its assumption says so, and names these). */
+const WEEKS = 4;
+const WEEK_DAYS = 7;
+
 type Definition = Pick<Metric, "id" | "label" | "unit" | "definition">;
 const DEF = {
   daily: { id: "adoption.daily_active_users", label: "Daily active users", unit: "count", definition: named(`People who logged in on an average working day, over the last ${RECENT_DAYS} days. API sessions don't count.`, { recentDays: RECENT_DAYS }) },
@@ -173,13 +177,13 @@ function activeMetrics(ctx: Ctx, data: Extract<Loaded, { status: "ok" }>): Metri
   const groups = groupsOf(users);
   const days = recentDays(ctx.now);
   const working = days.filter((d) => ![0, 6].includes(new Date(`${d}T00:00:00Z`).getUTCDay()));
-  const weeks = [0, 1, 2, 3].map((w) => new Set(days.slice(w * 7, w * 7 + 7)));
+  const weeks = Array.from({ length: WEEKS }, (_, w) => new Set(days.slice(w * WEEK_DAYS, w * WEEK_DAYS + WEEK_DAYS)));
   const daily = (who: UserRow[]): number => round1(working.reduce((sum, day) => sum + activeOn(activity, who, (d) => d === day), 0) / working.length);
   const weekly = (who: UserRow[]): number => round1(weeks.reduce((sum, week) => sum + activeOn(activity, who, (d) => week.has(d)), 0) / weeks.length);
   const assumptions = ["Days are in UTC", `Working days are Monday to Friday`];
   const out: Metric[] = [
     measured(DEF.daily, evidence, daily(users), users.length, groups.map((g) => groupSegment(g, daily(g.users))), { assumptions, stats: { workingDays: working.length } }),
-    measured(DEF.weekly, evidence, weekly(users), users.length, groups.map((g) => groupSegment(g, weekly(g.users))), { assumptions: ["Days are in UTC", named("Weeks are the last four runs of 7 days before the run", { weeks: 4, weekDays: 7 })] }),
+    measured(DEF.weekly, evidence, weekly(users), users.length, groups.map((g) => groupSegment(g, weekly(g.users))), { assumptions: ["Days are in UTC", named("Weeks are the last four runs of 7 days before the run", { weeks: WEEKS, weekDays: WEEK_DAYS })] }),
   ];
 
   const months = coveredMonths(activity, ctx.now);
@@ -404,7 +408,10 @@ const classicUsers: Rule = {
     const unread = everyone.length - who.length;
     if (classic.length === 0) return { outcome: "pass", summary: said`All ${plural(who.length, "active user")}${unread ? said` whose setting we could read` : ""} are set to use Lightning Experience.${unread ? said` The setting couldn't be read for ${plural(unread, "user")}.` : ""}`, evidence, segmentsChecked: segments };
     const share = pct(classic.length, who.length);
-    const byProfile = [...new Set(classic.map(profileOf))].sort().map((p) => named(said`${org(p)} (${classic.filter((u) => profileOf(u) === p).length})`, { users: classic.filter((u) => profileOf(u) === p).length }));
+    const byProfile = [...new Set(classic.map(profileOf))].sort().map((p) => {
+      const users = classic.filter((u) => profileOf(u) === p).length;
+      return named(said`${org(p)} (${users})`, { users });
+    });
     return {
       outcome: "issue",
       title: said`Some people still use Salesforce Classic`,

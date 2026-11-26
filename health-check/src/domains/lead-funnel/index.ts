@@ -78,7 +78,7 @@ const conversionBySource: Rule = {
     return {
       outcome: "issue",
       title: said`Some lead sources barely convert`,
-      summary: said`${overall}% of leads convert overall, but ${org(name)} converts ${rate(group)}% of ${group.length} leads.`,
+      summary: named(said`${overall}% of leads convert overall, but ${org(name)} converts ${rate(group)}% of ${group.length} leads.`, { overall: [overall, "percent"] }),
       recommendation: said`Find out whether these leads are poor or just poorly handled before changing what you spend on the source.`,
       recommendationType: "investigate",
       severity: "medium",
@@ -252,7 +252,7 @@ const sourceReturn: Rule = {
     return {
       outcome: "issue",
       title: said`Some lead sources have produced no wins`,
-      summary: said`${joinSaid(dry.map((r) => said`${org(r.source)}`), ", ")} brought in ${leads} leads and no won deals, against ${moneySaid(total, ctx.calibration.currency)} won from other sources.`,
+      summary: named(said`${joinSaid(dry.map((r) => said`${org(r.source)}`), ", ")} brought in ${leads} leads and no won deals, against ${moneySaid(total, ctx.calibration.currency)} won from other sources.`, { wonFromLeads: [total, "money"] }),
       recommendation: said`Check how these leads are handled, then decide whether the source is worth keeping.`,
       recommendationType: "investigate",
       severity: "medium",
@@ -305,10 +305,11 @@ const campaignReturn: Rule = {
     const segments = [{ dimension: "campaign type", segments: rows.length }];
     if (under.length === 0) return { outcome: "pass", summary: said`Every campaign type with a recorded cost returned more than it cost, across ${moneySaid(spend, ctx.calibration.currency)} of spend.`, evidence, segmentsChecked: segments, facts: { spend, types: rows.length } };
     const gap = Math.round(under.reduce((sum, r) => sum + r.cost - r.returned, 0));
+    const [cost, returned] = [under.reduce((sum, r) => sum + r.cost, 0), under.reduce((sum, r) => sum + r.returned, 0)];
     return {
       outcome: "issue",
       title: said`Some campaign spend isn't coming back`,
-      summary: named(said`${joinSaid(under.map((r) => said`${org(r.type)}`), ", ")} cost ${moneySaid(under.reduce((sum, r) => sum + r.cost, 0), ctx.calibration.currency)} and returned ${moneySaid(under.reduce((sum, r) => sum + r.returned, 0), ctx.calibration.currency)} in won deals from its leads.`, { costMoney: under.reduce((sum, r) => sum + r.cost, 0), returnedMoney: under.reduce((sum, r) => sum + r.returned, 0) }),
+      summary: named(said`${joinSaid(under.map((r) => said`${org(r.type)}`), ", ")} cost ${moneySaid(cost, ctx.calibration.currency)} and returned ${moneySaid(returned, ctx.calibration.currency)} in won deals from its leads.`, { costMoney: cost, returnedMoney: returned }),
       recommendation: said`Check the attribution first, because deals with contacts on a campaign aren't counted here. Then decide whether to keep this spend.`,
       recommendationType: "investigate",
       severity: "medium",

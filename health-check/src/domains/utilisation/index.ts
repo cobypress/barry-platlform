@@ -244,10 +244,12 @@ const unassignedSeats: Rule = {
             period: "per year",
             assumptions: spare.map((l) => said`${seatsSaid(l.TotalLicenses - l.UsedLicenses, l.Name)} at ${costs[l.Name]!} ${org(ctx.calibration.currency)} a year, from the calibration`).concat(said`Assumes seats can be reduced at renewal`),
           };
+    // Each licence's free seats, worked out once for its sentence and the value it's named with (DECISIONS.md 768).
+    const freeSeats = spare.map((l) => ({ l, free: l.TotalLicenses - l.UsedLicenses }));
     return {
       outcome: "issue",
       title: said`You're paying for seats nobody holds`,
-      summary: valued(said`Unassigned seats: ${seats}. ${joinSaid(spare.map((l) => said`${l.TotalLicenses - l.UsedLicenses} of ${l.TotalLicenses} ${org(l.Name)}`), "; ")}.`, each(spare, (l) => ({ spare: l.TotalLicenses - l.UsedLicenses, of: l.TotalLicenses }))),
+      summary: valued(said`Unassigned seats: ${seats}. ${joinSaid(freeSeats.map(({ l, free }) => said`${free} of ${l.TotalLicenses} ${org(l.Name)}`), "; ")}.`, each(freeSeats, (r) => ({ spare: r.free, of: r.l.TotalLicenses }))),
       recommendation: said`Reduce these seats at your next renewal, keeping whatever headroom your hiring plan needs.`,
       recommendationType: "change",
       severity: "medium",
@@ -308,9 +310,10 @@ const packageSeats: Rule = {
           period: "per year",
           assumptions: flagged.map((p) => said`${idle(p)} ${named(p)} ${idle(p) === 1 ? "seat" : "seats"} at ${price(p)} ${org(ctx.calibration.currency)} a year, from the calibration`).concat(said`Assumes seats can be reduced, or the app cancelled, at renewal`),
         };
+    const idleSeats = spare.map((p) => ({ p, n: idle(p) }));
     const parts = [
       unused.length ? said`${joinSaid(unused.map((p) => said`${named(p)} (${plural(p.AllowedLicenses, "seat")})`), ", ")} ${unused.length === 1 ? "has" : "have"} nobody assigned at all` : null,
-      spare.length ? valued(said`${joinSaid(spare.map((p) => said`${named(p)} has ${idle(p)} of ${p.AllowedLicenses} seats unassigned`), "; ")}`, each(spare, (p) => ({ idle: idle(p), of: p.AllowedLicenses }))) : null,
+      spare.length ? valued(said`${joinSaid(idleSeats.map(({ p, n }) => said`${named(p)} has ${n} of ${p.AllowedLicenses} seats unassigned`), "; ")}`, each(idleSeats, (r) => ({ idle: r.n, of: r.p.AllowedLicenses }))) : null,
     ].filter((part): part is Said => part !== null);
     return {
       outcome: "issue",

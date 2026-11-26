@@ -409,8 +409,8 @@ export function settlePaths(digest: RunDigest, set: FigureSet): { digest: RunDig
 /** The strict shadow, caught whole: whatever goes wrong in it, the run goes on as it would without it (DECISIONS.md 768). */
 function shadowOf(strict: typeof strictShadow, digest: RunDigest, report: BuiltReport, set: FigureSet, named: NamedValues): NonNullable<CheckedDigest["strictShadow"]> {
   try {
-    // A copy, so nothing the shadow does can reach the digest that is served.
-    return { ok: true, shadow: strict(structuredClone(digest), report, set, named) };
+    // Copies of all it reads, so nothing the shadow does can reach the digest, report or set the run goes on with.
+    return { ok: true, shadow: strict(structuredClone(digest), structuredClone(report), structuredClone(set), structuredClone(named)) };
   } catch (err) {
     // The error's name alone: a message can quote a text.
     return { ok: false, failed: err instanceof Error ? err.name : typeof err };

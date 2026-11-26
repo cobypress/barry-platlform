@@ -31,6 +31,8 @@ const STEADY_VOLUME = 0.25;
 const MIN_GROUP_EVENTS = 10;
 const RECENT_DAYS = 90;
 const REP_FLOOR_SHARE = 0.25;
+/** The same floor as a percentage, as the sentence says it and its named value is (DECISIONS.md 768). */
+const REP_FLOOR_PCT = REP_FLOOR_SHARE * 100;
 const MIN_REPS = 3;
 const UNLINKED_LIMIT = 30;
 const UNLINKED_SEGMENT_LIMIT = 60;
@@ -259,7 +261,7 @@ const repActivity: Rule = {
     return {
       outcome: "issue",
       title: said`Some reps are logging far less than their peers`,
-      summary: named(said`${plural(low.length, "rep")} logged under ${REP_FLOOR_SHARE * 100}% of the typical ${typical} activities per open deal in the last ${RECENT_DAYS} days. This may be a logging gap rather than a performance one.`, { floorPct: REP_FLOOR_SHARE * 100, recentDays: RECENT_DAYS }),
+      summary: named(said`${plural(low.length, "rep")} logged under ${REP_FLOOR_PCT}% of the typical ${typical} activities per open deal in the last ${RECENT_DAYS} days. This may be a logging gap rather than a performance one.`, { floorPct: REP_FLOOR_PCT, recentDays: RECENT_DAYS }),
       recommendation: said`Check their email and calendar connections first, then look at how they're working these deals.`,
       recommendationType: "investigate",
       severity: "medium",

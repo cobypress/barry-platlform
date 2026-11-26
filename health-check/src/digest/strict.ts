@@ -22,7 +22,8 @@ import { digestTextsAt, marksOf, type DigestText } from "./checked.ts";
 // another finding's figures, never the org's words (orgFree). It changes
 // nothing: it only counts what it would have masked.
 
-import type { NamedValues } from "../engine/named.ts";
+import type { NamedUnit, NamedValues } from "../engine/named.ts";
+import { extractFigures } from "../numbercheck/extract.ts";
 export { NAMED_VALUES_FILE, type NamedValues } from "../engine/named.ts";
 /** The strict check's shadow counts, written by the worker. Run folder only: never in the digest, never stored, never shown. */
 export const STRICT_SHADOW_FILE = "strict-shadow.json";
@@ -102,11 +103,15 @@ function computedMetric(m: Metric): Metric {
   return { ...base, segments: base.segments.map((s) => ({ ...s, notMeasurableReason: null })), series: base.series.map((p) => ({ ...p, notMeasurableReason: null })) } as Metric;
 }
 
-const PERCENT_NAME = /rate|share|percent|pct/i;
-
 /** The hours' constants and the fix prompt's fixed text, each a source of its own, so neither backs any other text of the finding. */
 export const HOURS = "#hours";
 export const PROMPT = "#prompt";
+/**
+ * The run's dates alone (its as-of day and analysis window): what a finding's or
+ * metric's texts may take from the run. Never the run's numbers (its API calls,
+ * budget share and API version), which would back any count a sentence wrote.
+ */
+export const RUN_DATES = "run#dates";
 
 /**
  * The constants a finding's fix table declares and the figures its hours are
@@ -140,24 +145,42 @@ function hoursFigures(f: Finding): DatasetFigure[] {
   return out;
 }
 
-const UNIT_NAME: ReadonlyArray<[RegExp, string]> = [[/Days$/, "day"], [/Hours$/, "hour"], [/Months$/, "month"], [/Weeks$/, "week"], [/Minutes$/, "minute"], [/Years$/, "year"]];
+/** A name's last word, case aside, and the unit it says. Only the last whole word: "generated", "separate" and "operator" say nothing. */
+const UNIT_WORD: Readonly<Record<string, DatasetFigure["kind"] | `duration:${string}`>> = {
+  pct: "percent", percent: "percent", rate: "percent", share: "percent",
+  money: "currency", points: "points",
+  day: "duration:day", days: "duration:day", hour: "duration:hour", hours: "duration:hour", week: "duration:week", weeks: "duration:week",
+  month: "duration:month", months: "duration:month", minute: "duration:minute", minutes: "duration:minute", year: "duration:year", years: "duration:year",
+};
+const EXPLICIT: Readonly<Record<NamedUnit, DatasetFigure["kind"] | `duration:${string}`>> = {
+  money: "currency", percent: "percent", points: "points", day: "duration:day", hour: "duration:hour", week: "duration:week", month: "duration:month", minute: "duration:minute", year: "duration:year",
+};
+
+/** The words of a name: "worstSegmentRate" is worst, segment, rate; "DataStorageMBShare" ends in share. */
+const wordsOf = (name: string): string[] => name.replace(/([a-z0-9])([A-Z])/g, "$1 $2").replace(/([A-Z]+)([A-Z][a-z])/g, "$1 $2").split(/[^A-Za-z0-9]+/).filter(Boolean).map((w) => w.toLowerCase());
+
+/** The unit a value is named with: given with it ("name@unit"), or said by its name's last word. */
+export function unitOf(key: string): DatasetFigure["kind"] | `duration:${string}` | null {
+  const [name, unit] = key.replace(/#\d+$/, "").split("@") as [string, string | undefined];
+  if (unit !== undefined) return (EXPLICIT as Record<string, DatasetFigure["kind"] | `duration:${string}`>)[unit] ?? null;
+  const last = wordsOf(name).at(-1);
+  return last !== undefined && Object.hasOwn(UNIT_WORD, last) ? UNIT_WORD[last]! : null;
+}
 
 /**
  * A computed value of a finding or metric as a row of the set: a plain number,
- * and in the unit its name says (DECISIONS.md 768: `…Money` an amount in the
- * run's currency, `…Pct` or a rate, share or percent a percentage, `…Points`
- * points, `…Days`, `…Hours`, `…Months`, `…Weeks`, `…Minutes`, `…Years` a
- * duration). Never a unit read from the finding's own text, as the documents'
- * set takes a fact's: here nothing of the prose is read, its units included.
+ * and in the unit it was named with (DECISIONS.md 768): given beside the value,
+ * `[limit, "percent"]`, where its name doesn't say it; else its name's last word
+ * (`…Money`, `…Pct`, `…Rate`, `…Share`, `…Points`, `…Days` and the other spans
+ * of time), whole and case aside. Never a unit read from the finding's own text,
+ * as the documents' set takes a fact's: here nothing of the prose is read.
  */
 function typed(source: string, key: string, value: number, currency: string | undefined): DatasetFigure[] {
-  // A second value under one name is kept as "name#2" (namedIn): its unit is the name's.
-  const name = key.replace(/#\d+$/, "");
   const out: DatasetFigure[] = [{ source, kind: "number", value }];
-  if (PERCENT_NAME.test(name)) out.push({ source, kind: "percent", value });
-  if (/Money$/.test(name)) out.push({ source, kind: "currency", value, ...(currency ? { currency } : {}) });
-  if (/Points$/.test(name)) out.push({ source, kind: "points", value });
-  for (const [pattern, unit] of UNIT_NAME) if (pattern.test(name)) out.push({ source, kind: "duration", value, unit });
+  const unit = unitOf(key);
+  if (unit === "currency") out.push({ source, kind: "currency", value, ...(currency ? { currency } : {}) });
+  else if (unit?.startsWith("duration:")) out.push({ source, kind: "duration", value, unit: unit.slice("duration:".length) });
+  else if (unit) out.push({ source, kind: unit as DatasetFigure["kind"], value });
   return out;
 }
 
@@ -207,9 +230,11 @@ export function strictDataset(report: BuiltReport, set: FigureSet, named: NamedV
   const promptRows = orgFree(buildDataset({ findings: [], metrics: [], extraText: [...prompts, ...hoursWords], orgNames: findings.flatMap((f) => f.subjects.map((s) => s.label)) }));
   const isPrompt = (r: { source: string }) => r.source.endsWith(PROMPT) || r.source.endsWith(HOURS);
   const ours = orgFree(computed);
+  // The run's dates again, under a source of their own: all a finding's or metric's texts may take from the run.
+  const runDates = free.dates.filter((d) => d.source === SOURCE.run).map((d) => ({ ...d, source: RUN_DATES }));
   return {
     figures: [...runWide(free.figures), ...mine(ours.figures), ...extra, ...promptRows.figures.filter(isPrompt)],
-    dates: [...runWide(free.dates), ...mine(ours.dates), ...promptRows.dates.filter(isPrompt)],
+    dates: [...runWide(free.dates), ...mine(ours.dates), ...promptRows.dates.filter(isPrompt), ...runDates],
     identifiers: [...runWide(free.identifiers), ...mine(ours.identifiers), ...promptRows.identifiers.filter(isPrompt)],
     tokens: [...runWide(free.tokens), ...mine(ours.tokens), ...promptRows.tokens.filter(isPrompt)],
     labels: [],
@@ -221,17 +246,22 @@ export function strictScope(digest: RunDigest, report: BuiltReport, t: DigestTex
   const at = t.at[0]!;
   if (t.path.startsWith("findings[].")) {
     const id = digest.findings[at]!.id;
-    if (t.path === "findings[].effortHours.basis") return [id, `${id}${HOURS}`, SOURCE.run];
-    if (t.path === "findings[].fixPrompt") return [id, `${id}${PROMPT}`, SOURCE.run];
-    return [id, SOURCE.run];
+    if (t.path === "findings[].effortHours.basis") return [id, `${id}${HOURS}`, RUN_DATES];
+    if (t.path === "findings[].fixPrompt") return [id, `${id}${PROMPT}`, RUN_DATES];
+    return [id, RUN_DATES];
   }
-  if (t.path.startsWith("metrics[].")) return [digest.metrics[at]!.id, SOURCE.run];
+  if (t.path.startsWith("metrics[].")) return [digest.metrics[at]!.id, RUN_DATES];
+  // An area's texts (its reason, DECISIONS.md 769) speak only of its own checks.
+  if (t.path.startsWith("areas[].")) {
+    const area = digest.areas[at]!;
+    return [...("findingIds" in area ? area.findingIds : digest.findings.filter((f) => f.domain === area.domain).map((f) => f.id)), RUN_DATES];
+  }
   if (t.path.startsWith("readiness.pillars[].")) {
     const p = digest.readiness!.pillars[at]!;
-    return [...p.findingIds, ...p.metricIds, SOURCE.run];
+    return [...p.findingIds, ...p.metricIds, RUN_DATES];
   }
-  if (t.path.startsWith("paths.insights[].")) return [digest.paths!.insights[at]!.id, SOURCE.run];
-  if (t.path === "paths.headline.text") return digest.paths?.headline ? [digest.paths.headline.insightId, SOURCE.run] : null;
+  if (t.path.startsWith("paths.insights[].")) return [digest.paths!.insights[at]!.id, RUN_DATES];
+  if (t.path === "paths.headline.text") return digest.paths?.headline ? [digest.paths.headline.insightId, RUN_DATES] : null;
   void report;
   return null;
 }
@@ -246,16 +276,34 @@ function ownerOf(digest: RunDigest, report: BuiltReport, t: DigestText): string 
     const id = digest.paths!.insights[at]!.id;
     return report.pathInsights?.find((f) => f.id === id)?.ruleId ?? "paths";
   }
-  return t.path.split(/[.[]/)[0]!;
+  if (t.path.startsWith("areas[].")) return `areas:${digest.areas[at]!.domain}`;
+  // Any other block by its path, "plan:phases", "value:groups", "overall:reason", so every owner is a key the snapshot can hold.
+  const [root, next] = t.path.split(".").map((k) => k.replace(/\[\]/g, ""));
+  return `${root}:${next ?? "text"}`;
 }
 
-/** A figure as the shadow records it: a number of ours as written, never a word or a token, which can be the org's. */
-const written = (raw: string): string => (raw.startsWith("[[") ? "(token)" : /[A-Za-z]\d|\d[A-Za-z]|_/.test(raw) && !/^\d+(?:st|nd|rd|th)$/.test(raw) ? "(identifier)" : raw);
+/** The kinds of figure recorded as written: numbers of ours. Any other (an identifier, a token, a link, an email, a malformed figure) is the org's, or could be. */
+const WRITTEN_KINDS: ReadonlySet<string> = new Set(["number", "percent", "points", "currency", "ratio", "fraction", "duration", "date", "magnitude"]);
 
-/** The figures in one text that the strict set, scoped to its sources, can't trace. Its figures in the org's words are set aside (764). */
+/** The figures in one text that the strict set, scoped to its sources, can't trace, each as the shadow may record it. Its figures in the org's words are set aside (764). */
 export function strictUntraced(text: string, orgWords: readonly OrgSpan[], set: FigureSet): { checked: number; unmatched: string[] } {
   const out = checkNumbers(text, set, { orgWords: [...orgWords] });
-  return { checked: out.checked, unmatched: out.unmatched.map((u) => u.raw) };
+  // Each figure's kind, as the reader read it: by kind, never by its shape.
+  const kinds = new Map<string, string>();
+  for (const f of extractFigures(text, { labels: set.labels.map((l) => l.value) }).figures) if (!kinds.has(f.raw) || !WRITTEN_KINDS.has(f.kind)) kinds.set(f.raw, f.kind);
+  return { checked: out.checked, unmatched: out.unmatched.map((u) => (WRITTEN_KINDS.has(kinds.get(u.raw) ?? "") ? u.raw : kinds.get(u.raw) === "token" ? "(token)" : "(identifier)")) };
+}
+
+/** How long the shadow may take before it gives up, so it can never hold a release up (DECISIONS.md 768). */
+export const SHADOW_BUDGET_MS = 10_000;
+
+/** The shadow gave up: too long. Its name is what the worker logs. */
+export class ShadowTimeout extends Error {
+  constructor() {
+    // One word, so it's no sentence the engine-texts scan would list as ours.
+    super("timeout");
+    this.name = "timeout";
+  }
 }
 
 /**
@@ -263,7 +311,8 @@ export function strictUntraced(text: string, orgWords: readonly OrgSpan[], set: 
  * (DECISIONS.md 768). Only marked texts are read: one with no marks is never
  * served as traced (withheld whole, or the run held) whatever it holds.
  */
-export function strictShadow(digest: RunDigest, report: BuiltReport, set: FigureSet, named: NamedValues = {}): StrictShadow {
+export function strictShadow(digest: RunDigest, report: BuiltReport, set: FigureSet, named: NamedValues = {}, budgetMs = SHADOW_BUDGET_MS, now: () => number = () => performance.now()): StrictShadow {
+  const until = now() + budgetMs;
   const strict = strictDataset(report, set, named);
   const scopes = new Map<string, FigureSet>();
   const scoped = (sources: string[] | null): FigureSet => {
@@ -275,6 +324,8 @@ export function strictShadow(digest: RunDigest, report: BuiltReport, set: Figure
   };
   const shadow: StrictShadow = { version: 1, checked: 0, untraced: 0, byKind: {}, figures: [] };
   for (const t of digestTextsAt(digest)) {
+    // Checked in the loop and nowhere else: nothing of the shadow outlives its call, so nothing can fire after a release.
+    if (now() > until) throw new ShadowTimeout();
     const marks = marksOf(digest, t);
     if (!marks || t.text === "") continue;
     const kind = strictKindOf(t.path);
@@ -285,7 +336,7 @@ export function strictShadow(digest: RunDigest, report: BuiltReport, set: Figure
     shadow.checked += out.checked;
     shadow.untraced += out.unmatched.length;
     const ruleId = ownerOf(digest, report, t);
-    for (const raw of out.unmatched) shadow.figures.push({ ruleId, kind, figure: written(raw) });
+    for (const figure of out.unmatched) shadow.figures.push({ ruleId, kind, figure });
   }
   return shadow;
 }

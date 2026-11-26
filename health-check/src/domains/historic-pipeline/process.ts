@@ -32,6 +32,8 @@ export const BACK_SEGMENT_LIMIT = 30;
 export const DEAD_END_SHARE = 33;
 /** Longer in a stage than this share of won deals took there is a long wait, as for open deals stuck in a stage. */
 export const WAIT_PERCENTILE = 0.75;
+/** The same line as a percentage, the value "three quarters" is named with (DECISIONS.md 768). */
+const WAIT_PCT = WAIT_PERCENTILE * 100;
 const TOP_PATHS = 5;
 
 const DEF = {
@@ -310,7 +312,7 @@ const deadEndStage: Rule = {
     return {
       outcome: "issue",
       title: said`Lost deals wait in ${org(stage)} before they're closed`,
-      summary: named(said`${dying.length} of ${lost.length} lost and no decision deals (${share}%) were last open in ${org(stage)}, and spent a median of ${wait} days there. Three quarters of won deals left ${org(stage)} within ${line} days. ${result.hits} of these lost deals (${result.rate}%) waited longer than that.${worst(result)}`, { lastOpen: dying.length, lost: lost.length, sharePct: share, waitDays: wait, wonWithinPct: 75, lineDays: line, waited: result.hits, waitedPct: result.rate }),
+      summary: named(said`${dying.length} of ${lost.length} lost and no decision deals (${share}%) were last open in ${org(stage)}, and spent a median of ${wait} days there. Three quarters of won deals left ${org(stage)} within ${line} days. ${result.hits} of these lost deals (${result.rate}%) waited longer than that.${worst(result)}`, { lastOpen: dying.length, lost: lost.length, sharePct: share, waitDays: wait, wonWithinPct: WAIT_PCT, lineDays: line, waited: result.hits, waitedPct: result.rate }),
       recommendation: said`Set a time limit for ${org(stage)} from your won deals: past it, a deal is reviewed and either moved on with a dated next step or closed, so lost deals stop sitting in the pipeline.`,
       recommendationType: "change",
       severity: "medium",

@@ -47,6 +47,9 @@ async function runs(): Promise<Record<string, StrictShadow>> {
     readOnly: { calibration: auto, answers: [], reviewMode: "automatic", transport: new Simulator({ readOnly: true }) },
     professional: { calibration: auto, answers: [], reviewMode: "automatic", transport: new Simulator({ organizationType: PE }) },
     gatedPulse: { calibration: auto, answers: [], product: "pulse", transport: new Simulator() },
+    // An unscored area says why from its own checks (HC_AREA_REASONS, DECISIONS.md 769): its reason's figures are held too.
+    areaReasons: { calibration: auto, answers: [], reviewMode: "automatic", transport: new Simulator({ readOnly: true }), areaReasons: true },
+    areaReasonsConsultant: { areaReasons: true },
   };
   for (const [name, options] of Object.entries(synthetic)) out[name] = await shadowOf((await runFromRecording(options)).dir);
   const first = await runFromRecording();
@@ -100,6 +103,12 @@ describe("the strict check's untraced figures can only fall (DECISIONS.md 768)",
   test("no rule's untraced count is higher than the snapshot holds, and none is new", () => {
     const risen = now.filter((r) => (heldAt.get(`${r.ruleId}\u0000${r.kind}`) ?? 0) < r.count).map((r) => `${r.ruleId} ${r.kind}: ${r.count}, held at ${heldAt.get(`${r.ruleId}\u0000${r.kind}`) ?? "none"}`);
     assert.deepEqual(risen, [], "Name the value each new figure writes (named() beside its sentence, or a fact) rather than raising the snapshot.");
+  });
+
+  test("and none is lower: the snapshot is exact, so no slack builds up", () => {
+    const nowAt = new Map(now.map((r) => [`${r.ruleId}\u0000${r.kind}`, r.count]));
+    const fallen = held.filter((r) => (nowAt.get(`${r.ruleId}\u0000${r.kind}`) ?? 0) < r.count).map((r) => `${r.ruleId} ${r.kind}: ${nowAt.get(`${r.ruleId}\u0000${r.kind}`) ?? 0}, held at ${r.count}`);
+    assert.deepEqual(fallen, [], "These fell: rewrite the snapshot with STRICT_LINT_WRITE=1 node --test src/digest/__tests__/strict-lint.test.ts, and say why in decision 768.");
   });
 
   test("the snapshot names rules, kinds and counts only: no org word, no figure", () => {

@@ -26,6 +26,8 @@ import { moneySaid } from "../../engine/said-forms.ts";
 const DOMAIN = "current_pipeline";
 const MIN_SEGMENT = 10;
 const STUCK_PERCENTILE = 0.75;
+/** The same line as a percentage, the value "three quarters" is named with (DECISIONS.md 768). */
+const STUCK_PCT = STUCK_PERCENTILE * 100;
 const QUIET_DAYS = 30;
 const REPEAT_PUSHES = 2;
 const NEXT_STEP_LIMIT = 30;
@@ -196,7 +198,7 @@ const stuckInStage = shareRule({
     };
   },
   issueTitle: said`Deals are sitting in stages for longer than your wins do`,
-  sentence: (hits, n, rate) => named(said`Open deals that have been in their stage longer than three quarters of your won deals took: ${hits} of ${n} (${rate}%).`, { wonWithinPct: STUCK_PERCENTILE * 100 }),
+  sentence: (hits, n, rate) => named(said`Open deals that have been in their stage longer than three quarters of your won deals took: ${hits} of ${n} (${rate}%).`, { wonWithinPct: STUCK_PCT }),
   recommendation: said`Go through these in pipeline reviews, and either move each deal on with a dated next step or close it.`,
   owner: "Head of sales",
   sized: true,
@@ -314,7 +316,7 @@ function concentrationRule(options: { id: string; title: string; limit: number; 
         severity: "medium",
         confidence: "high",
         evidence,
-        value: { kind: "revenue", amount: Math.round(amount), unit: ctx.calibration.currency, period: "open pipeline today", assumptions: [said`The Amount on open deals for the largest ${options.subject}: exposure, not expected loss`, said`${options.limit}% is our working limit, not a Salesforce figure`] },
+        value: { kind: "revenue", amount: Math.round(amount), unit: ctx.calibration.currency, period: "open pipeline today", assumptions: [said`The Amount on open deals for the largest ${options.subject}: exposure, not expected loss`, named(said`${options.limit}% is our working limit, not a Salesforce figure`, { limit: [options.limit, "percent"] })] },
         effort: { size: "M" },
         owner: "Head of sales",
         segmentsChecked: segments,
@@ -447,7 +449,7 @@ function currentMetrics(ctx: Ctx): Metric[] {
   const loaded = openDeals(ctx);
   const definitions = {
     count: { id: "current.open_deals", domain: DOMAIN, label: "Open deals", unit: "count" as const, definition: "Deals in a stage the calibration calls open, today." },
-    value: { id: "current.open_pipeline", domain: DOMAIN, label: "Open pipeline", unit: "currency" as const, definition: named("Total Amount of open deals today. A deal with no amount counts as zero.", { countedAs: 0 }) },
+    value: { id: "current.open_pipeline", domain: DOMAIN, label: "Open pipeline", unit: "currency" as const, definition: "Total Amount of open deals today. A deal with no amount counts as zero." },
     age: { id: "current.median_days_in_stage", domain: DOMAIN, label: "Days in current stage", unit: "days" as const, definition: "Median days open deals have been in their current stage." },
   };
   const shared = { exclusions: [] as string[], assumptions: [zoneNote(ctx)] };

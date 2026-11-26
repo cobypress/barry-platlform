@@ -452,10 +452,11 @@ const staleLeads: Rule = {
       return { outcome: "pass", summary: said`Open leads with no activity since ${org(health.staleBefore)}: ${stale.data} of ${open.data} (${rate}%), with no source above 50%.`, evidence, segmentsChecked: segments, facts: { stale: stale.data, open: open.data, rate } };
     }
     const worst = hotspots[0];
+    const worstPct = worst ? pct(worst.stale, worst.open) : null;
     return {
       outcome: "issue",
       title: said`Leads are going unworked`,
-      summary: named(said`Open leads older than ${STALE_ACTIVITY_DAYS} days with no logged activity: ${stale.data} of ${open.data} (${rate}%).${worst ? said` The worst source is ${org(worst.source)}, at ${pct(worst.stale, worst.open)}%.` : ""}`, { staleActivityDays: STALE_ACTIVITY_DAYS, worstPct: worst ? pct(worst.stale, worst.open) : null }),
+      summary: named(said`Open leads older than ${STALE_ACTIVITY_DAYS} days with no logged activity: ${stale.data} of ${open.data} (${rate}%).${worst ? said` The worst source is ${org(worst.source)}, at ${worstPct!}%.` : ""}`, { staleActivityDays: STALE_ACTIVITY_DAYS, worstPct }),
       recommendation: said`Agree a follow-up rule by source, and archive what's too old to work.`,
       recommendationType: "change",
       severity: "medium",
@@ -685,7 +686,7 @@ const recordTypeUse: Rule = {
     return {
       outcome: "issue",
       title,
-      summary: named(said`We could judge ${plural(judged.length, "record type")} of your own, on objects with at least ${RECORD_TYPE_MIN_RECENT} records made in the last 12 months. ${joinSaid(sentences, " ")} An active record type is still offered to anyone whose profile has it, and its page layouts and picklist values still have to be kept up.`, { minRecent: RECORD_TYPE_MIN_RECENT, recentMonths: 12 }),
+      summary: named(said`We could judge ${plural(judged.length, "record type")} of your own, on objects with at least ${RECORD_TYPE_MIN_RECENT} records made in the last 12 months. ${joinSaid(sentences, " ")} An active record type is still offered to anyone whose profile has it, and its page layouts and picklist values still have to be kept up.`, { minRecent: RECORD_TYPE_MIN_RECENT }),
       recommendation: said`Deactivate ${plural(flagged.length, "record type")} once you've checked that no profile defaults to ${one ? "it" : "them"} and no flow, Apex or integration names ${one ? "it" : "them"}.`,
       blockedRecommendation: said`Review ${plural(flagged.length, "record type")} with the people who own ${owners}; we aren't recommending deactivating ${one ? "it" : "them"}, because we can't see which profiles default to ${one ? "it" : "them"} or which flows, Apex and integrations name ${one ? "it" : "them"}.`,
       recommendationType: "deactivate",
