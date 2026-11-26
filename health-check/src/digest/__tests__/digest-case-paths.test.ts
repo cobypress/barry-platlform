@@ -112,6 +112,25 @@ describe("a consultant-led run with Service Cloud and the case status paths on",
     }
   });
 
+  test("an origin shaped like an email or an id over the segment line, on an automatic run with Service Cloud: raised, released as with the switch off, the name never written", async () => {
+    const calibration = await automaticSyntheticCalibration();
+    for (const name of ["help.desk@example.com", "500000000000009AAA"]) {
+      const odd = Array.from({ length: 26 }, (_, i): CaseSpec => ({ made: 50 + i, origin: name, priority: ["High", "Medium", "Low"][i % 3]!, steps: i < 14 ? [["Duplicate", 0.2]] : [["Working", 0.5], ["Closed", 2]] }));
+      const records = caseOrg(caseRecords([...worked(), ...odd], STATUSES));
+      const automatic = async (casePaths: boolean) => {
+        const run = await runHealthCheck({ provider: syntheticProvider, calibration, reviewMode: "automatic", modules: ALL_MODULES, outDir: tempDir(), now: new Date(AS_OF), transport: new Simulator({ records }), connectedUser: CONNECTED_USER, log: () => {}, ...(casePaths ? { casePaths } : {}) });
+        const { input, pseudonyms } = loadRun(run.dir);
+        return checkedDigest({ input, pseudonyms, inventory: null, madeAt: MADE_AT });
+      };
+      const [on, off] = [await automatic(true), await automatic(false)];
+      assert.deepEqual(counts(on), counts(off), name);
+      const straight = on.digest!.findings.find((f) => f.ruleId === "svc.closed-straight")!;
+      assert.equal(straight.status, "issue", name);
+      assert.match(straight.summary ?? "", /one origin we can't name here is at 53\.8% \(14 of 26\)/, name);
+      assert.ok(!JSON.stringify(on.digest!.findings.filter((f) => SERVED.includes(f.ruleId))).includes(name), `${name} is never written by the lane`);
+    }
+  });
+
   test("with the switch off, the run knows none of it", async () => {
     const { dir } = await consultant(new Simulator({ records: caseOrg(caseRecords(richCases())) }), false);
     const files = ["rules.json", "findings.json", "metrics.json"].map((f) => readFileSync(join(dir, f), "utf8")).join("");

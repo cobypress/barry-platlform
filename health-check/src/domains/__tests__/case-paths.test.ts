@@ -9,7 +9,7 @@ import { COUNTED_WHEN_MEASURED, INSIGHT_METRICS, INSIGHT_RULES, scoreDomains } f
 import { ALL_MODULES, SERVICE_CLOUD_MODULES } from "../index.ts";
 import { casePathsModule, withCasePaths } from "../service/index.ts";
 import { serviceOperationsModule } from "../service/operations.ts";
-import { LEAST_LAG_DAYS, lineSaid, snapshotAt, steadyMarginOf, steadyShare, STUCK_BAR, survival, type SnapCase } from "../service/paths.ts";
+import { LEAST_LAG_DAYS, lengthSaid, lineSaid, snapshotAt, steadyMarginOf, steadyShare, STUCK_BAR, survival, type SnapCase } from "../service/paths.ts";
 import { zBar } from "../historic-pipeline/paths/insights.ts";
 import type { AnalysisOutput } from "../../engine/evaluate.ts";
 import type { Finding, Metric } from "../../schemas/index.ts";
@@ -418,7 +418,7 @@ describe("cases closed straight (C3)", () => {
   test("a segment is never named where every case shares it", () => {
     const specs: CaseSpec[] = [...quick(200), ...Array.from({ length: 100 }, (_, i): CaseSpec => ({ made: 50 + i, steps: [["Duplicate", 0.2]] }))].map((x) => ({ ...x, origin: "Email", priority: "High" }));
     const f = one(on(specs), "svc.closed-straight");
-    assert.doesNotMatch(textOf(f), /by (origin|priority)/);
+    assert.doesNotMatch(textOf(f), /by (origin|priority|starting status)|Highest/);
   });
 
   test("closed cases with no recorded status change aren't counted, and the sentence says how many", () => {
@@ -429,6 +429,109 @@ describe("cases closed straight (C3)", () => {
   test("a case not yet closed isn't counted as closed straight, and the sentence says how many", () => {
     const specs: CaseSpec[] = [...quick(300), { made: 80, steps: [] }];
     assert.match(textOf(one(on(specs), "svc.closed-straight")), / 1 case has never been closed, and isn't counted as closed straight\./);
+  });
+});
+
+describe("before and after a first close, by place, never by time (review round 2)", () => {
+  const straightOf = (extra: CaseSpec[]) => one(on([...quick(240), ...extra]), "svc.closed-straight").facts!;
+  const thirty = (spec: Omit<CaseSpec, "made">): CaseSpec[] => Array.from({ length: 30 }, (_, i) => ({ made: 60 + i * 5, ...spec }));
+
+  test("closed in the second it was made: closed straight from the status it started in", () => {
+    const base = straightOf([]);
+    assert.equal(straightOf(thirty({ steps: [["Closed", 0]] })).hits, base.hits! + 30);
+  });
+
+  test("through Working and Waiting to Closed, all in one second: not closed straight", () => {
+    const base = straightOf([]);
+    assert.equal(straightOf(thirty({ steps: [["Working", 1], ["Waiting", 1], ["Closed", 1]] })).hits, base.hits);
+  });
+
+  test("a case made in a closed status and then worked is not closed straight: nothing open came before its first close", () => {
+    const base = straightOf([]);
+    assert.equal(straightOf(thirty({ start: "Closed", steps: [["Working", 1], ["Closed", 2]] })).hits, base.hits);
+  });
+
+  test("closed and reopened within its first second: reopened", () => {
+    const f = one(on([...quick(240), ...thirty({ steps: [["Closed", 0], ["Working", 0], ["Closed", 5]] })]), "svc.reopened-time");
+    assert.equal(f.facts!.reopened, 30, textOf(f));
+  });
+
+  test("a first change with no old value counts as the case being made only within 5 seconds of it; further off, the case is left out and said", () => {
+    const withRow = (seconds: number) => {
+      const x = withCases(extracts, caseRecords(quick(300)));
+      const cases = x.get(serviceCasesExtractor.id) as { closedCases: { data: Array<{ Id: string; CreatedDate: string }> } };
+      const h = (x.get(serviceActivityExtractor.id) as { statusChanges: { data: unknown[] } }).statusChanges.data;
+      for (const c of cases.closedCases.data.slice(0, 20)) h.push({ CaseId: c.Id, OldValue: null, NewValue: "New", CreatedDate: new Date(Date.parse(c.CreatedDate.replace("+0000", "Z")) + seconds * 1000).toISOString().replace("Z", "+0000") });
+      return all(analyseExtracts(x, { modules: SERVICE_CLOUD_MODULES, casePaths: true })).find((y) => y.ruleId === "svc.closed-straight")!;
+    };
+    assert.equal(withRow(5).facts!.n, one(on(quick(300)), "svc.closed-straight").facts!.n);
+    const far = withRow(3600);
+    assert.ok(far.evidence[1]!.exclusions.some((e) => /^\d+ cases? whose first status change has no old value and doesn't come when the case was made, so we can't tell where (it|they) started$/.test(e)), far.evidence[1]!.exclusions.join(" | "));
+  });
+
+  test("equal time open since a first close, still open, could go either way", () => {
+    // 19 longer for certain, 19 not, and 2 still open whose time since their first close equals the time before it.
+    const specs: CaseSpec[] = [
+      ...quick(300),
+      ...Array.from({ length: 19 }, (_, i): CaseSpec => ({ made: 80 + i, steps: [["Working", 0.5], ["Closed", 4], ["Working", 5], ["Closed", 10]] })),
+      ...Array.from({ length: 19 }, (_, i): CaseSpec => ({ made: 120 + i, steps: [["Working", 0.5], ["Closed", 4], ["Working", 5], ["Closed", 6]] })),
+      { made: 40, steps: [["Working", 0.5], ["Closed", 20], ["Working", 21]] },
+      { made: 42, steps: [["Working", 0.5], ["Closed", 21], ["Working", 22]] },
+    ];
+    const f = one(on(specs), "svc.reopened-time");
+    assert.equal(f.status, "not_measurable", textOf(f));
+    assert.match(f.notMeasurableReason!, /and 2 still open could take that past half/);
+  });
+
+  test("exactly one in twenty still open is not too many", () => {
+    // 285 closed and 15 open among the 300 made in the period.
+    const specs: CaseSpec[] = [...quickClosed(285), ANCHOR, ...Array.from({ length: 15 }, (_, i): CaseSpec => ({ made: 60 + i, steps: [["Working", 0.5]] }))];
+    const f = one(on(specs), "svc.closed-straight");
+    assert.notEqual(f.status, "not_measurable", textOf(f));
+    assert.equal(f.facts!.n, 300);
+  });
+
+  test("every length the lane says is in hours under a day, and a day from 23.5 hours up", () => {
+    assert.equal(lengthSaid(15 / 1440), "under an hour");
+    assert.equal(lengthSaid(1 / 24), "1 hour");
+    assert.equal(lengthSaid(5 / 24), "5 hours");
+    assert.equal(lengthSaid(23.6 / 24), "1 calendar day");
+    assert.equal(lengthSaid(2.25), "2.3 calendar days");
+    const f = one(on([...quick(240), { made: 90, steps: [["Working", 0.5], ["Closed", 4], ["Working", 4.5], ["Closed", 4.51]] }, ...thirty({ steps: [["Working", 0.5], ["Closed", 4], ["Working", 5], ["Closed", 10]] })]), "svc.reopened-time");
+    assert.doesNotMatch(textOf(f), /0 calendar days/);
+  });
+});
+
+describe("closed straight, a segment we can't name (review round 2)", () => {
+  const EMAIL = "help.desk@example.com";
+  const ID = "500000000000009AAA";
+  const segment = (origin: string, n: number, hits: number, made = 50): CaseSpec[] =>
+    Array.from({ length: n }, (_, i): CaseSpec => ({ made: made + i, origin, priority: ["High", "Medium", "Low"][i % 3]!, steps: i < hits ? [["Duplicate", 0.2]] : [["Working", 0.5], ["Closed", 2]] }));
+  for (const name of [EMAIL, ID]) {
+    test(`over the segment line only in an origin shaped like ${name === EMAIL ? "an email" : "an id"}: raised, the name left out`, () => {
+      const f = one(on([...quick(270), ...segment(name, 26, 14)]), "svc.closed-straight");
+      assert.equal(f.status, "issue", textOf(f));
+      assert.equal(f.title, "More than 50% of cases in one origin are closed straight from the status they started in");
+      assert.match(textOf(f), /but one origin we can't name here is at 53\.8% \(14 of 26\), over our line of 50% for any one\./);
+      assert.ok(!JSON.stringify(f).includes(name));
+    });
+    test(`over overall, the highest segment shaped like ${name === EMAIL ? "an email" : "an id"}: never "Highest by" a lower one`, () => {
+      const f = one(on([...quick(200), ...segment("Web", 100, 60, 50), ...segment(name, 40, 30, 160)]), "svc.closed-straight");
+      assert.equal(f.status, "issue", textOf(f));
+      assert.match(textOf(f), /The highest, at 75%, is one origin we can't name here\./);
+      assert.doesNotMatch(textOf(f), /Highest by origin/);
+      assert.ok(!JSON.stringify(f).includes(name));
+    });
+  }
+
+  test("the pass names only the dimensions compared: no origin when Origin wasn't read", () => {
+    const x = withCases(extracts, caseRecords(quick(300)));
+    const cases = x.get(serviceCasesExtractor.id) as { open: { missingFields?: string[] }; closedCases: { missingFields?: string[] } };
+    cases.open.missingFields = ["Case.Origin"];
+    cases.closedCases.missingFields = ["Case.Origin"];
+    const f = all(analyseExtracts(x, { modules: SERVICE_CLOUD_MODULES, casePaths: true })).find((y) => y.ruleId === "svc.closed-straight")!;
+    assert.match(textOf(f), /in any one starting status or priority, and none is crossed\.$/);
+    assert.match(textOf(one(on(quick(300)), "svc.closed-straight")), /in any one starting status, priority or origin, and none is crossed\.$/);
   });
 });
 

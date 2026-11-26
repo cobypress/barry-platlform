@@ -130,6 +130,8 @@ export type PathCase = {
   /** The open statuses before its first close, in order, a run once. */
   beforeClose: string[];
   firstCloseAt: number | null;
+  /** Where the first close is in `visits`, or -1: before and after are told by place, never by time (a status can last no time at all). */
+  firstCloseIndex: number;
   reopened: boolean;
   priority: string;
   origin: string;
@@ -207,13 +209,22 @@ export function ordered(changes: StatusChangeRow[], table: (v: string | null) =>
 }
 
 /**
+ * A first change with no old value is read as the case being made only within this many seconds of the case's
+ * CreatedDate: a row Salesforce writes when it saves a new case carries the save's own time, and a few seconds allow
+ * for a save that takes longer than one second. Further off, a change with no old value says nothing we can place.
+ */
+export const CREATION_SECONDS = 5;
+
+/**
  * A case's visits from its changes, starting in the first change's old value (or
  * its current status with none), or null when a value has no meaning. A first
- * change with no old value is the case being made: its new value is the status
- * it was made in, and it is no move.
+ * change with no old value, within CREATION_SECONDS of the case being made, is
+ * the case being made: its new value is the status it was made in, and it is no
+ * move; further off, "stray", and the case is left out.
  */
-function visitsOf(madeAt: number, changes: StatusChangeRow[], current: Status | null, table: (v: string | null) => Status | null): Visit[] | null {
+function visitsOf(madeAt: number, changes: StatusChangeRow[], current: Status | null, table: (v: string | null) => Status | null): Visit[] | null | "stray" {
   const made = changes.length > 0 && valueOf(changes[0]!.OldValue) === null;
+  if (made && Math.abs(instant(changes[0]!.CreatedDate) - madeAt) > CREATION_SECONDS * 1000) return "stray";
   const moves = made ? changes.slice(1) : changes;
   const first = made ? table(changes[0]!.NewValue) : moves.length ? table(moves[0]!.OldValue) : current;
   if (!first) return null;
@@ -307,14 +318,15 @@ export function caseCohortOf(ctx: Ctx): CaseCohort {
   const to = dayPlus(range.to, -lagDays);
   if (to < start) return { status: "not_measurable", reason: named(said`Cases here can take ${lagDays} days to close, so none made since ${daySaid(start)} has had the time yet.`, { lagDays: [lagDays, "day"], start: [start, "date"] }), evidence };
 
-  const counts = { beforeRead: 0, beforeHistory: 0, recent: 0, noChange: 0, unordered: 0, unknown: 0, mismatch: 0 };
+  const counts = { beforeRead: 0, beforeHistory: 0, recent: 0, noChange: 0, unordered: 0, stray: 0, unknown: 0, mismatch: 0 };
   const cases: PathCase[] = [];
   const universe: SnapCase[] = [];
   for (const r of rows) {
     const raw = changes.get(r.id) ?? [];
     const own = ordered(raw, table);
     const current = r.open ? table(r.open.Status) : null;
-    const visits = own === null || (r.open && !current) ? null : visitsOf(r.made, own, current, table);
+    const read = own === null || (r.open && !current) ? null : visitsOf(r.made, own, current, table);
+    const visits = read === "stray" ? null : read;
     const lastOf = visits?.at(-1)?.status ?? null;
     // Where the case stands now must be where its changes end: a closed case in a closed status, an open one in its Status.
     const consistent = visits !== null && lastOf !== null && (r.closed ? lastOf.closed : !current!.closed && lastOf.key === current!.key);
@@ -340,6 +352,10 @@ export function caseCohortOf(ctx: Ctx): CaseCohort {
       counts.unordered++;
       continue;
     }
+    if (read === "stray") {
+      counts.stray++;
+      continue;
+    }
     if (!visits) {
       counts.unknown++;
       continue;
@@ -348,8 +364,11 @@ export function caseCohortOf(ctx: Ctx): CaseCohort {
       counts.mismatch++;
       continue;
     }
-    const firstClose = visits.find((v) => v.status.closed) ?? null;
-    const beforeClose = runsOf(visits.filter((v) => !v.status.closed && (firstClose === null || v.start < firstClose.start)).map((v) => v.status.key));
+    // Before and after the first close are told by place in the visits, never by time: a status passed through in the
+    // same second as the next has no length, and a time test would drop it (or keep one that came after).
+    const firstCloseIndex = visits.findIndex((v) => v.status.closed);
+    const firstClose = firstCloseIndex >= 0 ? visits[firstCloseIndex]! : null;
+    const beforeClose = runsOf((firstCloseIndex >= 0 ? visits.slice(0, firstCloseIndex) : visits).filter((v) => !v.status.closed).map((v) => v.status.key));
     cases.push({
       id: r.id,
       madeAt: r.made,
@@ -360,7 +379,8 @@ export function caseCohortOf(ctx: Ctx): CaseCohort {
       path: runsOf(visits.map((v) => v.status.key)),
       beforeClose,
       firstCloseAt: firstClose ? firstClose.start : null,
-      reopened: firstClose !== null && visits.some((v) => !v.status.closed && v.start > firstClose.start),
+      firstCloseIndex,
+      reopened: firstCloseIndex >= 0 && visits.slice(firstCloseIndex + 1).some((v) => !v.status.closed),
       priority: r.priority,
       origin: r.origin,
     });
@@ -375,6 +395,7 @@ export function caseCohortOf(ctx: Ctx): CaseCohort {
       : []),
     ...(both.size ? [named(said`${plural(both.size, "case")} read as both open and closed, as ${both.size === 1 ? said`it` : said`they`} changed while we read`, { both: both.size })] : []),
     ...(counts.noChange ? [named(said`${plural(counts.noChange, "closed case")} with no recorded status change, so we can't tell which statuses ${counts.noChange === 1 ? said`it` : said`they`} went through`, { noChange: counts.noChange })] : []),
+    ...(counts.stray ? [named(said`${plural(counts.stray, "case")} whose first status change has no old value and doesn't come when the case was made, so we can't tell where ${counts.stray === 1 ? said`it` : said`they`} started`, { stray: counts.stray })] : []),
     ...(counts.unordered ? [named(said`${plural(counts.unordered, "case")} with status changes in the same second that we couldn't put in one order`, { unordered: counts.unordered })] : []),
     ...(counts.unknown ? [named(said`${plural(counts.unknown, "case")} with a status we couldn't find in your case status settings, or with none`, { unknown: counts.unknown })] : []),
     ...(counts.mismatch ? [named(said`${plural(counts.mismatch, "case")} whose recorded status changes don't end where the case stands now`, { mismatch: counts.mismatch })] : []),
@@ -423,21 +444,26 @@ const daysOf = (ms: number): number => ms / DAY;
 
 /** A median of calendar days, with the average beside it where it says something (709), or nothing to add. */
 function daysSaid(values: number[]): Said {
-  if (values.length === 1) {
-    const only = round1(values[0]!);
-    return named(said`${only} ${only === 1 ? said`calendar day` : said`calendar days`}`, { only: [only, "day"] });
-  }
+  if (values.length === 1) return lengthSaid(values[0]!);
   const exact = median(values);
-  if (exact < 1) {
-    // Under a day, in hours, so a median is never "0 calendar days".
-    const hours = Math.round(exact * 24);
-    return hours === 0 ? said`a median of under an hour` : hours === 1 ? said`a median of 1 hour` : named(said`a median of ${hours} hours`, { hours: [hours, "hour"] });
-  }
   const mid = round1(exact);
   const mean = meanStat(values).mean;
-  const unit = mid === 1 ? said`calendar day` : said`calendar days`;
-  if (mean === undefined || values.length < MIN_AVERAGE_VALUES || mid <= 0 || !averageApart(mid, mean)) return named(said`a median of ${mid} ${unit}`, { mid: [mid, "day"] });
-  return named(said`a median of ${mid} ${unit} (an average of ${mean})`, { mid: [mid, "day"], mean: [mean, "day"] });
+  // In hours under a day, with no average beside (an average in days beside a median in hours would read as two units).
+  if (inHours(exact) || mean === undefined || values.length < MIN_AVERAGE_VALUES || mid <= 0 || !averageApart(mid, mean)) return said`a median of ${lengthSaid(exact)}`;
+  return named(said`a median of ${lengthSaid(exact)} (an average of ${mean})`, { mean: [mean, "day"] });
+}
+
+/** Under a day, once rounded to the hour: said in hours. 23.6 hours rounds to 24, which is a day. */
+const inHours = (days: number): boolean => Math.round(days * 24) < 24;
+
+/** A length of time as the lane prints it: hours under a day, never "0 calendar days"; calendar days from a day up. */
+export function lengthSaid(days: number): Said {
+  if (inHours(days)) {
+    const hours = Math.round(days * 24);
+    return hours === 0 ? said`under an hour` : hours === 1 ? said`1 hour` : named(said`${hours} hours`, { hours: [hours, "hour"] });
+  }
+  const d = round1(days);
+  return d === 1 ? said`1 calendar day` : named(said`${d} calendar days`, { d: [d, "day"] });
 }
 
 /** Rule 4: the segments checked, in dimensions with two or more values. */
@@ -461,10 +487,18 @@ const GUARDED = [/\[\[[a-z]+[:\]]/, /@/, /\b(?=[a-zA-Z0-9]*\d)[a-zA-Z0-9]{15}(?:
  */
 export const sayable = (ctx: Ctx, name: string): boolean => !GUARDED.some((re) => re.test(name)) && !holdsNameOrSecret(name, ctx.pseudonyms) && ctx.pseudonyms.scrub(name) === name;
 
-/** The hotspots worth naming: in a dimension with two or more values among these rows, and a name we can write. */
-function nameable<R>(ctx: Ctx, rows: R[], dims: Record<string, (r: R) => string>, hotspots: Hotspot[]): Hotspot[] {
+/** The hotspots that count: in a dimension with two or more values among these rows (one value is the total again). */
+function segmentsOver<R>(rows: R[], dims: Record<string, (r: R) => string>, hotspots: Hotspot[]): Hotspot[] {
   const many = new Set(Object.entries(dims).filter(([, keyOf]) => new Set(rows.map(keyOf)).size >= 2).map(([d]) => d));
-  return hotspots.filter((h) => many.has(h.dimension) && sayable(ctx, h.key));
+  return hotspots.filter((h) => many.has(h.dimension));
+}
+
+/** "a, b or c", of our own words. */
+function orList(parts: Said[]): Said {
+  if (parts.length <= 1) return parts[0] ?? said``;
+  let out = parts[0]!;
+  for (let i = 1; i < parts.length - 1; i++) out = said`${out}, ${parts[i]!}`;
+  return said`${out} or ${parts.at(-1)!}`;
 }
 
 // ─── C1: more open cases past their status's line today than usual ─────────
@@ -819,7 +853,7 @@ export const reopenedTime: Rule = {
     }
     // A reopened case whose close date is its first close, though a later close is recorded: the close date we read would
     // then not be the final close, and every time after a first close would read short. Direct evidence, so nothing is said.
-    const keptFirst = reopened.filter((x) => !x.open && Math.abs(x.closedAt! - x.firstCloseAt!) < 1000 && x.visits.some((v) => v.status.closed && v.start > x.firstCloseAt!)).length;
+    const keptFirst = reopened.filter((x) => !x.open && Math.abs(x.closedAt! - x.firstCloseAt!) < 1000 && x.visits.slice(x.firstCloseIndex + 1).some((v) => v.status.closed)).length;
     if (keptFirst > 0) {
       const which = keptFirst === 1 ? said`On 1 reopened case, the close date we read is its first close, though a later close is recorded` : named(said`On ${keptFirst} reopened cases, the close date we read is their first close, though a later close is recorded`, { keptFirst });
       return { outcome: "not_measurable", reason: said`${which}, so we can't tell from the close date how long these cases took after their first close.`, evidence: c.evidence };
@@ -900,24 +934,35 @@ export const closedStraight: Rule = {
     const noChangeSaid = noChange === 0 ? said`` : noChange === 1 ? said` 1 case closed with no recorded status change isn't counted.` : named(said` ${noChange} cases closed with no recorded status change aren't counted.`, { noChange });
     const facts = { hits, n, rate, open, noChange, limit: STRAIGHT_LIMIT, segmentLimit: STRAIGHT_SEGMENT_LIMIT };
     const over = rate > STRAIGHT_LIMIT;
-    // Only a segment worth naming: in a dimension with two or more values here, and a name we can write.
-    const hotspots = nameable(ctx, c.cases, dims, result.hotspots);
-    if (!over && hotspots.length === 0) {
-      return { outcome: "pass", summary: named(said`${lead}${openSaid}${noChangeSaid} Our lines are ${STRAIGHT_LIMIT}% overall and ${STRAIGHT_SEGMENT_LIMIT}% in any one starting status, priority or origin, and none is crossed.`, { limit: [STRAIGHT_LIMIT, "percent"], segmentLimit: [STRAIGHT_SEGMENT_LIMIT, "percent"] }), evidence: c.evidence, segmentsChecked: result.segmentsChecked, facts };
+    // The outcome is decided on every segment in a dimension with two or more values here; only the wording leaves out a
+    // name we can't write (an email's or an id's shape), and says so.
+    const counted = segmentsOver(c.cases, dims, result.hotspots);
+    const hotspots = counted.filter((h) => sayable(ctx, h.key));
+    // The dimensions compared, as the pass names them: only those this run read.
+    const compared = orList(Object.keys(dims).map((d) => said`${dimensionWords(d)}`));
+    if (!over && counted.length === 0) {
+      return { outcome: "pass", summary: named(said`${lead}${openSaid}${noChangeSaid} Our lines are ${STRAIGHT_LIMIT}% overall and ${STRAIGHT_SEGMENT_LIMIT}% in any one ${compared}, and none is crossed.`, { limit: [STRAIGHT_LIMIT, "percent"], segmentLimit: [STRAIGHT_SEGMENT_LIMIT, "percent"] }), evidence: c.evidence, segmentsChecked: result.segmentsChecked, facts };
     }
+    const top = counted[0];
+    const topNamed = top !== undefined && sayable(ctx, top.key);
     const worst = hotspots[0];
-    const hidden = !worst
+    const hidden = !top
       ? said``
       : !over
-        ? named(said` The total is within our line of ${STRAIGHT_LIMIT}%, but by ${dimensionWords(worst.dimension)}, ${org(worst.key)} is at ${worst.rate}% (${worst.hits} of ${worst.n}), over our line of ${STRAIGHT_SEGMENT_LIMIT}% for any one.`, { straightLimit: [STRAIGHT_LIMIT, "percent"], worstPct: [worst.rate, "percent"], worstHits: worst.hits, worstN: worst.n, segmentLimit: [STRAIGHT_SEGMENT_LIMIT, "percent"] })
-        : worst
-          ? named(said` That is over our line of ${STRAIGHT_LIMIT}%. Highest by ${dimensionWords(worst.dimension)}: ${org(worst.key)}, at ${worst.rate}%.`, { straightLimit: [STRAIGHT_LIMIT, "percent"], worstPct: [worst.rate, "percent"] })
-          : said``;
-    const overSaid = over && !worst ? named(said` That is over our line of ${STRAIGHT_LIMIT}%.`, { straightLimit: [STRAIGHT_LIMIT, "percent"] }) : said``;
-    // Titled by what is true: over the line overall, or in one segment.
+        ? topNamed
+          ? named(said` The total is within our line of ${STRAIGHT_LIMIT}%, but by ${dimensionWords(top.dimension)}, ${org(top.key)} is at ${top.rate}% (${top.hits} of ${top.n}), over our line of ${STRAIGHT_SEGMENT_LIMIT}% for any one.`, { straightLimit: [STRAIGHT_LIMIT, "percent"], worstPct: [top.rate, "percent"], worstHits: top.hits, worstN: top.n, segmentLimit: [STRAIGHT_SEGMENT_LIMIT, "percent"] })
+          : named(said` The total is within our line of ${STRAIGHT_LIMIT}%, but one ${dimensionWords(top.dimension)} we can't name here is at ${top.rate}% (${top.hits} of ${top.n}), over our line of ${STRAIGHT_SEGMENT_LIMIT}% for any one.`, { straightLimit: [STRAIGHT_LIMIT, "percent"], worstPct: [top.rate, "percent"], worstHits: top.hits, worstN: top.n, segmentLimit: [STRAIGHT_SEGMENT_LIMIT, "percent"] })
+        : topNamed
+          ? named(said` That is over our line of ${STRAIGHT_LIMIT}%. Highest by ${dimensionWords(top.dimension)}: ${org(top.key)}, at ${top.rate}%.`, { straightLimit: [STRAIGHT_LIMIT, "percent"], worstPct: [top.rate, "percent"] })
+          : named(said` That is over our line of ${STRAIGHT_LIMIT}%. The highest, at ${top.rate}%, is one ${dimensionWords(top.dimension)} we can't name here.`, { straightLimit: [STRAIGHT_LIMIT, "percent"], worstPct: [top.rate, "percent"] })
+      ;
+    const overSaid = over && !top ? named(said` That is over our line of ${STRAIGHT_LIMIT}%.`, { straightLimit: [STRAIGHT_LIMIT, "percent"] }) : said``;
+    // Titled by what is true: over the line overall, or in one segment, named where we can.
     const title = over
       ? named(said`More than ${STRAIGHT_LIMIT}% of cases are closed straight from the status they started in`, { straightLimit: [STRAIGHT_LIMIT, "percent"] })
-      : named(said`More than ${STRAIGHT_SEGMENT_LIMIT}% of cases with ${dimensionWords(worst!.dimension)} ${org(worst!.key)} are closed straight from the status they started in`, { segmentLimit: [STRAIGHT_SEGMENT_LIMIT, "percent"] });
+      : topNamed
+        ? named(said`More than ${STRAIGHT_SEGMENT_LIMIT}% of cases with ${dimensionWords(top!.dimension)} ${org(top!.key)} are closed straight from the status they started in`, { segmentLimit: [STRAIGHT_SEGMENT_LIMIT, "percent"] })
+        : named(said`More than ${STRAIGHT_SEGMENT_LIMIT}% of cases in one ${dimensionWords(top!.dimension)} are closed straight from the status they started in`, { segmentLimit: [STRAIGHT_SEGMENT_LIMIT, "percent"] });
     return {
       outcome: "issue",
       title,
