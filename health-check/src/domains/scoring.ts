@@ -54,9 +54,15 @@ export const INSIGHT_METRICS: ReadonlySet<string> = new Set(["historic.path_vari
  * never take away a score, or change the reason, an area has without it. Measured, each counts as any other check.
  */
 export const COUNTED_WHEN_MEASURED: ReadonlySet<string> = new Set(["lead.source-win-rate"]);
+/**
+ * The same for a rule from a version on (DECISIONS.md 777): cur.stuck-in-stage 3, behind HC_STUCK_EXPECTED, says it
+ * can't tell where version 2 measured, so switching it on must never take away an area's score. Version 2 counts as before.
+ */
+export const COUNTED_WHEN_MEASURED_FROM: Readonly<Record<string, number>> = { "cur.stuck-in-stage": 3 };
+const countedWhenMeasured = (f: Finding): boolean => COUNTED_WHEN_MEASURED.has(f.ruleId) || (Object.hasOwn(COUNTED_WHEN_MEASURED_FROM, f.ruleId) && f.ruleVersion >= COUNTED_WHEN_MEASURED_FROM[f.ruleId]!);
 /** The rules of COUNTED_WHEN_MEASURED among these findings with no result at all. */
 const idleAdditions = (findings: Finding[]): Set<string> => {
-  const idle = new Set([...COUNTED_WHEN_MEASURED].filter((id) => findings.some((f) => f.ruleId === id)));
+  const idle = new Set(findings.filter(countedWhenMeasured).map((f) => f.ruleId));
   for (const f of findings) if (f.status !== "not_measurable") idle.delete(f.ruleId);
   return idle;
 };

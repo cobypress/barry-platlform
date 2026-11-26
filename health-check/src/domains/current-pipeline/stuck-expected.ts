@@ -20,14 +20,17 @@
 // since the read's start are used, since an older entry is in the read only if
 // its deal was still open or closed inside it, which favours long stays.
 //
-// The tail. After the longest finished stay, S stays where it was (some stays
-// still running are longer), unless the history covers twice the longest finished
-// stay: then deals were followed long enough to have been seen leaving later, none
-// did, and those still there are past every stay the stage's times explain, so S is
-// taken as none beyond it. Otherwise a stage whose estimate still has more than
-// TAIL_LIMIT of stays running at its longest finished stay is not measurable: the
-// history doesn't yet cover how long deals stay there, and an estimate would be a
-// guess.
+// Where the estimate holds. S is known only as far as enough stays are still
+// being followed: past the last finished stay with at least MIN_AT_RISK stays at
+// risk (the horizon), it is unknown, and taken as no lower than it was there, so
+// nothing is expected to be stuck that the estimate can't see. A stage is
+// measurable only when, at the horizon, at most TAIL_LIMIT of stays are still
+// running: the stays are then followed well past the line and past where almost
+// all of them end, so the expectation needs almost nothing beyond what is known.
+// On a short history, or a stage whose stays outrun it, that fails and the stage
+// says it can't be compared, never a guess. (An earlier rule, which expected
+// nothing past the longest finished stay when the oldest entry was twice its age,
+// raised up to 46% of steady young orgs and is gone: the e45 re-review.)
 //
 // The expectation. Each entry at age a today is still in the stage with chance
 // S(a); so, given the deals that really entered, the stage would hold sum S(a) of
@@ -48,30 +51,34 @@ export type Stay = { days: number; done: boolean };
 
 /** A stage's estimate of how long stays last. */
 export type StageModel = {
-  /** Days: the percentile of stays, by the estimate. */
+  /** Days: about the percentile of stays, by the estimate. */
   line: number;
-  /** The longest finished stay, in days. */
-  longest: number;
-  /** The share of stays still running after the longest finished one (before any cut). */
-  plateau: number;
-  /** True when the history covers twice the longest finished stay, so nothing is expected past it. */
-  cut: boolean;
-  /** Distinct finished stays, ascending, with S just after each and Greenwood's sum up to it. */
+  /** Days: the last finished stay with at least MIN_AT_RISK stays at risk. Past it S is held where it was. */
+  horizon: number;
+  /** S at the horizon: the share of stays still running there. */
+  reach: number;
+  /** Distinct finished stays, ascending, up to the horizon, with S just after each and Greenwood's sum up to it. */
   times: number[];
   surv: number[];
   greenwood: number[];
   finished: number;
 };
 
-/** The most of a stage's stays the estimate may leave running at its longest finished stay, short of the cut. */
+/** The most of a stage's stays the estimate may leave running at its horizon. */
 export const TAIL_LIMIT = 0.05;
-/** The history must cover this many times the longest finished stay for nothing to be expected past it. */
-export const CUT_COVER = 2;
+/** The fewest stays still being followed for the estimate to be read at a time. */
+export const MIN_AT_RISK = 10;
+/** Shares are compared with this much slack, so 5% read from counts is never 5.000000000000001%. */
+const SLACK = 1e-9;
 
 export type ModelOutcome = StageModel | { why: "few" | "uncovered" };
 
-/** A stage's estimate from its stays, given how many days of history the read covers for it, at `percentile` (0 to 1). */
-export function stageModel(stays: readonly Stay[], coverDays: number, percentile: number, minFinished: number): ModelOutcome {
+/**
+ * A stage's estimate from its stays, at `percentile` (0 to 1). Ties: at the same days, finished stays leave before
+ * stays still running are counted out, as Kaplan-Meier's convention has it (a stay still running at t was at risk at t).
+ */
+export function stageModel(stays: readonly Stay[], percentile: number, minFinished: number, limits: { tail?: number; atRisk?: number } = {}): ModelOutcome {
+  const [tailLimit, minAtRisk] = [limits.tail ?? TAIL_LIMIT, limits.atRisk ?? MIN_AT_RISK];
   const finished = stays.filter((s) => s.done).length;
   if (finished < minFinished) return { why: "few" };
   const sorted = [...stays].sort((a, b) => a.days - b.days || Number(b.done) - Number(a.done));
@@ -81,7 +88,7 @@ export function stageModel(stays: readonly Stay[], coverDays: number, percentile
   let atRisk = sorted.length;
   let s = 1;
   let g = 0;
-  for (let i = 0; i < sorted.length; ) {
+  for (let i = 0; i < sorted.length && atRisk >= minAtRisk; ) {
     const t = sorted[i]!.days;
     let d = 0;
     let c = 0;
@@ -99,14 +106,11 @@ export function stageModel(stays: readonly Stay[], coverDays: number, percentile
     }
     atRisk -= d + c;
   }
-  const longest = times.at(-1)!;
-  const plateau = surv.at(-1)!;
-  const cut = coverDays >= CUT_COVER * longest;
-  if (!cut && plateau > TAIL_LIMIT) return { why: "uncovered" };
-  const at = surv.findIndex((x) => x <= 1 - percentile);
-  // With the cut, the stays still running past the longest finished one are past the line, which is that stay.
-  const line = at >= 0 ? times[at]! : longest;
-  return { line, longest, plateau, cut, times, surv, greenwood, finished };
+  if (!times.length) return { why: "uncovered" };
+  const reach = surv.at(-1)!;
+  if (reach > tailLimit + SLACK) return { why: "uncovered" };
+  const line = times[surv.findIndex((x) => x <= 1 - percentile + SLACK)]!;
+  return { line, horizon: times.at(-1)!, reach, times, surv, greenwood, finished };
 }
 
 /** Count of sorted values at or below x. */
@@ -123,7 +127,7 @@ function upTo(sorted: readonly number[], x: number): number {
 
 /** S(age), the share of stays longer than `age`, and Greenwood's sum at it. */
 export function survival(model: StageModel, age: number): { s: number; g: number } {
-  if (model.cut && age > model.longest) return { s: 0, g: 0 };
+  // Past the horizon the last value holds: an upper bound, so the expectation never reads low where S is unknown.
   const k = upTo(model.times, age);
   return k === 0 ? { s: 1, g: 0 } : { s: model.surv[k - 1]!, g: model.greenwood[k - 1]! };
 }
