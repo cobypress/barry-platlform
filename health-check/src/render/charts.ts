@@ -215,7 +215,9 @@ export function scorecardChart(rows: ScorecardRow[], options: ScorecardOptions =
     body.push(text(PAD, y + 15, clip(row.label, labelWidth - 12, 13), { size: 13 }));
     if (weightOf) body.push(text(PAD + labelWidth + weightColumn - 14, y + 15, String(weightOf(row.domain)), { size: 12, fill: colour.panelMuted, anchor: "end" }));
     if (row.score === null) {
-      body.push(text(left, y + 15, clip(row.note, trackWidth + 40, 12), { size: 12, fill: colour.panelMuted }));
+      // A whole sentence or nothing (DECISIONS.md 769): the first that fits by clip's own rule.
+      const note = row.wholeNotes ? (row.wholeNotes.find((n) => clip(n, trackWidth + 40, 12) === n) ?? "") : clip(row.note, trackWidth + 40, 12);
+      body.push(text(left, y + 15, note, { size: 12, fill: colour.panelMuted }));
     } else {
       const was = before?.get(row.domain) ?? null;
       body.push(bar(left, y + 2, (row.score / 100) * trackWidth, BAR, colour.chartreuse));

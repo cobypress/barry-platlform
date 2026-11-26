@@ -86,6 +86,8 @@ export type RunOptions = {
   stageNames?: boolean;
   /** HC_STAGE_NAMES_MODEL on, with stageNames (DECISIONS.md 766): a stage a model read from its name is used. Otherwise it is set aside. */
   stageNamesModel?: boolean;
+  /** HC_AREA_REASONS on (DECISIONS.md 769): an unscored area says why from its own checks' reasons. Off or absent, as before. */
+  areaReasons?: boolean;
   /** The run this one re-checks: its first health check, whose findings the report compares against. */
   baselineRunId?: string | null;
   /**
@@ -473,15 +475,18 @@ async function runHealthCheckWithin(options: RunOptions): Promise<RunResult> {
   // The company information in Setup is the name the customer goes by, unless one was given.
   run.customerRef ??= org.data?.[0]?.Name?.trim() || null;
   run.status = "analysing";
+  // Said at every analysis, so a resume after the switch changed says what this analysis did (DECISIONS.md 769).
+  if (options.areaReasons === true) run.areaReasons = true;
+  else delete run.areaReasons;
   await saveRun();
-  const output = analyseRun(dir, run, calibration, modules, extracts, options.answers ?? [], options.knownModules ?? ALL_MODULES, options.gated === true, options.stageNames === true, options.stageNamesModel === true);
+  const output = analyseRun(dir, run, calibration, modules, extracts, options.answers ?? [], options.knownModules ?? ALL_MODULES, options.gated === true, options.stageNames === true, options.stageNamesModel === true, options.areaReasons === true);
   // Each issue's records by name, for the action lists. Beside the pseudonym map, not in checkpoints/.
   writeJson(join(dir, ACTION_LISTS_FILE), buildActionLists(output.records, extracts, client.instanceUrl));
   run.status = output.manualSteps.some((s) => s.status === "pending") ? "awaiting_manual" : "in_review";
   run.finishedAt = new Date().toISOString();
   await saveRun();
   // Re-render so the notes show the final status and call count.
-  renderOutputs(dir, run, calibration, output);
+  renderOutputs(dir, run, calibration, output, options.areaReasons === true);
   return { run, dir, output };
 }
 
@@ -514,7 +519,7 @@ export function keepSkipped(run: Run, skipped: SkippedRead[], log: (message: str
   }
 }
 
-function analyseRun(dir: string, run: Run, calibration: Calibration, modules: DomainModule[], extracts: Map<string, unknown>, answers: ManualAnswer[], known: DomainModule[], gated = false, stageNames = false, stageNamesModel = false): AnalysisOutput {
+function analyseRun(dir: string, run: Run, calibration: Calibration, modules: DomainModule[], extracts: Map<string, unknown>, answers: ManualAnswer[], known: DomainModule[], gated = false, stageNames = false, stageNamesModel = false, areaReasons = false): AnalysisOutput {
   const pseudonyms = loadPseudonyms(dir);
   const users = extracts.get(usersExtractor.id) as { status: string; data?: UserRow[] } | undefined;
   const directory = new Map((users?.data ?? []).map((u) => [u.Id, { name: u.Name, aliases: [u.Username, u.Email] }]));
@@ -577,18 +582,18 @@ function analyseRun(dir: string, run: Run, calibration: Calibration, modules: Do
   const meaningsPath = join(dir, STAGE_MEANINGS_FILE);
   if (Object.keys(meanings).length > 0) writeJson(meaningsPath, meanings);
   else rmSync(meaningsPath, { force: true });
-  renderOutputs(dir, run, calibration, output);
+  renderOutputs(dir, run, calibration, output, areaReasons);
   return output;
 }
 
-function renderOutputs(dir: string, run: Run, calibration: Calibration, output: AnalysisOutput): void {
+function renderOutputs(dir: string, run: Run, calibration: Calibration, output: AnalysisOutput, areaReasons = false): void {
   // The path insights too, last (DECISIONS.md 703): the run keeps every finding; the documents choose theirs.
   writeJson(join(dir, "findings.json"), allFindings(output));
   writeJson(join(dir, "metrics.json"), allMetrics(output));
   writeJson(join(dir, "manual-steps.json"), output.manualSteps);
   // The values the findings' and metrics' sentences were named with, for the strict check alone (DECISIONS.md 768): run folder only.
   writeJson(join(dir, NAMED_VALUES_FILE), output.named ?? {});
-  const scores = scoreDomains(run.modules, output.findings, run.ruleSetVersion);
+  const scores = scoreDomains(run.modules, output.findings, run.ruleSetVersion, areaReasons ? { areaReasons } : {});
   writeJson(join(dir, "scores.json"), scores);
   const factsPath = join(dir, FACTS_FILE);
   const facts = existsSync(factsPath) ? summariseFacts(readJson<Facts>(factsPath)) : null;
