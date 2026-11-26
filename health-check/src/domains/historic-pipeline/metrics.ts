@@ -268,7 +268,7 @@ function salesCycle(ctx: Ctx, data: Ready): Metric[] {
     const days = (d: Deal): number => Math.max(0, rawDays(d));
     const all = deals.map(days);
     const fallback = deals.filter((d) => d.closedAtSource === "close_date").length;
-    const assumptions = [...definition.assumptions, ...(fallback ? [said`${fallback} deals have no closing history row, so CloseDate was used`] : [])];
+    const assumptions = [...definition.assumptions, ...(fallback ? [named(said`${fallback} deals have no closing history row, so CloseDate was used`, { fallback })] : [])];
     return measured(
       { ...definition, assumptions, exclusions },
       {

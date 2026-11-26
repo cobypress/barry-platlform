@@ -293,7 +293,7 @@ const unlinkedTasks: Rule = {
       outcome: "issue",
       title: said`Tasks are being logged against nothing`,
       // The dimension is one of our own two names; the rep's token or the task type is the org's.
-      summary: said`Tasks linked to no record: ${result.hits} of ${result.n} (${result.rate}%).${worst ? said` Worst by ${dimensionWords(worst.dimension)}: ${org(worst.key)}, at ${worst.rate}%.` : ""} This work won't show on any deal, contact or account.`,
+      summary: said`Tasks linked to no record: ${result.hits} of ${result.n} (${result.rate}%).${worst ? named(said` Worst by ${dimensionWords(worst.dimension)}: ${org(worst.key)}, at ${worst.rate}%.`, { worstPct: worst.rate }) : ""} This work won't show on any deal, contact or account.`,
       recommendation: said`Show these people how to log against the deal, and check any tool that's creating tasks automatically.`,
       recommendationType: "change",
       severity: "low",

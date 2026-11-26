@@ -144,7 +144,7 @@ const UNIT_NAME: ReadonlyArray<[RegExp, string]> = [[/Days$/, "day"], [/Hours$/,
 /**
  * A computed value of a finding or metric as a row of the set: a plain number,
  * and in the unit its name says (DECISIONS.md 768: `…Money` an amount in the
- * run's currency, `…Pct` or a rate, share or percent a percentage, `…Days`,
+ * run's currency, `…Pct` or a rate, share or percent a percentage, `…Points` points, `…Days`,
  * `…Hours`, `…Months`, `…Weeks`, `…Minutes`, `…Years` a duration), and in any
  * unit the set already holds that same value in under that source (as the
  * documents' set takes a fact's unit from how the engine wrote it: the value is
@@ -154,6 +154,7 @@ function typed(source: string, name: string, value: number, held: readonly Datas
   const out: DatasetFigure[] = [{ source, kind: "number", value }];
   if (PERCENT_NAME.test(name)) out.push({ source, kind: "percent", value });
   if (/Money$/.test(name)) out.push({ source, kind: "currency", value, ...(currency ? { currency } : {}) });
+  if (/Points$/.test(name)) out.push({ source, kind: "points", value });
   for (const [pattern, unit] of UNIT_NAME) if (pattern.test(name)) out.push({ source, kind: "duration", value, unit });
   out.push(...held.filter((r) => r.value === value && r.kind !== "number").map((r) => ({ ...r, source })));
   return out;
@@ -198,8 +199,14 @@ export function strictDataset(report: BuiltReport, set: FigureSet, named: NamedV
     const fixed = assembleMarked({ ...f, title: "", summary: "", recommendation: "", orgWords: undefined }, rule);
     return [{ source: `${f.id}${PROMPT}`, text: fixed.text, orgWords: fixed.spans }];
   });
-  const promptRows = orgFree(buildDataset({ findings: [], metrics: [], extraText: prompts, orgNames: findings.flatMap((f) => f.subjects.map((s) => s.label)) }));
-  const isPrompt = (r: { source: string }) => r.source.endsWith(PROMPT);
+  // And the hours' fixed words (what a unit is, the bulk reason, a fixed basis), the fix table's own, beside its numbers.
+  const hoursWords = findings.flatMap((f) => {
+    const rule = FIX_TABLE[f.ruleId]?.hours;
+    if (!rule || !f.effortHours) return [];
+    return [{ source: `${f.id}${HOURS}`, text: rule.kind === "fixed" ? rule.basis : [rule.one, rule.many, rule.bulk ?? ""].join("\n") }];
+  });
+  const promptRows = orgFree(buildDataset({ findings: [], metrics: [], extraText: [...prompts, ...hoursWords], orgNames: findings.flatMap((f) => f.subjects.map((s) => s.label)) }));
+  const isPrompt = (r: { source: string }) => r.source.endsWith(PROMPT) || r.source.endsWith(HOURS);
   const ours = orgFree(computed);
   return {
     figures: [...runWide(free.figures), ...mine(ours.figures), ...extra, ...promptRows.figures.filter(isPrompt)],

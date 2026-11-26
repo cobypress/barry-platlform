@@ -31,7 +31,7 @@ export function atOwnWinRate(ctx: Pick<RuleContext, "metrics" | "calibration" | 
     unit: ctx.calibration.currency,
     period: options.period,
     // Each made by said, so the value's assumptions are marked (DECISIONS.md 663).
-    assumptions: [options.basis, said`Weighted by your own win rate of ${rate.value}%, measured on ${rate.n} closed deals`, options.caveat],
+    assumptions: [options.basis, named(said`Weighted by your own win rate of ${rate.value}%, measured on ${rate.n} closed deals`, { winPct: rate.value, measuredOn: rate.n }), options.caveat],
   };
 }
 

@@ -1,4 +1,5 @@
 import { notSized, pct, plural, segmentRate, type Rule, type RuleContext, type RuleResult, type SegmentedRate } from "../../engine/rule.ts";
+import { named } from "../../engine/named.ts";
 import type { Calibration, Metric, MetricSegment } from "../../schemas/index.ts";
 import { loadPipeline, unorderedReason, unsplitLostReason, type Deal, type PipelineData } from "./cohort.ts";
 import { daysByStage, stageLeftFrom } from "./deep-dive.ts";
@@ -194,7 +195,7 @@ export function processMetrics(ctx: Ctx): Metric[] {
 function worst(result: SegmentedRate): Said {
   const worse = result.hotspots.filter((h) => h.rate > result.rate).slice(0, 3);
   // A segment's key is the org's: a record type, a team, a lead source, a person's token.
-  return worse.length ? said` Highest: ${joinSaid(worse.map((h) => said`${dimensionWords(h.dimension)} ${org(h.key)}, ${h.hits} of ${h.n} (${h.rate}%)`), "; ")}.` : said``;
+  return worse.length ? said` Highest: ${joinSaid(worse.map((h) => named(said`${dimensionWords(h.dimension)} ${org(h.key)}, ${h.hits} of ${h.n} (${h.rate}%)`, { hits: h.hits, of: h.n, ratePct: h.rate })), "; ")}.` : said``;
 }
 
 /** Said in the analysis, so the reason is marked (DECISIONS.md 663). */
@@ -309,7 +310,7 @@ const deadEndStage: Rule = {
     return {
       outcome: "issue",
       title: said`Lost deals wait in ${org(stage)} before they're closed`,
-      summary: said`${dying.length} of ${lost.length} lost and no decision deals (${share}%) were last open in ${org(stage)}, and spent a median of ${wait} days there. Three quarters of won deals left ${org(stage)} within ${line} days. ${result.hits} of these lost deals (${result.rate}%) waited longer than that.${worst(result)}`,
+      summary: named(said`${dying.length} of ${lost.length} lost and no decision deals (${share}%) were last open in ${org(stage)}, and spent a median of ${wait} days there. Three quarters of won deals left ${org(stage)} within ${line} days. ${result.hits} of these lost deals (${result.rate}%) waited longer than that.${worst(result)}`, { lastOpen: dying.length, lost: lost.length, sharePct: share, waitDays: wait, wonWithinPct: 75, lineDays: line, waited: result.hits, waitedPct: result.rate }),
       recommendation: said`Set a time limit for ${org(stage)} from your won deals: past it, a deal is reviewed and either moved on with a dated next step or closed, so lost deals stop sitting in the pipeline.`,
       recommendationType: "change",
       severity: "medium",

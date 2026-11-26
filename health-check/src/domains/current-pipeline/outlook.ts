@@ -62,7 +62,7 @@ export function openStageMetrics(ctx: Ctx, data: Ready, deals: Deal[], evidence:
   const definitions = {
     noAmount: { id: "current.open_no_amount", label: "Open deals with no amount", unit: "count" as const, definition: "Open deals today with no Amount, or zero. We never impute one." },
     pastClose: { id: "current.open_past_close", label: "Open deals past their close date", unit: "count" as const, definition: "Open deals today whose close date has passed." },
-    age: { id: "current.open_median_age", label: "Age of open deals", unit: "days" as const, definition: `Median days since open deals were created. A stage needs ${MIN_STAGE_DEALS} open deals for its own median.` },
+    age: { id: "current.open_median_age", label: "Age of open deals", unit: "days" as const, definition: named(`Median days since open deals were created. A stage needs ${MIN_STAGE_DEALS} open deals for its own median.`, { minStageDeals: MIN_STAGE_DEALS }) },
     weighted: {
       id: "current.weighted_pipeline",
       label: "Weighted open pipeline",

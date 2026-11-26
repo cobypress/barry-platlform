@@ -120,7 +120,7 @@ const adjustmentsRule: Rule = {
     const adjusted = rows.filter((r) => r.HasAdjustment && r.ForecastAmount !== r.AmountWithoutAdjustments);
     const segments = [{ dimension: "forecast owner", segments: new Set(rows.map((r) => r.OwnerId)).size }];
     const facts = { share, adjustedOwners: new Set(adjusted.map((r) => r.OwnerId)).size, owners: new Set(rows.map((r) => r.OwnerId)).size };
-    if (share <= ADJUSTMENT_LIMIT) return { outcome: "pass", summary: said`Hand adjustments move the Commit forecast by ${share}%, at or under our working limit of ${ADJUSTMENT_LIMIT}%.`, evidence, segmentsChecked: segments, facts };
+    if (share <= ADJUSTMENT_LIMIT) return { outcome: "pass", summary: named(said`Hand adjustments move the Commit forecast by ${share}%, at or under our working limit of ${ADJUSTMENT_LIMIT}%.`, { limitPct: ADJUSTMENT_LIMIT }), evidence, segmentsChecked: segments, facts };
     return {
       outcome: "issue",
       title: said`Much of the Commit forecast comes from hand adjustments`,

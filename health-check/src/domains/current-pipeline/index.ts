@@ -303,7 +303,7 @@ function concentrationRule(options: { id: string; title: string; limit: number; 
       const [top, amount] = [...byKey].sort(([ka, a], [kb, b]) => b - a || ka.localeCompare(kb))[0]!;
       const share = pct(amount, total);
       const segments = [{ dimension: options.subject, segments: byKey.size }];
-      if (share <= options.limit) return { outcome: "pass", summary: said`The largest ${options.subject} holds ${share}% of open pipeline, at or under our working limit of ${options.limit}%.`, evidence, segmentsChecked: segments, facts: { share } };
+      if (share <= options.limit) return { outcome: "pass", summary: named(said`The largest ${options.subject} holds ${share}% of open pipeline, at or under our working limit of ${options.limit}%.`, { limitPct: options.limit }), evidence, segmentsChecked: segments, facts: { share } };
       return {
         outcome: "issue",
         // Made once when the rule is declared, so said again here, in the analysis, whose ledger vouches for it.

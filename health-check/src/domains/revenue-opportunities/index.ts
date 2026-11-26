@@ -114,7 +114,7 @@ const winBacks: Rule = {
     return {
       outcome: "issue",
       title: said`You have past deals worth going back to`,
-      summary: said`${plural(candidates.length, "deal")} lost or left undecided ${WIN_BACK_MIN_MONTHS} to ${WIN_BACK_MAX_MONTHS} months ago sit on accounts with nothing open and no win since. ${noDecision} of them never reached a decision.`,
+      summary: named(said`${plural(candidates.length, "deal")} lost or left undecided ${WIN_BACK_MIN_MONTHS} to ${WIN_BACK_MAX_MONTHS} months ago sit on accounts with nothing open and no win since. ${noDecision} of them never reached a decision.`, { fromMonths: WIN_BACK_MIN_MONTHS, toMonths: WIN_BACK_MAX_MONTHS }),
       recommendation: said`Start with the no decision deals, where nothing was lost to a competitor, and check why each one stopped.`,
       recommendationType: "investigate",
       severity: "medium",
@@ -156,11 +156,11 @@ const dormantAccounts: Rule = {
     const typical = wonAmounts.length >= ctx.calibration.minSample ? median(wonAmounts) : null;
     const value: Value =
       typical === null
-        ? notSized(said`${wonAmounts.length} won deals with amounts is below the calibrated minimum of ${ctx.calibration.minSample}, so there's no typical deal to size this from.`)
+        ? notSized(named(said`${wonAmounts.length} won deals with amounts is below the calibrated minimum of ${ctx.calibration.minSample}, so there's no typical deal to size this from.`, { wonWithAmounts: wonAmounts.length, minSample: ctx.calibration.minSample }))
         : atOwnWinRate(ctx, typical * dormant.length, {
             multiCurrency: data.multiCurrency,
             period: "one-off, if each account buys once more",
-            basis: said`${plural(dormant.length, "dormant account")} at your median won deal of ${moneySaid(Math.round(typical), ctx.calibration.currency)}`,
+            basis: named(said`${plural(dormant.length, "dormant account")} at your median won deal of ${moneySaid(Math.round(typical), ctx.calibration.currency)}`, { medianWonMoney: Math.round(typical) }),
             caveat: said`Assumes each account has one more deal in it, and buys as often as an average deal wins. Some will have closed or moved on, so treat this as a ceiling`,
           });
     const stranded = dormant.filter((a) => inactive.has(a.OwnerId)).length;

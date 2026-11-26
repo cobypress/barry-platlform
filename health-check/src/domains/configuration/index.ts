@@ -129,7 +129,7 @@ const unusedCustomFields: Rule = {
       const unused = scan.data.fields.filter((f) => pct(f.filled, f.total) < UNUSED_FILL_LIMIT && pct(f.recentFilled, f.recentTotal) < UNUSED_FILL_LIMIT);
       const segments = [{ dimension: "all records", segments: scan.data.fields.length }, { dimension: "records created in the last 12 months", segments: scan.data.fields.length }];
       if (unused.length === 0) {
-        results.push({ outcome: "pass", key: object, summary: said`Every scanned custom field on ${org(named)} is filled on at least ${UNUSED_FILL_LIMIT}% of records.`, evidence: [ctx.ev(scan.source, { count: scan.data.fields.length, exclusions })], segmentsChecked: segments });
+        results.push({ outcome: "pass", key: object, summary: valued(said`Every scanned custom field on ${org(named)} is filled on at least ${UNUSED_FILL_LIMIT}% of records.`, { fillPct: UNUSED_FILL_LIMIT }), evidence: [ctx.ev(scan.source, { count: scan.data.fields.length, exclusions })], segmentsChecked: segments });
         continue;
       }
       const fields = unused.flatMap((u) => summary?.fields.find((f) => f.name === u.field) ?? []);
@@ -255,7 +255,7 @@ const stageSprawl: Rule = {
     if (active.length <= STAGE_LIMIT && unused.length === 0) {
       return { outcome: "pass", summary: said`${active.length} active stages, all used in the analysis window.`, evidence, segmentsChecked: segments, facts: { activeStages: active.length } };
     }
-    const tooMany = active.length > STAGE_LIMIT ? said`${plural(active.length, "active stage")}, against our working limit of ${STAGE_LIMIT}` : null;
+    const tooMany = active.length > STAGE_LIMIT ? valued(said`${plural(active.length, "active stage")}, against our working limit of ${STAGE_LIMIT}`, { activeStages: active.length, stageLimit: STAGE_LIMIT }) : null;
     const idle = unused.length > 0 ? said`${plural(unused.length, "active stage")} with no deals in the analysis window` : null;
     // The one or two parts, joined with ", and" as before.
     const parts = tooMany && idle ? said`${tooMany}, and ${idle}` : (tooMany ?? idle ?? said``);

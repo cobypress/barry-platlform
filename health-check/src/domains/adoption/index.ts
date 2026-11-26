@@ -192,7 +192,7 @@ function activeMetrics(ctx: Ctx, data: Extract<Loaded, { status: "ok" }>): Metri
   const series: SeriesPoint[] = months.map((month) => ({ date: `${month}-01`, value: activeOn(activity, users, inMonth(month)), n: users.length, notMeasurableReason: null }));
   const mau = activeOn(activity, users, inMonth(last));
   // Said, so it is marked as ours (DECISIONS.md 693); the month is a date the engine worked out.
-  const coverage = [activity.truncated ? said`The login history covers ${plural(months.length, "whole month")}, from ${org(months[0] + "-01")}. The read reached its cap, so older months were left out` : said`The login history covers ${plural(months.length, "whole month")}, from ${org(months[0] + "-01")}`];
+  const coverage = [activity.truncated ? named(said`The login history covers ${plural(months.length, "whole month")}, from ${org(months[0] + "-01")}. The read reached its cap, so older months were left out`, { months: months.length }) : named(said`The login history covers ${plural(months.length, "whole month")}, from ${org(months[0] + "-01")}`, { months: months.length })];
   // The group that fell furthest from its peak, month by month, so a chart can set it beside the org's line.
   const steepest = groups
     .filter((g) => g.users.length >= MIN_GROUP && months.length > 1)
@@ -404,11 +404,11 @@ const classicUsers: Rule = {
     const unread = everyone.length - who.length;
     if (classic.length === 0) return { outcome: "pass", summary: said`All ${plural(who.length, "active user")}${unread ? said` whose setting we could read` : ""} are set to use Lightning Experience.${unread ? said` The setting couldn't be read for ${plural(unread, "user")}.` : ""}`, evidence, segmentsChecked: segments };
     const share = pct(classic.length, who.length);
-    const byProfile = [...new Set(classic.map(profileOf))].sort().map((p) => said`${org(p)} (${classic.filter((u) => profileOf(u) === p).length})`);
+    const byProfile = [...new Set(classic.map(profileOf))].sort().map((p) => named(said`${org(p)} (${classic.filter((u) => profileOf(u) === p).length})`, { users: classic.filter((u) => profileOf(u) === p).length }));
     return {
       outcome: "issue",
       title: said`Some people still use Salesforce Classic`,
-      summary: said`${classic.length} of ${who.length} active users (${share}%) aren't set to use Lightning Experience: ${joinSaid(byProfile, ", ")}.`,
+      summary: named(said`${classic.length} of ${who.length} active users (${share}%) aren't set to use Lightning Experience: ${joinSaid(byProfile, ", ")}.`, { classic: classic.length, of: who.length, sharePct: share }),
       recommendation: said`Move these users to Lightning Experience, and find out first what keeps them on Classic, such as a page, button or tool that only works there.`,
       recommendationType: "change",
       severity: share > 25 ? "medium" : "low",

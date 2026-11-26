@@ -170,7 +170,7 @@ function winSources(ctx: Ctx, data: Ready): Metric[] {
   const won = wonIn(ctx, data);
   if (won.length < minSample) return every.map((d) => notMeasurable(d, thinReason(won.length, "won deals", minSample)));
   const blank = won.filter((d) => d.Amount === null).length;
-  if (tooManyBlank(won)) return every.map((d) => notMeasurable(d, said`${blank} of ${won.length} won deals have no amount, so shares of won value would mislead.`));
+  if (tooManyBlank(won)) return every.map((d) => notMeasurable(d, named(said`${blank} of ${won.length} won deals have no amount, so shares of won value would mislead.`, { blank, won: won.length })));
   const blankNote = blank > 0 ? [named(said`${blank} won deals with no amount count as zero`, { blank, countedAs: 0 })] : [];
   const withAccount = won.filter((d) => d.AccountId);
   const noAccount = won.length - withAccount.length;
