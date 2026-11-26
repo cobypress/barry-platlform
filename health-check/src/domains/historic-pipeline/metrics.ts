@@ -11,6 +11,8 @@ import { loadPipeline, unorderedReason, unsplitLostReason, type Deal, type Pipel
 type Ctx = Omit<RuleContext, "metrics">;
 type Ready = Extract<PipelineData, { status: "ok" }>;
 
+/** What a deal with no amount counts as in a win rate by value: "count as zero" says it, and is named with it (DECISIONS.md 773). */
+const NO_AMOUNT = 0;
 const DAY = 86_400_000;
 const DOMAIN = "historic_pipeline";
 export const SEGMENT_NOTE = "Sample below the calibrated minimum";
@@ -155,13 +157,13 @@ function winRate(ctx: Ctx, data: Ready): Metric[] {
   else {
     const valueRate = (group: Deal[]): number | null => {
       if (pct(group.filter((d) => d.Amount === null).length, group.length) > MAX_MISSING_AMOUNT_PCT) return null;
-      const total = group.reduce((sum, d) => sum + (d.Amount ?? 0), 0);
-      return total === 0 ? null : pct(group.filter((d) => d.category === "won").reduce((sum, d) => sum + (d.Amount ?? 0), 0), total);
+      const total = group.reduce((sum, d) => sum + (d.Amount ?? NO_AMOUNT), 0);
+      return total === 0 ? null : pct(group.filter((d) => d.category === "won").reduce((sum, d) => sum + (d.Amount ?? NO_AMOUNT), 0), total);
     };
     const value = valueRate(decided);
     if (value === null) metrics.push(notMeasurable(definitions.value, "Closed deals have no amounts."));
     else {
-      const assumptions = [...definitions.value.assumptions, ...(missingAmount > 0 ? [named(said`${missingAmount} closed deals have no amount and count as zero`, { missingAmount })] : [])];
+      const assumptions = [...definitions.value.assumptions, ...(missingAmount > 0 ? [named(said`${missingAmount} closed deals have no amount and count as zero`, { missingAmount, countedAs: NO_AMOUNT })] : [])];
       metrics.push(measured({ ...definitions.value, assumptions }, { value, n: decided.length, dateRange: ctx.window, segments: segment(decided, dims, minSample, valueRate) }));
     }
   }

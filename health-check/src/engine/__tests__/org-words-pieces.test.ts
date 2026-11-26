@@ -12,6 +12,22 @@ import { join, relative } from "node:path";
 // expression, signed off in review as a number or a sentence said made.
 
 const SIGNED_OFF: string[] = [
+  // The days the logins read covers, a number worked out from the calibration's dormant period (DECISIONS.md 773).
+  'src/domains/configuration/documented.ts: loginDays',
+  // A number word of ours that claims nothing, one fixed word as written (word(), DECISIONS.md 773; its lint refuses a digit or a value).
+  'src/domains/adoption/index.ts: word("twice")',
+  'src/domains/automation/index.ts: word("one")',
+  'src/domains/configuration/index.ts: word("one")',
+  'src/domains/current-pipeline/index.ts: word("a quarter")',
+  'src/domains/current-pipeline/index.ts: word("one")',
+  'src/domains/data-quality/index.ts: word("one")',
+  'src/domains/historic-pipeline/index.ts: word("one")',
+  'src/domains/historic-pipeline/potential.ts: word("one")',
+  'src/domains/historic-pipeline/paths/insights.ts: word("one")',
+  'src/domains/historic-pipeline/potential.ts: word("one")',
+  'src/domains/historic-pipeline/potential.ts: word("one")',
+  'src/domains/security/index.ts: word("one")',
+  'src/domains/technical-health/index.ts: word("one")',
   // Fixed sentences of our own, declared as string literals in notes.ts.
   "src/domains/automation/index.ts: END_OF_SUPPORT",
   "src/domains/automation/index.ts: END_OF_SUPPORT",

@@ -1,6 +1,6 @@
 import { notSized, plural, type RuleContext } from "../../engine/rule.ts";
 import { named } from "../../engine/named.ts";
-import { eng, joinSaid, org, said, type Said } from "../../engine/org-words.ts";
+import { eng, joinSaid, org, said, type Said, word } from "../../engine/org-words.ts";
 import { moneySaid } from "../../engine/said-forms.ts";
 import type { Value } from "../../schemas/index.ts";
 import { zoneOf } from "../time-zone.ts";
@@ -36,7 +36,7 @@ export const SITUATIONS = {
     const zone = zoneOf(ctx);
     return { key: "past-close", phrase: said`open past their close date`, matches: (d) => wasPastClose(d, data.stages, zone), ceiling: true };
   },
-  inStageFor: (days: number, data: Ready): Situation => ({ key: `in-stage-${days}`, phrase: named(said`in one stage for ${days} days or more`, { inStageDays: days }), matches: (d) => longestInStage(d, data.stages) >= days, ceiling: true }),
+  inStageFor: (days: number, data: Ready): Situation => ({ key: `in-stage-${days}`, phrase: named(said`in ${word("one")} stage for ${days} days or more`, { inStageDays: days }), matches: (d) => longestInStage(d, data.stages) >= days, ceiling: true }),
   unchangedFor: (days: number, data: Ready): Situation => ({ key: `unchanged-${days}`, phrase: named(said`open for ${days} days or more with no change to stage, amount or close date`, { unchangedDays: days }), matches: (d) => longestUnchanged(d, data.stages) >= days, ceiling: true }),
   inStage: (stage: string): Situation => ({ key: `stage-${stage}`, phrase: said`in the ${org(stage)} stage`, matches: (d) => wasInStage(d, stage), ceiling: false }),
 };
@@ -53,7 +53,7 @@ export function potentialRevenue(ctx: Pick<RuleContext, "calibration" | "window"
   if (affected.length === 0) return notSized(said`There are no deals to size.`);
   const priced = affected.filter((d) => (d.Amount ?? 0) > 0);
   const unpriced = affected.length - priced.length;
-  if (priced.length === 0) return notSized(named(said`None of these ${plural(affected.length, "deal")} has an amount, and we don't impute one.`, { affected: affected.length }));
+  if (priced.length === 0) return notSized(named(said`None of these ${plural(affected.length, "deal")} has an amount, and we don't impute ${word("one")}.`, { affected: affected.length }));
 
   const { currency, minSample } = ctx.calibration;
   // The analysis window's two dates, which the engine works out from the run's date: digits and dashes only.
@@ -110,7 +110,7 @@ export function potentialRevenue(ctx: Pick<RuleContext, "calibration" | "window"
     period: "potential revenue in deals open today",
     assumptions: [
       named(said`Raw exposure: ${moneySaid(exposure, currency)}, the total Amount on ${plural(priced.length, "affected deal")} with an amount`, { exposureMoney: exposure, priced: priced.length }),
-      ...(unpriced ? [named(said`${unpriced} of the ${affected.length} affected deals have no amount, so they add nothing here. We don't impute one`, { unpriced, affected: affected.length })] : []),
+      ...(unpriced ? [named(said`${unpriced} of the ${affected.length} affected deals have no amount, so they add nothing here. We don't impute ${word("one")}`, { unpriced, affected: affected.length })] : []),
       ...lines,
       ...unsizedNotes,
       said`Lost and no decision deals both count as not won`,

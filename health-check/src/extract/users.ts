@@ -60,7 +60,10 @@ export type LoginSummary = {
   apiByUser: Record<string, { logins: number; applications: string[] }>;
 };
 
-const LOGIN_DAYS = 90;
+/** The fewest days of login history read; the calibration's dormant period, when longer, widens it (loginDaysOf). */
+export const LOGIN_DAYS = 90;
+/** The days of login history the read covers, as it chooses them below: the API logins' period says the same (DECISIONS.md 773). */
+export const loginDaysOf = (dormantDays: number): number => Math.max(LOGIN_DAYS, dormantDays);
 const LOGIN_MAX_ROWS = 20_000;
 
 export const loginsExtractor: Extractor<Sourced<LoginSummary>> = {
@@ -69,7 +72,7 @@ export const loginsExtractor: Extractor<Sourced<LoginSummary>> = {
   async run(ctx) {
     // As far back as the dormant period, when the calibration sets it longer, so a
     // login inside it is seen and its user isn't counted as dormant (DECISIONS.md 361, 393).
-    const from = daysBefore(ctx.now, Math.max(LOGIN_DAYS, ctx.calibration.dormantDays));
+    const from = daysBefore(ctx.now, loginDaysOf(ctx.calibration.dormantDays));
     const plan = planFields(ctx, FIELD_SPECS.loginHistory);
     const where = `WHERE ${soqlWindow("LoginTime", from, ctx.now)} ORDER BY LoginTime DESC`;
     if (!plan.ok) return { status: "unavailable", reason: plan.reason, source: { kind: "soql", api: "rest", query: `SELECT ${FIELD_SPECS.loginHistory.required.join(", ")} FROM LoginHistory ${where}` } };

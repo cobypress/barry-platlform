@@ -30,7 +30,7 @@ import { aiSignalsExtractor } from "../../extract/ai.ts";
 import { aiMetrics } from "./ai.ts";
 import { loginActivityExtractor } from "../../extract/adoption.ts";
 import { WHERE } from "../where.ts";
-import { joinSaid, org, passedOn, said, type Said } from "../../engine/org-words.ts";
+import { joinSaid, org, passedOn, said, type Said, word } from "../../engine/org-words.ts";
 
 // Every title, summary, recommendation and reason of its own is written with
 // `said`, and every name the org chose with `org`, so the digest can say which
@@ -186,7 +186,7 @@ const unassignedLayouts: Rule = {
       severity: "low",
       confidence: "high",
       evidence,
-      value: notSized(said`Unused layouts are a tidiness cost, not a measurable one.`),
+      value: notSized(said`Unused layouts are a tidiness cost, not a measurable ${word("one")}.`),
       effort: { size: "S" },
       owner: "Salesforce admin",
       segmentsChecked: [{ dimension: "object", segments: objects.size }],

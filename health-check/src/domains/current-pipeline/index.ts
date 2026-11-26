@@ -1,5 +1,5 @@
 import { schemaExtractor } from "../../extract/configuration.ts";
-import { named } from "../../engine/named.ts";
+import { named, aside } from "../../engine/named.ts";
 import { quotasExtractor, revenueForecastType } from "../../extract/forecast.ts";
 import { nextStepsExtractor, opportunitiesExtractor, stagesExtractor } from "../../extract/opportunities.ts";
 import { daysBefore } from "../../extract/types.ts";
@@ -15,7 +15,7 @@ import { meanStat } from "../average.ts";
 import { localDay, todayIn, zoneNote, zoneOf } from "../time-zone.ts";
 import { daysSince, enteredCurrentStage, quarterBounds, stageRuns } from "./stages.ts";
 import { deliveryOutlook, openStageMetrics, OUTLOOK_LABELS, retiredStages } from "./outlook.ts";
-import { eng, joinSaid, org, said, type Said } from "../../engine/org-words.ts";
+import { eng, joinSaid, org, said, type Said, word } from "../../engine/org-words.ts";
 import { moneySaid } from "../../engine/said-forms.ts";
 
 // Every title, summary, recommendation and reason is written with `said`, and
@@ -23,6 +23,8 @@ import { moneySaid } from "../../engine/said-forms.ts";
 // with `org`, so the digest can say which words are the org's (DECISIONS.md 655,
 // 657). A reason passed on from an extract quotes Salesforce and stays plain.
 
+/** What a deal with no amount counts as in open pipeline: its definition says "counts as zero" (DECISIONS.md 773). */
+const NO_AMOUNT = 0;
 const DOMAIN = "current_pipeline";
 const MIN_SEGMENT = 10;
 const STUCK_PERCENTILE = 0.75;
@@ -305,12 +307,14 @@ function concentrationRule(options: { id: string; title: string; limit: number; 
       const [top, amount] = [...byKey].sort(([ka, a], [kb, b]) => b - a || ka.localeCompare(kb))[0]!;
       const share = pct(amount, total);
       const segments = [{ dimension: options.subject, segments: byKey.size }];
+      // The one account or rep the finding is about: "one account holds…" counts them (DECISIONS.md 773).
+      const subjects = [{ type: options.subject, label: options.labelOf(ctx, top) }];
       if (share <= options.limit) return { outcome: "pass", summary: named(said`The largest ${options.subject} holds ${share}% of open pipeline, at or under our working limit of ${options.limit}%.`, { limitPct: options.limit }), evidence, segmentsChecked: segments, facts: { share } };
       return {
         outcome: "issue",
         // Made once when the rule is declared, so said again here, in the analysis, whose ledger vouches for it.
-        title: said`${options.issueTitle}`,
-        summary: options.sentence(share),
+        title: named(said`${options.issueTitle}`, { holders: subjects.length }),
+        summary: named(options.sentence(share), { holders: subjects.length }),
         recommendation: said`${options.recommendation}`,
         recommendationType: "investigate",
         severity: "medium",
@@ -320,7 +324,7 @@ function concentrationRule(options: { id: string; title: string; limit: number; 
         effort: { size: "M" },
         owner: "Head of sales",
         segmentsChecked: segments,
-        subjects: [{ type: options.subject, label: options.labelOf(ctx, top) }],
+        subjects,
         facts: { share, limit: options.limit, keys: byKey.size },
       };
     },
@@ -329,7 +333,8 @@ function concentrationRule(options: { id: string; title: string; limit: number; 
 
 const accountConcentration = concentrationRule({
   id: "cur.account-concentration",
-  title: "Open pipeline resting on one account",
+  // The check's name, which a pass carries: "one" names no count (DECISIONS.md 773).
+  title: aside("Open pipeline resting on one account", "one"),
   limit: ACCOUNT_SHARE_LIMIT,
   keyOf: (d) => d.AccountId,
   subject: "account",
@@ -338,12 +343,12 @@ const accountConcentration = concentrationRule({
   minKeys: 2,
   issueTitle: said`Too much of your pipeline rests on one account`,
   sentence: (share) => named(said`One account holds ${share}% of open pipeline. If that relationship stalls, the number goes with it.`, { share: [share, "percent"] }),
-  recommendation: said`Check how much of this is real, then build pipeline elsewhere so one account can't decide the quarter.`,
+  recommendation: said`Check how much of this is real, then build pipeline elsewhere so ${word("one")} account can't decide the quarter.`,
 });
 
 const repConcentration = concentrationRule({
   id: "cur.rep-concentration",
-  title: "Open pipeline resting on one rep",
+  title: aside("Open pipeline resting on one rep", "one"),
   limit: REP_SHARE_LIMIT,
   keyOf: (d) => d.OwnerId,
   subject: "rep",
@@ -426,7 +431,7 @@ const coverage: Rule = {
       outcome: "issue",
       title: said`There isn't enough pipeline to cover this quarter's quota`,
       summary: named(said`Open pipeline closing this quarter is ${result.coverage} times what's left of quota, against our working target of ${COVERAGE_TARGET}. Quota ${moneySaid(result.quota, ctx.calibration.currency)}, won ${moneySaid(result.won, ctx.calibration.currency)}, open ${moneySaid(result.open, ctx.calibration.currency)}.`, { coverage: [result.coverage, "ratio"], coverageTarget: [COVERAGE_TARGET, "ratio"], quota: [result.quota, "money"], won: [result.won, "money"], open: [result.open, "money"] }),
-      recommendation: said`Decide this month whether to build more pipeline or reset the number. Coverage can't be fixed in the last weeks of a quarter.`,
+      recommendation: said`Decide this month whether to build more pipeline or reset the number. Coverage can't be fixed in the last weeks of ${word("a quarter")}.`,
       recommendationType: "investigate",
       severity: result.coverage < COVERAGE_TARGET / 2 ? "high" : "medium",
       confidence: "medium",
@@ -449,7 +454,7 @@ function currentMetrics(ctx: Ctx): Metric[] {
   const loaded = openDeals(ctx);
   const definitions = {
     count: { id: "current.open_deals", domain: DOMAIN, label: "Open deals", unit: "count" as const, definition: "Deals in a stage the calibration calls open, today." },
-    value: { id: "current.open_pipeline", domain: DOMAIN, label: "Open pipeline", unit: "currency" as const, definition: "Total Amount of open deals today. A deal with no amount counts as zero." },
+    value: { id: "current.open_pipeline", domain: DOMAIN, label: "Open pipeline", unit: "currency" as const, definition: named("Total Amount of open deals today. A deal with no amount counts as zero.", { countedAs: NO_AMOUNT }) },
     age: { id: "current.median_days_in_stage", domain: DOMAIN, label: "Days in current stage", unit: "days" as const, definition: "Median days open deals have been in their current stage." },
   };
   const shared = { exclusions: [] as string[], assumptions: [zoneNote(ctx)] };
@@ -464,7 +469,7 @@ function currentMetrics(ctx: Ctx): Metric[] {
   const metrics: Metric[] = [{ ...definitions.count, ...common, status: "measured", value: deals.length, n: deals.length, segments: [...segment(deals, dims, 1, (group) => group.length), ...retiredStages(ctx, deals)], ...rest }];
   if (data.multiCurrency) metrics.push({ ...definitions.value, ...common, status: "not_measurable", reason: "The org is multi-currency, and amounts can't be added until historic rates are supplied." });
   else {
-    const total = (group: Deal[]): number => Math.round(group.reduce((sum, d) => sum + (d.Amount ?? 0), 0));
+    const total = (group: Deal[]): number => Math.round(group.reduce((sum, d) => sum + (d.Amount ?? NO_AMOUNT), 0));
     metrics.push({ ...definitions.value, ...common, status: "measured", value: total(deals), n: deals.length, segments: segment(deals, dims, 1, total), ...rest });
   }
   const placed = deals.filter((d) => enteredCurrentStage(d));

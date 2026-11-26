@@ -1,6 +1,7 @@
 import { AsyncLocalStorage } from "node:async_hooks";
 import { createHash } from "node:crypto";
 import { passedOnSpans } from "./passed-on.ts";
+import { notFigures } from "./named.ts";
 
 // Which characters of a finding's sentence were chosen inside the customer's org
 // (DECISIONS.md 655): a flow's label, a field's name, a stage. The connector
@@ -24,6 +25,23 @@ export type Said = string & { readonly [SAID]: true };
 const ORG = Symbol("org words");
 /** A value the org chose, wrapped for `said`. */
 export type OrgWords = { readonly [ORG]: string };
+
+/** The words word() made, each its own String object, so said tells them from any other text. */
+const WORDS = new WeakSet<object>();
+
+/**
+ * A number word of ours that is no claim: "we don't impute one", "count them
+ * twice", "one trigger per object". The text is ours as written; said records
+ * where it sits so the strict check (DECISIONS.md 773, in shadow) sets it aside.
+ * Nothing else reads it: the reader and every served check see the word as before.
+ * A lint test refuses it around a digit or anything but one literal.
+ */
+export function word(text: string): Said {
+  // Typed as ours, a Said, as eng() is: what said may take; at run time a String said can tell apart.
+  const w = new String(text);
+  WORDS.add(w);
+  return w as unknown as Said;
+}
 
 /** Marks a value the org chose: a label, an API name, a stage, a picklist value. */
 export const org = (text: string): OrgWords => ({ [ORG]: text });
@@ -194,14 +212,19 @@ function push(spans: OrgSpan[], start: number, end: number): void {
  * the ledger doesn't hold. Unknown goes up through every level that quotes it.
  * A sentence with org words made anywhere but the open ledger is unknown here.
  */
-function piecesOf(strings: readonly string[], pieces: readonly unknown[], sentences = false): { text: string; spans: OrgSpan[] | null; passed: OrgSpan[] } {
+function piecesOf(strings: readonly string[], pieces: readonly unknown[], sentences = false): { text: string; spans: OrgSpan[] | null; passed: OrgSpan[]; words: OrgSpan[] } {
   let text = strings[0]!;
   const spans: OrgSpan[] = [];
   const passed: OrgSpan[] = [];
+  const words: OrgSpan[] = [];
   let known = true;
   pieces.forEach((piece, i) => {
     const at = text.length;
-    if (piece !== null && typeof piece === "object" && PASSED in piece) {
+    if (piece instanceof String && WORDS.has(piece)) {
+      // Our own word, and no figure: no span of the org's, only where it sits (DECISIONS.md 773).
+      text += piece.valueOf();
+      words.push({ start: at, end: text.length });
+    } else if (piece !== null && typeof piece === "object" && PASSED in piece) {
       // A reason passed on: its own spans, or unknown; and where it sits, for the org-value guard.
       const { text: reason, spans: own, passed: inner } = (piece as PassedOn)[PASSED];
       text += reason;
@@ -233,7 +256,7 @@ function piecesOf(strings: readonly string[], pieces: readonly unknown[], senten
     }
     text += strings[i + 1]!;
   });
-  return { text, spans: known ? spans : null, passed };
+  return { text, spans: known ? spans : null, passed, words };
 }
 
 function record(text: string, spans: OrgSpan[] | null, passed: OrgSpan[] = []): void {
@@ -244,8 +267,9 @@ function record(text: string, spans: OrgSpan[] | null, passed: OrgSpan[] = []): 
 
 /** A sentence with the characters it took from the org marked. Returns the plain string. */
 export function said<const P extends readonly unknown[]>(strings: TemplateStringsArray, ...pieces: P & { readonly [K in keyof P]: Piece<P[K]> }): Said {
-  const { text, spans, passed } = piecesOf(strings, pieces);
+  const { text, spans, passed, words } = piecesOf(strings, pieces);
   record(text, spans, passed);
+  if (words.length > 0) notFigures(text, words);
   return text as Said;
 }
 

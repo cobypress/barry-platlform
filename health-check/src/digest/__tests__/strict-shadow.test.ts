@@ -5,9 +5,9 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { checkedDigest, digestDataset, type CheckedDigest } from "../checked.ts";
 import { buildDigest } from "../build.ts";
-import { RUN_DATES, ShadowTimeout, strictDataset, strictScope, strictShadow, strictUntraced, STRICT_SHADOW_FILE, unitOf, type StrictShadow } from "../strict.ts";
-import { markSentence } from "../../engine/org-words.ts";
-import { named, namedFor, namedIn, NAMED_VALUES_FILE, withNamedValues } from "../../engine/named.ts";
+import { notFigureSpans, RUN_DATES, ShadowTimeout, strictDataset, strictScope, strictShadow, strictUntraced, STRICT_SHADOW_FILE, unitOf, type StrictShadow } from "../strict.ts";
+import { markSentence, said, word } from "../../engine/org-words.ts";
+import { aside, named, namedFor, namedIn, NAMED_VALUES_FILE, notFiguresIn, withNamedValues } from "../../engine/named.ts";
 import { buildReport, type ReportInput } from "../../narrative/sections.ts";
 import { scopeDataset } from "../../numbercheck/index.ts";
 import type { Finding } from "../../schemas/index.ts";
@@ -134,6 +134,41 @@ describe("the strict check traces a finding's figures to its own computed values
   test("the end-of-support sentence is made from the one constant its date is named with", () => {
     assert.equal(SUPPORT_ENDED_ON, "2025-12-31");
     assert.equal(END_OF_SUPPORT, "Salesforce ended support for Workflow Rules and Process Builder on 31 December 2025. They keep running, but any bug is yours to work around.");
+  });
+
+  test("word() sets aside a number word of ours that claims nothing, and only that word; the text is as written (DECISIONS.md 773)", () => {
+    withNamedValues(() =>
+      namedFor("rule:a", () => {
+        const text = said`We don't impute ${word("one")}. One account holds 26%.`;
+        assert.equal(text, "We don't impute one. One account holds 26%.");
+        const marks = notFiguresIn([text], "rule:a")!;
+        assert.deepEqual(marks, [{ sentence: text, spans: [{ start: 16, end: 19 }] }]);
+        const empty = { figures: [], dates: [], identifiers: [], tokens: [], labels: [] };
+        // The claim stays a figure, and untraced with nothing named.
+        assert.deepEqual(strictUntraced(text, notFigureSpans(text, marks), empty).unmatched, ["One", "26%"]);
+        assert.deepEqual(strictUntraced(text, [], empty).unmatched, ["one", "One", "26%"]);
+        // Another rule's sentence lends no word marks.
+        assert.equal(notFiguresIn([text], "rule:b"), null);
+      }),
+    );
+  });
+
+  test("aside() marks a whole literal's word, and leaves the literal as written", () => {
+    withNamedValues(() =>
+      namedFor("rule:a", () => {
+        const text = aside("Each move from one stage to the next, planted.", "one");
+        assert.equal(text, "Each move from one stage to the next, planted.");
+        assert.deepEqual(notFiguresIn([text], "rule:a"), [{ sentence: text, spans: [{ start: 15, end: 18 }] }]);
+      }),
+    );
+  });
+
+  test("a word mark set aside in one sentence never hides the same word elsewhere in the text", () => {
+    const text = "We don't impute one. Later, one rep holds it all.";
+    const spans = notFigureSpans(text, [{ sentence: "We don't impute one.", spans: [{ start: 16, end: 19 }] }]);
+    assert.deepEqual(spans, [{ start: 16, end: 19 }]);
+    const empty = { figures: [], dates: [], identifiers: [], tokens: [], labels: [] };
+    assert.deepEqual(strictUntraced(text, spans, empty).unmatched, ["one"]);
   });
 
   test("a word that only holds a unit's letters says nothing", () => {

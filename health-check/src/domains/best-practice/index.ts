@@ -1,5 +1,5 @@
 import { metadataExtractor, scheduledJobsExtractor } from "../../extract/automation.ts";
-import { named } from "../../engine/named.ts";
+import { named, aside } from "../../engine/named.ts";
 import { userKinds } from "../user-kinds.ts";
 import { componentChangesExtractor } from "../../extract/component-changes.ts";
 import { ownershipExtractor, usersExtractor, type UserRow } from "../../extract/users.ts";
@@ -104,7 +104,8 @@ const ownershipSkew: Rule = {
   version: 2,
   records: true,
   domain: "best_practice",
-  title: "One owner holding too many records",
+  // The check's name, which a pass carries: "One" names no count (DECISIONS.md 773).
+  title: aside("One owner holding too many records", "One"),
   evaluate(ctx): RuleResult | RuleResult[] {
     const ownership = ctx.data(ownershipExtractor);
     const source = { kind: "soql", api: "rest", query: ownership.query } as const;

@@ -1,6 +1,6 @@
 import { notSized, pct, plural, type Rule, type RuleContext, type RuleResult } from "../../../engine/rule.ts";
 import { named } from "../../../engine/named.ts";
-import { org, said, type Said } from "../../../engine/org-words.ts";
+import { org, said, type Said, word } from "../../../engine/org-words.ts";
 import { andList } from "../../../engine/said-forms.ts";
 import type { SegmentCheck } from "../../../schemas/index.ts";
 import { dimensions, groupBy, median, round1 } from "../metrics.ts";
@@ -412,7 +412,7 @@ function untestedSaid(all: Array<{ untested: Untested | null; period: Period }>,
   return said`${lateSaid}${openSaid}${fewSaid}`;
 }
 
-export const NOT_A_CAUSE = said` This shows how often they went together, not that one is the reason for the other.`;
+export const NOT_A_CAUSE = said` This shows how often they went together, not that ${word("one")} is the reason for the other.`;
 const value = (): ReturnType<typeof notSized> => notSized(said`It compares the paths your deals took, which has no direct figure.`);
 
 /** Lowest with no segment to check it in; high only with segments and both sides at twice the minimum. */

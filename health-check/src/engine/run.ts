@@ -1,5 +1,5 @@
 import { withRunOrgWords } from "./org-words.ts";
-import { NAMED_VALUES_FILE } from "./named.ts";
+import { NAMED_VALUES_FILE, NOT_FIGURES_FILE } from "./named.ts";
 import { appendFileSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { createHash, randomUUID } from "node:crypto";
 import { dirname, join, resolve } from "node:path";
@@ -600,6 +600,8 @@ function renderOutputs(dir: string, run: Run, calibration: Calibration, output: 
   writeJson(join(dir, "manual-steps.json"), output.manualSteps);
   // The values the findings' and metrics' sentences were named with, for the strict check alone (DECISIONS.md 768): run folder only.
   writeJson(join(dir, NAMED_VALUES_FILE), output.named ?? {});
+  // And where their number words claim nothing (DECISIONS.md 773): run folder only.
+  writeJson(join(dir, NOT_FIGURES_FILE), output.notFigures ?? {});
   const scores = scoreDomains(run.modules, output.findings, run.ruleSetVersion, areaReasons ? { areaReasons } : {});
   writeJson(join(dir, "scores.json"), scores);
   const factsPath = join(dir, FACTS_FILE);

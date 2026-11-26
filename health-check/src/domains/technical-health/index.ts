@@ -11,7 +11,7 @@ import { labelsOf } from "../labels.ts";
 import { labelsExtractor } from "../../extract/labels.ts";
 import { isObjectId, objectResolver } from "../object-names.ts";
 import { WHERE } from "../where.ts";
-import { joinSaid, org, passedOn, said, type Said } from "../../engine/org-words.ts";
+import { joinSaid, org, passedOn, said, type Said, word } from "../../engine/org-words.ts";
 import { andList, grouped } from "../../engine/said-forms.ts";
 import { judgedTests, liveCode, loopsOverLimits } from "./code.ts";
 import { LINT_RULES } from "./lint.ts";
@@ -195,7 +195,7 @@ const multipleTriggers: Rule = {
       // Written with said, the object's label as the org's (DECISIONS.md 655); an object we couldn't name is our own words.
       title: said`Some objects have several triggers`,
       summary: said`${joinSaid(multiple.map((o) => named(said`${o.label === null ? UNNAMED : org(o.label)} has ${o.n}`, { n: o.n })), "; ")}. Salesforce doesn't guarantee the order they run in.${note}`,
-      recommendation: said`Move to one trigger per object, calling a handler class.`,
+      recommendation: said`Move to ${word("one")} trigger per object, calling a handler class.`,
       recommendationType: "change",
       severity: "medium",
       confidence: "high",

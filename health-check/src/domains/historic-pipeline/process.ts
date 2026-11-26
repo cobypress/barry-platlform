@@ -1,5 +1,5 @@
 import { notSized, pct, plural, segmentRate, type Rule, type RuleContext, type RuleResult, type SegmentedRate } from "../../engine/rule.ts";
-import { each, named } from "../../engine/named.ts";
+import { each, named, aside } from "../../engine/named.ts";
 import type { Calibration, Metric, MetricSegment } from "../../schemas/index.ts";
 import { loadPipeline, unorderedReason, unsplitLostReason, type Deal, type PipelineData } from "./cohort.ts";
 import { daysByStage, stageLeftFrom } from "./deep-dive.ts";
@@ -37,7 +37,7 @@ const WAIT_PCT = WAIT_PERCENTILE * 100;
 const TOP_PATHS = 5;
 
 const DEF = {
-  transitions: { id: "historic.stage_transitions", label: "How deals move between stages", unit: "count", definition: "Each move from one stage to the next in the stage history of deals that closed in the window, counted from stage to stage. Repeated rows in the same stage, such as a close date change, aren't moves." },
+  transitions: { id: "historic.stage_transitions", label: "How deals move between stages", unit: "count", definition: aside("Each move from one stage to the next in the stage history of deals that closed in the window, counted from stage to stage. Repeated rows in the same stage, such as a close date change, aren't moves.", "one") },
   skipped: { id: "historic.won_skipped_stage", label: "Won deals that skipped a stage", unit: "percent", definition: "Won deals that never entered one of the expected stages, as a share of won deals. The expected stages are the ones the calibration marks as required, or else those most won deals passed through." },
   backwards: { id: "historic.went_backwards", label: "Deals that went back a stage", unit: "percent", definition: "Deals that moved to an earlier open stage at least once, as a share of deals that closed in the window." },
   wonPath: { id: "historic.path_to_won", label: "Most common path to won", unit: "percent", definition: "The run of stages won deals most often took, as a share of won deals, with the next most common paths." },
@@ -308,7 +308,7 @@ const deadEndStage: Rule = {
     const wait = round1(median(dying.map(waitOf)));
     const result = segmentRate(dying, (d) => waitOf(d) > line, dimensions(ctx), { segmentLimit: 50, minSegment: minSample });
     const checked = [...segments, ...result.segmentsChecked];
-    if (wait <= line) return { outcome: "pass", summary: named(said`More lost deals leave from ${org(stage)} than from any other stage (${dying.length} of ${lost.length}, ${share}%), but after a median of ${wait} days there, no longer than three quarters of won deals took (${line} days).`, { dying: dying.length, lost: lost.length, share: [share, "percent"], wait: [wait, "day"], line: [line, "day"] }), evidence: data.evidence, segmentsChecked: checked, facts: { share, wait, line } };
+    if (wait <= line) return { outcome: "pass", summary: named(said`More lost deals leave from ${org(stage)} than from any other stage (${dying.length} of ${lost.length}, ${share}%), but after a median of ${wait} days there, no longer than three quarters of won deals took (${line} days).`, { wonWithinPct: WAIT_PCT, dying: dying.length, lost: lost.length, share: [share, "percent"], wait: [wait, "day"], line: [line, "day"] }), evidence: data.evidence, segmentsChecked: checked, facts: { share, wait, line } };
     return {
       outcome: "issue",
       title: said`Lost deals wait in ${org(stage)} before they're closed`,

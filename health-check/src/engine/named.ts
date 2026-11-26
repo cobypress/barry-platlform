@@ -73,15 +73,54 @@ export function each<T>(items: readonly T[], values: (item: T) => Readonly<Recor
   return out;
 }
 
+/** Where in a sentence of ours a number word claims nothing (word(), DECISIONS.md 773), by sentence. */
+export type NotFigures = Readonly<Record<string, ReadonlyArray<{ sentence: string; spans: ReadonlyArray<{ start: number; end: number }> }>>>;
+/** Where a run keeps them, by finding or metric id. Run folder only. */
+export const NOT_FIGURES_FILE = "not-figures.json";
+type WordEntry = { text: string; spans: Array<{ start: number; end: number }>; owner: string | null };
+let words: WordEntry[] | null = null;
+const fixedWords = new Map<string, Array<{ start: number; end: number }>>();
+
+/** Records where a sentence's word() pieces sit, as said makes it. */
+export function notFigures(text: string, spans: Array<{ start: number; end: number }>): void {
+  if (words) words.push({ text, spans, owner });
+  else if (fixedWords.size < FIXED_MAX && !fixedWords.has(text)) fixedWords.set(text, spans);
+}
+
+/**
+ * word() for a whole literal of ours that can't be a said template without
+ * losing what it is (a metric's definition, a rule's title, which the engine
+ * texts' scan knows as written): the text, unchanged, with each whole `w` in it
+ * recorded as no figure. The same lint holds `w` to one fixed word, never a digit.
+ */
+export function aside<T extends string>(text: T, w: string): T {
+  const spans: Array<{ start: number; end: number }> = [];
+  for (const m of text.matchAll(new RegExp(String.raw`(?<![\w-])${w.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}(?![\w-])`, "g"))) spans.push({ start: m.index, end: m.index + w.length });
+  if (spans.length > 0) notFigures(text, spans);
+  return text;
+}
+
+/** The sentences these texts hold whole that carry word() pieces, made while `by` ran or at a module's load. */
+export function notFiguresIn(texts: ReadonlyArray<string | null | undefined>, by: string | readonly string[]): Array<{ sentence: string; spans: Array<{ start: number; end: number }> }> | null {
+  const owners = new Set(typeof by === "string" ? [by] : by);
+  if (!words) return null;
+  const own = texts.filter((t): t is string => typeof t === "string" && t.trim() !== "");
+  const out = new Map<string, Array<{ start: number; end: number }>>();
+  for (const [text, spans] of fixedWords) if (own.some((t) => t.includes(text))) out.set(text, spans);
+  for (const e of words) if (e.owner !== null && owners.has(e.owner) && !out.has(e.text) && own.some((t) => t.includes(e.text))) out.set(e.text, e.spans);
+  return out.size > 0 ? [...out].map(([sentence, spans]) => ({ sentence, spans })) : null;
+}
+
 /** Runs one analysis with its own ledger, as `said`'s marks are (DECISIONS.md 655). */
 export function withNamedValues<T>(run: () => T): T {
-  const [outerLedger, outerOwner] = [ledger, owner];
+  const [outerLedger, outerOwner, outerWords] = [ledger, owner, words];
   ledger = [];
+  words = [];
   owner = null;
   try {
     return run();
   } finally {
-    [ledger, owner] = [outerLedger, outerOwner];
+    [ledger, owner, words] = [outerLedger, outerOwner, outerWords];
   }
 }
 
@@ -108,7 +147,8 @@ function written(text: string): Set<number> {
  * named for another finding never backs this one; and, of a module-level
  * sentence, only the values it writes.
  */
-export function namedIn(texts: ReadonlyArray<string | null | undefined>, by: string): Record<string, number> | null {
+export function namedIn(texts: ReadonlyArray<string | null | undefined>, by: string | readonly string[]): Record<string, number> | null {
+  const owners = new Set(typeof by === "string" ? [by] : by);
   if (!ledger) return null;
   const own = texts.filter((t): t is string => typeof t === "string" && t.trim() !== "");
   const out: Record<string, number> = {};
@@ -127,7 +167,7 @@ export function namedIn(texts: ReadonlyArray<string | null | undefined>, by: str
     add(Object.fromEntries(Object.entries(values).filter(([, v]) => shown.has(v))));
   }
   for (const entry of ledger) {
-    if (entry.owner !== by || seen.has(entry.text) || !own.some((t) => t.includes(entry.text))) continue;
+    if (entry.owner === null || !owners.has(entry.owner) || seen.has(entry.text) || !own.some((t) => t.includes(entry.text))) continue;
     seen.add(entry.text);
     add(entry.values);
   }

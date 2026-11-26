@@ -8,7 +8,7 @@ import { accessExtractor, holdersOf, PRIVILEGED_RULES, privilegedHolding, privil
 import { notSized, plural, segmentRate, type NotMeasurableResult, type Rule, type RuleContext, type RuleResult } from "../../engine/rule.ts";
 import type { DomainModule } from "../types.ts";
 import { WHERE } from "../where.ts";
-import { joinSaid, org, passedOn, said, type Said } from "../../engine/org-words.ts";
+import { joinSaid, org, passedOn, said, type Said, word } from "../../engine/org-words.ts";
 
 // Every title, summary, recommendation and reason is written with `said`, and
 // every name the org chose with `org`, so the digest can say which words are the
@@ -164,7 +164,7 @@ const modifyAllData = privilegeRule({
   permission: "PermissionsModifyAllData",
   label: said`Modify All Data`,
   severity: "high",
-  why: said`This overrides sharing, so one compromised or careless login can change or delete anything.`,
+  why: said`This overrides sharing, so ${word("one")} compromised or careless login can change or delete anything.`,
 });
 
 const viewAllData = privilegeRule({
