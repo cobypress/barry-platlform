@@ -68,7 +68,7 @@ export const MIN_SNAPSHOTS = 12;
  * least `points`, and by `z` standard errors of a share of today's open cases at that median: the margin grows as
  * the open cases get fewer (set by the noise probe, DECISIONS.md 776; a test may change it).
  */
-export const STUCK_BAR: { quantile: number; points: number; z: number; mode: "both" | "weeks" | "steady" } = { quantile: 0.9, points: 10, z: 3, mode: "both" };
+export const STUCK_BAR: { quantile: number; points: number; z: number; relative: number; mode: "both" | "weeks" | "steady" } = { quantile: 0.9, points: 10, z: 3, relative: 0.3, mode: "both" };
 /** Cases closed straight from where they started, overall and in any one segment. */
 const STRAIGHT_LIMIT = 25;
 const STRAIGHT_SEGMENT_LIMIT = 50;
@@ -586,7 +586,10 @@ export const stuckInStatus: Rule = {
     const rate = pct(hits, n);
     // What a steady queue with these stay times would have past the lines, weighted by today's open cases in each status.
     const steady = round1((today.targets.reduce((t, x) => t + today.expected.get(x.status.key)!, 0) / n) * 100);
-    const steadyMargin = Math.max(STUCK_BAR.points, Math.ceil(STUCK_BAR.z * Math.sqrt((steady * (100 - steady)) / n)));
+    // Its margin: our least points, the z bar's points at today's count, or a share of the steady share itself, whichever is
+    // most: a status with long stays has its steady share read a little short from stays that began in the lookback, and the
+    // probe's heavy-tailed orgs read 13 to 16 points over it with nothing wrong.
+    const steadyMargin = Math.max(STUCK_BAR.points, Math.ceil(STUCK_BAR.z * Math.sqrt((steady * (100 - steady)) / n)), Math.ceil(STUCK_BAR.relative * steady));
     // The earlier weeks: the same weekday and time, back while a whole lookback and gap lie inside what we read.
     const earliest = Math.max(c.yearStart, c.historyFrom) + (LOOKBACK_DAYS + GAP_DAYS) * DAY;
     const weeks: Snapshot[] = [];

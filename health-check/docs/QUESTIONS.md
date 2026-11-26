@@ -448,4 +448,4 @@ h) Is `CaseStatus.IsClosed` the whole truth about which statuses close a case, o
 i) Can an open case have a `Status` that is a closed status (or the reverse) at the moment we read? The lane leaves such a case out of the stuck check and says so.
 j) On Professional Edition: are Cases, CaseStatus and CaseHistory there, and can Case Status history be tracked (F10)? The service module itself is unconfirmed there.
 k) Business hours are read and not applied: every day here is a calendar day, and the sentences say so. Whether customers want business hours is a later question (scout note section 7).
-l) An org with no open case at all stops a run with Service Cloud at the base (the open cases metric has no segments and no reason). Not this lane's; how likely is a Service Cloud org with no open case?
+l) An org with no open case at all used to stop a run with Service Cloud (the open cases metric had no segments and no reason); it now measures 0 open cases and says why it isn't split (decision 776). How likely is a Service Cloud org with no open case, and is "0 open cases" then true, or a sign the read missed them?

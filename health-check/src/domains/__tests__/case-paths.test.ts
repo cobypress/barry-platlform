@@ -306,7 +306,7 @@ describe("open cases past their status's line, against earlier weeks (C1)", () =
   });
 
   test("the bar: above what 90% of the earlier weeks were at or below, and by a margin the noise probe set", () => {
-    assert.deepEqual(STUCK_BAR, { quantile: 0.9, points: 10, z: 3, mode: "both" });
+    assert.deepEqual(STUCK_BAR, { quantile: 0.9, points: 10, z: 3, relative: 0.3, mode: "both" });
   });
 });
 
