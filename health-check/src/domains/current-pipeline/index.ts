@@ -89,6 +89,8 @@ type ShareRule = {
   scope: (ctx: RuleContext, data: Ready, open: Deal[]) => Scoped;
   /** Our own words, for the summary and the evidence's note. */
   scopeLabel: Said;
+  /** What a pass with no deal in scope says, where "There are no <scopeLabel> to check." doesn't read (DECISIONS.md 779). Made in the analysis, so its marks are kept. */
+  emptySummary?: () => Said;
   issueTitle: Said;
   sentence: (hits: number, n: number, rate: number) => Said;
   recommendation: Said;
@@ -115,7 +117,7 @@ export function shareRule(options: ShareRule): Rule {
       const base = { ...data.evidence[0]!, dateRange: { from: ctx.window.to, to: ctx.window.to } };
       if ("reason" in scoped) return { outcome: "not_measurable", reason: scoped.reason, evidence: [{ ...base, count: null }, ...(scoped.evidence ?? [])] };
       const evidence: Evidence[] = [{ ...base, count: scoped.deals.length, exclusions: [...data.exclusions, ...(scoped.exclusions ?? [])], note: options.scopeLabel }, ...(scoped.evidence ?? [])];
-      if (scoped.deals.length === 0) return { outcome: "pass", summary: said`There are no ${options.scopeLabel} to check.`, evidence, segmentExemptReason: "There are no deals to segment." };
+      if (scoped.deals.length === 0) return { outcome: "pass", summary: options.emptySummary?.() ?? said`There are no ${options.scopeLabel} to check.`, evidence, segmentExemptReason: "There are no deals to segment." };
       const result = segmentRate(scoped.deals, scoped.isHit, dimensions(ctx), { segmentLimit: options.segmentLimit, minSegment: MIN_SEGMENT });
       const overLimit = result.rate > options.totalLimit;
       const leftOut = scoped.leftOut ? said` ${scoped.leftOut}` : said``;
@@ -178,6 +180,12 @@ function leftOutSentence(noLine: number, noEntry: number): Said | undefined {
   return named(said`${lead}: ${noLine} in ${line(noLine)}, and ${noEntry} with ${entry(noEntry)}.`, { noLine, noEntry });
 }
 
+/**
+ * Stuck-in-stage's pass with no deal to compare (DECISIONS.md 779): the scope's label doesn't fit "There are no … to
+ * check." Made each time it is said, inside the analysis, so the sentence's marks are kept.
+ */
+const stuckNone = (): Said => said`There are no open deals we can compare with won deals in their stage.`;
+
 const stuckInStage = shareRule({
   id: "cur.stuck-in-stage",
   version: 2,
@@ -187,6 +195,7 @@ const stuckInStage = shareRule({
   segmentLimit: STUCK_LIMITS_BEFORE_3.segment,
   severity: "high",
   scopeLabel: said`open deals with a stage to compare`,
+  emptySummary: stuckNone,
   scope(ctx, data, open) {
     const lines = stageLines(ctx, data);
     if (lines.size === 0) return { reason: named(said`No open stage has ${ctx.calibration.minSample} won deals to compare with.`, { minSample: ctx.calibration.minSample }) };
@@ -775,7 +784,7 @@ const stuckInStageUnscored: Rule = {
     const evidence: Evidence[] = [{ ...base, count: deals.length, exclusions: [...data.exclusions, ...exclusions], note: said`open deals with a stage to compare` }];
     const left = leftOutSentence(noLine, noEntry);
     const leftOut = left ? said` ${left}` : said``;
-    if (deals.length === 0) return { outcome: "pass", summary: said`There are no open deals with a stage to compare to check.`, evidence, segmentExemptReason: "There are no deals to segment." };
+    if (deals.length === 0) return { outcome: "pass", summary: stuckNone(), evidence, segmentExemptReason: "There are no deals to segment." };
     const days = (d: Deal): number => daysSince(enteredCurrentStage(d)!, ctx.now);
     const isPast = (d: Deal): boolean => days(d) > lines.get(d.StageName)!;
     // Version 2's own reading, every segment of ten or more, for the judges between runs (loosened.ts, stuckBefore3).

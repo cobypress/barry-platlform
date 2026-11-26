@@ -64,7 +64,7 @@ export type ReportInput = {
   recordCounts?: Record<string, { rows: number; total: number }>;
   /** What each stage the calibration doesn't name was taken to mean, from Salesforce's flags (DECISIONS.md 600). The calibration's own stages aren't here. */
   stageMeanings?: Record<string, "open" | "won" | "lost"> | null;
-  /** The rules the run's analysis ran and those its engine knew (DECISIONS.md 718), for the digest alone. Null for a run analysed before they were kept. */
+  /** The rules the run's analysis ran and those its engine knew (DECISIONS.md 718), for the digest, and a baseline's run list for the comparison (779). Null for a run analysed before they were kept. */
   rules?: RulesRun | null;
   /**
    * When the run's kept /limits reading was taken (DECISIONS.md 726), from its folder: a resumed
@@ -958,7 +958,7 @@ export function buildReport(all: ReportInput): BuiltReport {
     const first = buildReport({ ...input.baseline, baseline: null });
     baselineRefused = first.refused.length;
     progress = compareWithBaseline(
-      { runId: first.input.run.id, asOf: first.input.run.asOf, findings: first.teamFindings, scores: first.input.scores ?? [], overall: first.overall, value: first.value, limitsReadAt: limitsReadAt(first.input.run, first.input.limitsReadAt), ...(input.baseline.carried ? { carried: input.baseline.carried } : {}), metrics: first.input.metrics },
+      { runId: first.input.run.id, asOf: first.input.run.asOf, findings: first.teamFindings, scores: first.input.scores ?? [], overall: first.overall, value: first.value, limitsReadAt: limitsReadAt(first.input.run, first.input.limitsReadAt), ...(input.baseline.carried ? { carried: input.baseline.carried } : {}), metrics: first.input.metrics, ...(first.input.rules ? { rulesRun: first.input.rules.rulesRun } : {}) },
       { runId: run.id, asOf: run.asOf, findings: team, scores, overall, value, limitsReadAt: limitsReadAt(run, input.limitsReadAt), ownCalls: run.budget.callsMade, asRead: effective.findings, checkedByCode: checkedByCode(run) },
     );
   }

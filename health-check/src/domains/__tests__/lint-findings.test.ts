@@ -364,11 +364,14 @@ describe("scores and history don't move because we started measuring (decision 6
     assert.equal(withoutSix.notTotalledFindingIds, undefined);
   });
 
-  test("every other rule compares as before: a rule absent from the earlier run is still new", () => {
+  test("every other rule: absent from the earlier run, it is checked for the first time too (decision 779); listed there as run with nothing found, new", () => {
     const before = without.filter((f) => f.ruleId !== "tech.governor-limit-risk");
     const p = compareWithBaseline(side("before", before), side("now", without));
-    assert.ok(p.added.some((c) => c.ruleId === "tech.governor-limit-risk"));
-    assert.equal(p.newlyMeasured, undefined);
+    assert.ok(p.newlyMeasured?.some((c) => c.ruleId === "tech.governor-limit-risk"));
+    assert.ok(!p.added.some((c) => c.ruleId === "tech.governor-limit-risk"));
+    const listed = compareWithBaseline({ ...side("before", before), rulesRun: [...new Set(without.map((f) => f.ruleId))] }, side("now", without));
+    assert.ok(listed.added.some((c) => c.ruleId === "tech.governor-limit-risk"));
+    assert.equal(listed.newlyMeasured, undefined);
   });
 });
 

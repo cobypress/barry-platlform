@@ -1,5 +1,5 @@
 import type { BuiltReport } from "../narrative/sections.ts";
-import { passedOnMerit } from "../domains/scoring.ts";
+import { passedOnMerit, unscoredVersion } from "../domains/scoring.ts";
 import { noMoneyReason } from "./amount-notes.ts";
 import { bySeverity, domainLabel, isThinData, issuesOf, type Added } from "../narrative/select.ts";
 import { kindTallies, noteCounts } from "../narrative/unmeasured.ts";
@@ -99,10 +99,12 @@ export function chapterSlide(r: Render, report: BuiltReport, domain: string): st
   const { issues, broken, belowPar, passed, open } = groups(own, report.added);
   const worth = worthOf(report.value, new Set(own.map((f) => f.id)));
   const score = report.input.scores?.find((s) => s.domain === domain);
+  // The checks the area counts: never a version shown and not scored (DECISIONS.md 779), as Passed leaves it out.
+  const checks = own.filter((f) => !unscoredVersion(f)).length;
 
   const counts = `<div class="counts stat-row">${[
     score?.status === "measured" ? [String(score.score), "Score out of 100"] : null,
-    [String(own.length), own.length === 1 ? "Check" : "Checks"],
+    [String(checks), checks === 1 ? "Check" : "Checks"],
     [String(passed.length), "Passed"],
     [String(issues.length), issues.length === 1 ? "Issue" : "Issues"],
   ]

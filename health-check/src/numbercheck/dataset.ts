@@ -1,6 +1,7 @@
 import type { Finding, ManualStep, Metric, NumberOverride, Run, Score } from "../schemas/index.ts";
 import { extractFigures, inOrgWords, type Figure, type PartialDate } from "./extract.ts";
 import { kindTallies } from "../narrative/unmeasured.ts";
+import { passedOnMerit, unscoredVersion } from "../domains/scoring.ts";
 import type { PseudonymEntry } from "../privacy/pseudonymiser.ts";
 import { spansIfCurrent, type MarkedSentence, type OrgSpan } from "../engine/org-words.ts";
 
@@ -291,7 +292,11 @@ function addSummary(set: FigureSet, all: Finding[], metrics: Metric[], manualSte
   const issues = findings.filter((f) => f.status === "issue");
   c.number(findings.length);
   c.number(issues.length);
-  c.number(findings.filter((f) => f.status === "passed").length);
+  const passed = findings.filter((f) => f.status === "passed").length;
+  c.number(passed);
+  // The passes the outputs count: never a version shown and not scored (DECISIONS.md 778, 779). Only where it differs, so a run without one has the set it had.
+  const onMerit = findings.filter(passedOnMerit).length;
+  if (onMerit !== passed) c.number(onMerit);
   c.number(findings.filter((f) => f.status === "not_measurable").length);
   // What couldn't be measured, by kind (DECISIONS.md 627).
   for (const n of kindTallies(findings)) c.number(n);
@@ -305,6 +310,8 @@ function addSummary(set: FigureSet, all: Finding[], metrics: Metric[], manualSte
   c.number(byDomain.size);
   for (const group of byDomain.values()) {
     c.number(group.length);
+    const scored = group.filter((f) => !unscoredVersion(f)).length;
+    if (scored !== group.length) c.number(scored);
     c.number(group.filter((f) => f.status === "issue").length);
     for (const n of kindTallies(group)) c.number(n);
   }
