@@ -1,4 +1,5 @@
 import { compareWithBaseline, limitsReadAt, progressDays, progressFigures, progressTitles, storageSentences, stricterHeading, worthFigures, type Progress } from "../progress/compare.ts";
+import { passedOnMerit } from "../domains/scoring.ts";
 import { readFromNameNote } from "../connect/stage-outcomes.ts";
 import { factsText, type FactsSummary } from "../facts/summary.ts";
 import { currencyStanding } from "../engine/currency.ts";
@@ -556,7 +557,7 @@ function summaryCounts(findings: Finding[]): PromptSource {
     issues: issues.length,
     critical: issues.filter((f) => f.severity === "critical").length,
     high: issues.filter((f) => f.severity === "high").length,
-    passed: findings.filter((f) => f.status === "passed").length,
+    passed: findings.filter(passedOnMerit).length,
     notMeasurable: findings.filter((f) => f.status === "not_measurable").length,
   };
 }
@@ -786,7 +787,7 @@ function fullSpecs(input: ReportInput, team: Finding[], metrics: Metric[], surve
   const verdict = verdictOf(team);
   const issues = issuesOf(team, added);
   const notMeasurable = team.filter((f) => f.status === "not_measurable");
-  const passed = team.filter((f) => f.status === "passed");
+  const passed = team.filter(passedOnMerit);
   const pipelineMetrics = metrics.filter((m) => m.domain === "historic_pipeline" || m.domain === "current_pipeline");
   const setupReview = isSetupReview(input.run);
   return [

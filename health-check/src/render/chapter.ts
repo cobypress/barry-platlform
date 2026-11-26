@@ -1,4 +1,5 @@
 import type { BuiltReport } from "../narrative/sections.ts";
+import { passedOnMerit } from "../domains/scoring.ts";
 import { noMoneyReason } from "./amount-notes.ts";
 import { bySeverity, domainLabel, isThinData, issuesOf, type Added } from "../narrative/select.ts";
 import { kindTallies, noteCounts } from "../narrative/unmeasured.ts";
@@ -53,7 +54,7 @@ function groups(own: Finding[], added?: Added) {
     issues,
     broken: issues.filter((f) => f.severity === "critical" || f.severity === "high"),
     belowPar: issues.filter((f) => f.severity !== "critical" && f.severity !== "high"),
-    passed: own.filter((f) => f.status === "passed"),
+    passed: own.filter(passedOnMerit),
     open: own.filter((f) => f.status === "not_measurable"),
   };
 }

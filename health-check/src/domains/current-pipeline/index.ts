@@ -752,10 +752,9 @@ export const withStuckExpected = (modules: DomainModule[]): DomainModule[] => mo
 /**
  * cur.stuck-in-stage version 4, behind HC_STUCK_UNSCORED (DECISIONS.md 778): version 2's line, count and deal list,
  * shown and never scored. A snapshot of open deals over-samples long stays (777), so the share past the line says
- * nothing on its own about a problem; the list is for pipeline reviews. Served as an observation: an issue of
- * severity info, as the code checker's groups are shown and not scored (673), so the deal list and the figure reach
- * the customer, and a version the score leaves out (UNSCORED_VERSIONS in scoring.ts) never moves an area, the
- * overall score or the headline, and is never counted in an area's coverage. No deal past the line: a pass.
+ * nothing on its own about a problem. Always a pass the score leaves out (UNSCORED_VERSIONS in scoring.ts): never an
+ * issue, never scored, never counted in an area's coverage nor as a pass that reflects well; its figure and its own
+ * words only, with no deal list (option (a); a list for review is the owner's to decide, FOR-REVIEW-LIST.md).
  */
 const stuckInStageUnscored: Rule = {
   id: "cur.stuck-in-stage",
@@ -784,32 +783,10 @@ const stuckInStageUnscored: Rule = {
     const facts = { hits: read.hits, n: read.n, rate: read.rate, wonLineRate: read.rate, ...(read.hotspots[0] ? { wonLineWorstSegmentRate: read.hotspots[0].rate } : {}) };
     // "About": the line is a percentile of won deals' stays, read between two of them.
     const lead = named(said`Open deals that have been in their stage longer than about three quarters of won deals stayed there: ${read.hits} of ${read.n} (${read.rate}%).`, { wonWithinPct: STUCK_PCT, hits: read.hits, n: read.n, rate: [read.rate, "percent"] });
-    if (read.hits === 0) return { outcome: "pass", summary: said`${lead}${leftOut}`, evidence, segmentsChecked: read.segmentsChecked, facts };
-    // Each deal's time against its line on one basis: the deal's rounded down, the line's up, in whole hours where the
-    // line is under a day (as 776 does) and in days to one decimal otherwise, and listed only where the two read apart.
-    const inHours = (d: Deal): boolean => lines.get(d.StageName)! < 1;
-    const shownDays = (d: Deal): number => (inHours(d) ? Math.floor(days(d) * 24) : Math.floor(days(d) * 10) / 10);
-    const shownLine = (d: Deal): number => (inHours(d) ? Math.ceil(lines.get(d.StageName)! * 24) : Math.ceil(lines.get(d.StageName)! * 10) / 10);
-    const text = (x: number): string => (Number.isInteger(x) ? `${x}` : x.toFixed(1));
-    const unitOf = (d: Deal, x: number): string => (inHours(d) ? (x === 1 ? "hour" : "hours") : x === 1 ? "day" : "days");
-    const listed = deals.filter((d) => isPast(d) && shownDays(d) > shownLine(d));
-    return {
-      outcome: "issue",
-      title: said`Open deals that have waited longest in their stage`,
-      summary: said`${lead}${leftOut} Some open deals are usually past this point, because the deals still open at any moment tend to be the slower ones. Whether this share is a problem depends on what is normal for these stages, which we can't tell from it, so the list is for your pipeline reviews.`,
-      recommendation: said`In pipeline reviews, go through the deals that have waited longest in each stage, and agree a next step or a decision for each.`,
-      recommendationType: "investigate",
-      severity: "info",
-      confidence: "high",
-      evidence,
-      value: notSized(said`Some open deals are usually past this point, so the Amount on them doesn't show money at risk, and we don't put a figure on it.`),
-      effort: { size: "S" },
-      owner: "Head of sales",
-      segmentsChecked: read.segmentsChecked,
-      subjects: [],
-      facts,
-      ...(listed.length ? { records: { object: "Opportunity" as const, rows: listed.map((d) => ({ id: d.Id, problem: `In ${d.StageName} for ${text(shownDays(d))} ${unitOf(d, shownDays(d))}, where about three quarters of won deals' stays there ended within ${text(shownLine(d))} ${unitOf(d, shownLine(d))}` })), fix: "Agree a next step or a decision for it" } } : {}),
-    };
+    // Always a pass (DECISIONS.md 778, option (a)): it never asserts a fault, so it is no issue in any count, list, plan,
+    // ticket file, alert or comparison, and carries no deal list. Its own words say what the figure can't show.
+    const note = read.hits > 0 ? said` Some open deals are usually past this point, because the deals still open at any moment tend to be the slower ones. Whether this share is a problem depends on what is normal for these stages, which we can't tell from it.` : said``;
+    return { outcome: "pass", summary: said`${lead}${leftOut}${note}`, evidence, segmentsChecked: read.segmentsChecked, facts };
   },
 };
 

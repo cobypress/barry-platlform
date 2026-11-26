@@ -416,15 +416,14 @@ const SIGNED_OFF: string[] = [
   // calibration's minimum (typed numbers), its lead and left-out sentences (said made), plural over our literal noun.
   "src/domains/current-pipeline/index.ts: ctx.calibration.minSample",
   "src/domains/current-pipeline/index.ts: lead",
-  "src/domains/current-pipeline/index.ts: lead",
   "src/domains/current-pipeline/index.ts: left",
-  "src/domains/current-pipeline/index.ts: leftOut",
   "src/domains/current-pipeline/index.ts: leftOut",
   "src/domains/current-pipeline/index.ts: plural(noEntry, \"deal\")",
   "src/domains/current-pipeline/index.ts: plural(noLine, \"deal\")",
   "src/domains/current-pipeline/index.ts: read.hits",
   "src/domains/current-pipeline/index.ts: read.n",
   "src/domains/current-pipeline/index.ts: read.rate",
+  "src/domains/current-pipeline/index.ts: note",
   // cur.stuck-in-stage 3 (HC_STUCK_EXPECTED, DECISIONS.md 777), each read in review: typed numbers the rule works out
   // (counts, rounded shares, the calibration's minimum), sentences said made (the lead, left-out, total and segment
   // sentences and their helpers, the scope label), plural over our literal noun, and the dimension's name as version 2's.

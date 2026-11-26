@@ -74,6 +74,11 @@ const idleAdditions = (findings: Finding[]): Set<string> => {
 export const UNSCORED_VERSIONS: Readonly<Record<string, readonly number[]>> = { "cur.stuck-in-stage": [4] };
 /** Whether a finding's rule version is one the score leaves out. */
 export const unscoredVersion = (f: { ruleId: string; ruleVersion: number }): boolean => Object.hasOwn(UNSCORED_VERSIONS, f.ruleId) && UNSCORED_VERSIONS[f.ruleId]!.includes(f.ruleVersion);
+/**
+ * A pass that counts as one in what the documents say of an area: never a reading the score leaves out (778), whose
+ * own words say it can't tell, so it never adds to "passed", "what's working well" or the passing checks.
+ */
+export const passedOnMerit = (f: { status: string; ruleId: string; ruleVersion: number }): boolean => f.status === "passed" && !unscoredVersion(f);
 const notScored = (f: Finding): boolean => SETUP_RULES.has(f.ruleId) || UNSCORED_RULES.has(f.ruleId) || INSIGHT_RULES.has(f.ruleId) || unscoredVersion(f);
 
 const WEIGHTS: Record<string, number> = {
