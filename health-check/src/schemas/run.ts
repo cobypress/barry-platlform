@@ -122,6 +122,9 @@ export const Run = z.object({
   // A pulse shown through an automatic check's gate (DECISIONS.md 746): its digest is checked by code, as an automatic
   // run's is (756). Set only then, so every other run.json is as before.
   gated: z.literal(true).optional(),
+  // Analysed with HC_AREA_REASONS on (DECISIONS.md 769), so its documents print each unscored area's reason whole. Set
+  // only then, so every other run.json is as before.
+  areaReasons: z.literal(true).optional(),
   // Absent on a run stored before decision 710.
   orgProfile: OrgProfile.optional(),
 });

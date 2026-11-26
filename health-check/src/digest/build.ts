@@ -10,7 +10,7 @@ import type { Pseudonymiser } from "../privacy/pseudonymiser.ts";
 import { knownPeople } from "../fix/prompt.ts";
 import { spansIfCurrent, textSha256, type OrgSpan } from "../engine/org-words.ts";
 import { engineOwn, orgValuesOf } from "../engine/automatic-words.ts";
-import { UNSCORED_RULES } from "../domains/scoring.ts";
+import { areaReasonFrom, areaReasonParts, AREA_REASON_TODAY, UNSCORED_RULES } from "../domains/scoring.ts";
 import { hasLoosened, hasTightened, issueUnder, passedUnder } from "../engine/loosened.ts";
 import { DIGEST_VERSION, NAMED_PEOPLE_SENTENCE, RunDigest, type DigestArea, type DigestReadiness, type DigestFinding, type DigestMetric, type DigestTotal, type DigestValueModel, type SentenceOrgWords } from "../schemas/digest.ts";
 import { FIX_PROMPT_MAX, type Finding, type Metric } from "../schemas/index.ts";
@@ -332,12 +332,23 @@ function digestValue(report: BuiltReport): DigestValueModel {
   };
 }
 
-function digestAreas(report: BuiltReport): DigestArea[] {
+function digestAreas(report: BuiltReport, pseudonyms: Pseudonymiser): DigestArea[] {
   return (report.input.scores ?? []).map((s): DigestArea =>
     s.status === "measured"
       ? { status: "measured", domain: s.domain, label: domainLabel(s.domain), score: s.score, findingIds: [...s.findingIds] }
-      : { status: "not_measurable", domain: s.domain, label: domainLabel(s.domain), reason: s.reason, ...(s.notMeasurableKind ? { notMeasurableKind: s.notMeasurableKind } : {}) },
+      : { status: "not_measurable", domain: s.domain, label: domainLabel(s.domain), reason: areaReasonShown(report, s.domain, s.reason, pseudonyms), ...(s.notMeasurableKind ? { notMeasurableKind: s.notMeasurableKind } : {}) },
   );
+}
+
+/**
+ * An area's reason as a digest or a document shows it (DECISIONS.md 769): one
+ * said from its checks' reasons that the name and id guard would change is the
+ * sentence the area gave before, ours, never the named-people sentence, which is
+ * about an issue. Any other reason as it is.
+ */
+export function areaReasonShown(report: Pick<BuiltReport, "input">, domain: string, reason: string, pseudonyms: Pseudonymiser): string {
+  const from = areaReasonFrom(domain, report.input.findings, reason);
+  return from && holdsPersonOrSecret(reason, pseudonyms) ? from.today : reason;
 }
 
 const GRADE = /^[A-E]$/;
@@ -379,7 +390,7 @@ export function buildDigest({ report, pseudonyms, inventory, madeAt }: DigestFor
       overall.status === "measured" && Number.isInteger(overall.score) && GRADE.test(overall.grade)
         ? { status: "measured", score: overall.score, grade: overall.grade, areaDomains: overall.areas.map((a) => a.domain), ...(scoreCaveatFor(report) ? { caveat: scoreCaveatFor(report)! } : {}) }
         : { status: "not_measurable", reason: overall.status === "not_measurable" ? overall.reason : "The overall score couldn't be kept." },
-    areas: digestAreas(report),
+    areas: digestAreas(report, pseudonyms),
     findings: report.teamFindings.map((f) => digestFinding(f, { ownCalls: run.budget.callsMade, carried: report.progress?.carried ?? {} })),
     metrics: report.metrics.map(digestMetric),
     value: digestValue(report),
@@ -541,7 +552,7 @@ function moreWords(d: Pick<RunDigest, "metrics" | "areas" | "overall" | "plan">,
   });
   const areas = d.areas.map((a) => {
     if (a.status !== "not_measurable") return a;
-    const reason = engineWords(a.reason);
+    const reason = engineWords(a.reason) ?? checksWords(a, report);
     return reason ? { ...a, orgWords: { ...a.orgWords, reason } } : a;
   });
   const overallReason = d.overall.status === "not_measurable" ? engineWords(d.overall.reason) : undefined;
@@ -550,6 +561,46 @@ function moreWords(d: Pick<RunDigest, "metrics" | "areas" | "overall" | "plan">,
   const noteWords = note ? engineWords(note) : undefined;
   const plan = d.plan.hoursTotal && noteWords ? { ...d.plan, hoursTotal: { ...d.plan.hoursTotal, orgWords: { note: noteWords } } } : d.plan;
   return { metrics, areas, overall, plan };
+}
+
+/**
+ * An area's reason said from its own checks' reasons (DECISIONS.md 769), marked
+ * part by part: our words with no marks, and each check's reason with the marks
+ * the run made for it, moved to where it sits. Only while the area reads exactly
+ * as the score made it from the run's findings, and every check's part still
+ * reads as marked; anything else is unknown, for the checked digest to withhold.
+ */
+function checksWords(a: Extract<DigestArea, { status: "not_measurable" }>, report: BuiltReport): SentenceOrgWords | undefined {
+  const score = (report.input.scores ?? []).find((s) => s.domain === a.domain);
+  if (score?.status !== "not_measurable" || score.reason !== a.reason) return undefined;
+  const byId = new Map(report.input.findings.map((f) => [f.id, f]));
+  for (const today of AREA_REASON_TODAY) {
+    const parts = areaReasonParts(a.domain, report.input.findings, today);
+    if (!parts || parts.map((p) => p.text).join(" ") !== a.reason) continue;
+    const spans: OrgSpan[] = [];
+    let at = 0;
+    for (const part of parts) {
+      // Every check's marks for the same sentence together: a span any of them marks as the org's is the org's here.
+      const marked = part.findingIds.map((id) => byId.get(id)).map((f) => (f ? spansIfCurrent(part.text, f.orgWords?.notMeasurableReason) : null)).filter((x): x is OrgSpan[] => x !== null);
+      const own = part.findingIds.length === 0 ? [] : marked.length ? unionOf(marked.flat()) : null;
+      if (!own) return undefined;
+      spans.push(...own.map((s) => ({ start: s.start + at, end: s.end + at })));
+      at += part.text.length + 1;
+    }
+    return { orgWordsMarked: true, orgWords: spans };
+  }
+  return undefined;
+}
+
+/** Spans together, sorted, with those that touch or overlap joined: sorted and apart, as a marking must be. */
+function unionOf(spans: OrgSpan[]): OrgSpan[] {
+  const out: OrgSpan[] = [];
+  for (const s of [...spans].sort((a, b) => a.start - b.start || a.end - b.end)) {
+    const last = out.at(-1);
+    if (last && s.start <= last.end) last.end = Math.max(last.end, s.end);
+    else out.push({ ...s });
+  }
+  return out;
 }
 
 /**

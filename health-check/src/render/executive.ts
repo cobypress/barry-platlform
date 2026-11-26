@@ -10,6 +10,7 @@ import { deliveryOutlookChart, scorecardChart, scorecardOptions, winRateBySegmen
 import { compactMoney, longDate, monthYear } from "./format.ts";
 import { chartSlot, coverScore, document, documentTitle, difficultySpan, estimateLines, paginate, inDocumentOrder, paragraphs, printed, renderContext, severityChip, textLines, valueFigure, valueText, type Render } from "./html.ts";
 import { noteSections, referenceMap, valueItemId } from "./references.ts";
+import { withWholeNotes } from "./area-notes.ts";
 import { investmentPage, MONEY_CSS, moneyPage } from "./money.ts";
 import { PROGRESS_CSS, progressPage } from "./progress.ts";
 import { nextStepsPage, riskPage } from "./exec-pages.ts";
@@ -300,7 +301,7 @@ function executiveHtmlWith(report: BuiltReport, pseudonyms: Pseudonymiser, words
   const invested = investmentPage(r, report);
   if (invested) add(invested);
 
-  add(`<div class="eyebrow">Scorecard</div><h2>How each area stands</h2><p style="margin-bottom:14px">${r.t(currentBody(built, "scorecard") + scoreLine(report))}</p>${chartSlot(scorecardChart(scorecard(team, scores, areasOf(run, team)), scorecardOptions(report)))}${setupReview ? "" : `<h3 class="sub">Win rate by team and kind of deal</h3><div style="margin-top:8px">${chartSlot(winRateBySegment(report.metrics.find((m) => m.id === "historic.win_rate")))}</div>`}`);
+  add(`<div class="eyebrow">Scorecard</div><h2>How each area stands</h2><p style="margin-bottom:14px">${r.t(currentBody(built, "scorecard") + scoreLine(report))}</p>${chartSlot(scorecardChart(withWholeNotes(report, scorecard(team, scores, areasOf(run, team)), pseudonyms), scorecardOptions(report)))}${setupReview ? "" : `<h3 class="sub">Win rate by team and kind of deal</h3><div style="margin-top:8px">${chartSlot(winRateBySegment(report.metrics.find((m) => m.id === "historic.win_rate")))}</div>`}`);
 
   // Only figures with something to stand against, as in the full report.
   const compared = report.comparisons.filter((c) => c.value !== null && (c.published.length > 0 || c.own.status === "measured"));

@@ -64,6 +64,11 @@ export type WorkerDeps = {
    * model's readings. Until it does, its strict schema throws on one, so stageNamesModel is ignored without it.
    */
   stageNamesModelConsole?: boolean;
+  /**
+   * HC_AREA_REASONS=on, exactly, read once at start in env.ts (DECISIONS.md 769): an area the score leaves out says
+   * why from its own checks' reasons. Off when absent: the area says what it said before.
+   */
+  areaReasons?: boolean;
   /** The worker's switch for automatic runs, read once at start in env.ts (DECISIONS.md 688). Absent: off. */
   automatic?: AutomaticSwitch;
   /**
