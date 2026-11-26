@@ -100,7 +100,7 @@ export function journeyOf(ctx: Ctx): Cohort {
   const lagDays = Math.max(LEAST_LAG_DAYS, Math.ceil(quantile(closedDays, LAG_QUANTILE)));
   const from = ctx.window.from;
   const to = dayPlus(localDay(ctx.now, zone), -lagDays);
-  if (to < from) return { status: "not_measurable", reason: said`Leads take so long to become closed deals here that none created since ${daySaid(from)} has had the ${lagDays} days it takes, so none can be counted yet.`, evidence };
+  if (to < from) return { status: "not_measurable", reason: said`Leads here can take ${lagDays} days to become closed deals, so none created since ${daySaid(from)} has had the time yet, and none can be counted.`, evidence };
 
   const inPeriod = (l: Lead): boolean => dayOf(l) >= from && dayOf(l) <= to;
   const recent = data.leads.filter((l) => dayOf(l) > to).length;
@@ -110,7 +110,7 @@ export function journeyOf(ctx: Ctx): Cohort {
   const left = data.leads.filter((l) => inPeriod(l) && notFollowed(l)).length;
   const exclusions = [
     ...data.exclusions,
-    ...(recent ? [said`${plural(recent, "lead")} created after ${daySaid(to)}, too recent to have had the ${lagDays} days within which 9 in 10 of the leads that became closed deals got there`] : []),
+    ...(recent ? [said`${plural(recent, "lead")} created after ${daySaid(to)}, too recent to have had the ${lagDays} days that 9 in 10 of the leads that became closed deals took`] : []),
     ...(left ? [said`${plural(left, "lead")} converted into a deal we couldn't follow: not read, at a stage with no meaning, or closed before the lead was made`] : []),
   ];
   const kept = [...followed.values()].filter((d) => inPeriod(d.lead));
@@ -121,7 +121,7 @@ export function journeyOf(ctx: Ctx): Cohort {
 /** Too many still open to say how the period's deals end, or null when few enough are. */
 function tooOpen(c: Extract<Cohort, { status: "ok" }>): Said | null {
   const open = c.deals.filter((d) => d.open).length;
-  return c.deals.length > 0 && open > OPEN_SHARE * c.deals.length ? said`Of the ${c.deals.length} deals from leads made early enough to judge, ${open} are still open, too many to say how they end.` : null;
+  return c.deals.length > 0 && open > OPEN_SHARE * c.deals.length ? said`Of the ${c.deals.length} deals from leads made early enough to judge, ${open} are still open, too many to say how these deals end.` : null;
 }
 
 /** The cohort, or not measurable with the reason: a reason of its own, too many still open, or too few leads in it. */
@@ -155,8 +155,8 @@ export function journeyMetrics(ctx: Ctx): Metric[] {
   const { minSample } = ctx.calibration;
   const assumptions = [
     zoneNote(ctx),
-    said`Leads made ${periodSaid(c)} are counted: the run's date less ${c.lagDays} days, the time within which 9 in 10 of the leads that became closed deals got there`,
-    said`Days are whole calendar days, from the day a lead was made to the day its deal closed, because Salesforce keeps the day a lead converted without a time`,
+    said`Leads made ${periodSaid(c)} are counted. The period ends ${c.lagDays} days before the run: the time 9 in 10 of the leads that became closed deals took to get there`,
+    said`Days are whole calendar days, from the day a lead was made to the day its deal closed, because Salesforce records the day a lead converted but not the time`,
     said`A deal converted from more than one lead is counted once, from the first of them`,
   ];
   const rest = { dateRange: { from: c.from, to: c.to }, segmentExemptReason: null, series: [] as SeriesPoint[], exclusions: c.exclusions, assumptions };

@@ -123,7 +123,7 @@ describe("leads that became won deals (L2's measure)", () => {
     const m = measured(metric(a, "lead.won_lead_rate"));
     assert.equal(m.value, base.value);
     assert.equal(m.n, base.n);
-    assert.ok(m.exclusions.some((e) => /^100 leads created after .*, too recent to have had the \d+ days within which 9 in 10 of the leads that became closed deals got there$/.test(e)), m.exclusions.join(" | "));
+    assert.ok(m.exclusions.some((e) => /^100 leads created after .*, too recent to have had the \d+ days that 9 in 10 of the leads that became closed deals took$/.test(e)), m.exclusions.join(" | "));
     assert.deepEqual(one(a, "lead.source-win-rate").facts, one(on(richSpecs()), "lead.source-win-rate").facts);
   });
 
@@ -144,7 +144,7 @@ describe("leads that became won deals (L2's measure)", () => {
   test("too recent: when no lead made since the window's start has had the journey's time, nothing is counted", () => {
     const specs = Array.from({ length: 30 }, (_, i): LeadSpec => ({ source: "Web", made: 300 - i, convertedAfter: 3, outcome: i % 2 ? "won" : "lost", closedAfter: 200 }));
     const a = on(specs, undefined, { window: { from: "2026-06-01", to: "2026-10-31" } });
-    assert.equal((metric(a, "lead.won_lead_rate") as { reason: string }).reason, "Leads take so long to become closed deals here that none created since 1 June 2026 has had the 200 days it takes, so none can be counted yet.");
+    assert.equal((metric(a, "lead.won_lead_rate") as { reason: string }).reason, "Leads here can take 200 days to become closed deals, so none created since 1 June 2026 has had the time yet, and none can be counted.");
   });
 
   test("too few leads in the period, when slow deals set a long lag", () => {
@@ -158,7 +158,7 @@ describe("leads that became won deals (L2's measure)", () => {
   test("too many still open is not measurable, saying how many", () => {
     const specs = richSpecs().map((s, i) => (s.outcome && i % 9 === 0 ? { ...s, outcome: "open" as const } : s));
     const a = on(specs);
-    assert.match((metric(a, "lead.won_lead_rate") as { reason: string }).reason, /^Of the 220 deals from leads made early enough to judge, \d+ are still open, too many to say how they end\.$/);
+    assert.match((metric(a, "lead.won_lead_rate") as { reason: string }).reason, /^Of the 220 deals from leads made early enough to judge, \d+ are still open, too many to say how these deals end\.$/);
     assert.equal(one(a, "lead.source-win-rate").status, "not_measurable");
   });
 });
