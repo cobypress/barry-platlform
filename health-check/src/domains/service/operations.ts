@@ -10,6 +10,7 @@ import { localDay, zoneOf } from "../time-zone.ts";
 import { missingFieldReason } from "../../extract/fields.ts";
 import { org, passedOn, said, type Said } from "../../engine/org-words.ts";
 import { grouped } from "../../engine/said-forms.ts";
+import { closedStraight, reopenedTime, sentBackCases, statusPathMetrics, stuckInStatus } from "./paths.ts";
 import { ageDays, byOrigin, caseQueues, HOUR, limitsOf, median, MIN_SEGMENT, originOf, ownerType, priorityOf, quantile, queueOwned, round1, yearRange, yearsCases } from "./shared.ts";
 
 /** Our name for a segment's dimension: one of the rules' own keys, or, to be safe, the org's words (DECISIONS.md 657). */
@@ -575,5 +576,19 @@ export const serviceOperationsModule: DomainModule = {
   metrics: [metrics],
   rules: [backlogGrowth, backlogAge, priorityResolution, milestoneBreaches, firstReply, reopened, unassigned, originMissing, classification, customerLinked],
 };
+
+/**
+ * Service operations with the case status paths on (HC_CASE_PATHS, DECISIONS.md 776): the same reads, and the paths'
+ * stored metric, three checks and a stored insight after the rest, so every finding and metric before them keeps its
+ * place. Reaches only a run that includes the service module.
+ */
+export const casePathsModule: DomainModule = {
+  ...serviceOperationsModule,
+  metrics: [metrics, statusPathMetrics],
+  rules: [...serviceOperationsModule.rules, stuckInStatus, reopenedTime, closedStraight, sentBackCases],
+};
+
+/** The modules a run analyses with the switch on: service operations swapped for its paths', and nothing else touched. */
+export const withCasePaths = (modules: DomainModule[]): DomainModule[] => modules.map((m) => (m === serviceOperationsModule ? casePathsModule : m));
 
 export const SERVICE_OPERATIONS_METRIC_IDS = ["service.open_cases", "service.resolution_days", "service.cases_created", "service.cases_by_origin", "service.routing_declined"];

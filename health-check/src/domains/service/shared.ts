@@ -32,8 +32,9 @@ export const DAY = 24 * HOUR;
 /** A queue owns it when the owner id is a group's (00G). */
 export const queueOwned = (ownerId: string): boolean => ownerId.startsWith("00G");
 export const ownerType = (c: { OwnerId: string }): string => (queueOwned(c.OwnerId) ? "Queue" : "Person");
-export const priorityOf = (c: { Priority: string | null }): string => c.Priority ?? "No priority";
-export const originOf = (c: { Origin?: string | null }): string => c.Origin ?? "No origin";
+// An empty value is none (DECISIONS.md 776): an empty key stopped the run with a schema error, as an empty lead source did (770).
+export const priorityOf = (c: { Priority: string | null }): string => (c.Priority === null || c.Priority === "" ? "No priority" : c.Priority);
+export const originOf = (c: { Origin?: string | null }): string => (c.Origin === undefined || c.Origin === null || c.Origin === "" ? "No origin" : c.Origin);
 
 /**
  * Origin as a segment, only where the cases' read has the field. Without it
