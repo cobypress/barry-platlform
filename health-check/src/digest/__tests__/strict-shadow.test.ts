@@ -12,6 +12,7 @@ import { buildReport, type ReportInput } from "../../narrative/sections.ts";
 import { scopeDataset } from "../../numbercheck/index.ts";
 import type { Finding } from "../../schemas/index.ts";
 import { keepStrictShadow, namedValuesOf } from "../../worker/run-job.ts";
+import { END_OF_SUPPORT, SUPPORT_ENDED_ON } from "../../domains/automation/notes.ts";
 import { automatic, base, MADE_AT } from "./readiness-scenarios.ts";
 
 // The strict per-finding check, in shadow (DECISIONS.md 768, KAN-102): each
@@ -109,6 +110,30 @@ describe("the strict check traces a finding's figures to its own computed values
     // As the run folder keeps them: a name, or "name@unit" where named() was given the unit.
     assert.deepEqual(summaryUntraced(input, first.id, { [first.id]: { days: 7, "limit@percent": 25, "overall@percent": 26.7, "wonFromLeads@money": 2_561_000 } }), []);
     assert.deepEqual(summaryUntraced(input, first.id, { [first.id]: { days: 7, limit: 25, overall: 26.7, wonFromLeads: 2_561_000 } }), ["25%", "26.7%", "£2,561,000"]);
+  });
+
+  test("a named date traces the day it names, in the finding's own material alone (DECISIONS.md 772)", () => {
+    const text = "Source: Salesforce, checked 2026-11-02. Support ended on 31 December 2025.";
+    const input = inputWith((f) => (f.id === first.id ? withSummary(f, text, {}) : f));
+    assert.deepEqual(summaryUntraced(input, first.id), ["2026-11-02", "31 December 2025"]);
+    assert.deepEqual(summaryUntraced(input, first.id, { [first.id]: { "checkedOn@date": 20261102, "supportEnded@date": 20251231 } }), []);
+    // Another finding's date backs nothing here, and a day that isn't the one named stays untraced.
+    assert.deepEqual(summaryUntraced(input, first.id, { [second.id]: { "checkedOn@date": 20261102, "supportEnded@date": 20251231 } }), ["2026-11-02", "31 December 2025"]);
+    assert.deepEqual(summaryUntraced(input, first.id, { [first.id]: { "checkedOn@date": 20261103, "supportEnded@date": 20251231 } }), ["2026-11-02"]);
+  });
+
+  test("named() keeps a date as yyyymmdd under name@date, and refuses what isn't one", () => {
+    withNamedValues(() =>
+      namedFor("rule:a", () => {
+        named("Planted check on 2026-11-02 and in 2026-02", { checkedOn: ["2026-11-02", "date"], month: ["2026-02", "date"], not: ["soon", "date"] });
+        assert.deepEqual(namedIn(["Planted check on 2026-11-02 and in 2026-02"], "rule:a"), { "checkedOn@date": 20261102, "month@date": 20260200 });
+      }),
+    );
+  });
+
+  test("the end-of-support sentence is made from the one constant its date is named with", () => {
+    assert.equal(SUPPORT_ENDED_ON, "2025-12-31");
+    assert.equal(END_OF_SUPPORT, "Salesforce ended support for Workflow Rules and Process Builder on 31 December 2025. They keep running, but any bug is yours to work around.");
   });
 
   test("a word that only holds a unit's letters says nothing", () => {
