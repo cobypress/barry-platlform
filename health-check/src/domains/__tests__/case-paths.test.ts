@@ -258,6 +258,13 @@ describe("open cases past their status's line, against earlier weeks (C1)", () =
     assert.match(textOf(f), / That is more than what a steady queue would have\./);
   });
 
+  test("a stay not yet ended counts in the steady share at its length so far, never left out", () => {
+    // Three two-day stays and one begun 63 days ago and still going: leaving that one out would say no case should be past the line.
+    const snap = snapshotAt(withStays([[60, 2], [61, 2], [62, 2], [63, 200]], 0), NOW, 0, 3);
+    assert.equal(snap.lines.get("Working"), 2);
+    assert.ok(snap.expected.get("Working")! > 0.8, String(snap.expected.get("Working")));
+  });
+
   test("the steady share is the length-biased share past the line: E[max(0, X - line)] / E[X]", () => {
     assert.equal(steadyShare([1, 2, 3, 6], 2), (0 + 0 + 1 + 4) / 12);
     assert.equal(steadyShare([], 1), 0);
