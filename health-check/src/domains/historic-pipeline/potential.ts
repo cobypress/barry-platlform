@@ -36,8 +36,8 @@ export const SITUATIONS = {
     const zone = zoneOf(ctx);
     return { key: "past-close", phrase: said`open past their close date`, matches: (d) => wasPastClose(d, data.stages, zone), ceiling: true };
   },
-  inStageFor: (days: number, data: Ready): Situation => ({ key: `in-stage-${days}`, phrase: said`in one stage for ${days} days or more`, matches: (d) => longestInStage(d, data.stages) >= days, ceiling: true }),
-  unchangedFor: (days: number, data: Ready): Situation => ({ key: `unchanged-${days}`, phrase: said`open for ${days} days or more with no change to stage, amount or close date`, matches: (d) => longestUnchanged(d, data.stages) >= days, ceiling: true }),
+  inStageFor: (days: number, data: Ready): Situation => ({ key: `in-stage-${days}`, phrase: named(said`in one stage for ${days} days or more`, { stages: 1, inStageDays: days }), matches: (d) => longestInStage(d, data.stages) >= days, ceiling: true }),
+  unchangedFor: (days: number, data: Ready): Situation => ({ key: `unchanged-${days}`, phrase: named(said`open for ${days} days or more with no change to stage, amount or close date`, { unchangedDays: days }), matches: (d) => longestUnchanged(d, data.stages) >= days, ceiling: true }),
   inStage: (stage: string): Situation => ({ key: `stage-${stage}`, phrase: said`in the ${org(stage)} stage`, matches: (d) => wasInStage(d, stage), ceiling: false }),
 };
 

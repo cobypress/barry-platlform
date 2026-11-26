@@ -1,4 +1,5 @@
 import { fieldDescribeExtractor, missingFieldReason } from "../../extract/fields.ts";
+import { named } from "../../engine/named.ts";
 import { activityExtractor } from "../../extract/activity.ts";
 import { schemaExtractor } from "../../extract/configuration.ts";
 import { leadsExtractor } from "../../extract/leads.ts";
@@ -128,7 +129,7 @@ const responseTime: Rule = {
     return {
       outcome: "issue",
       title: said`Some leads wait days for a first response`,
-      summary: said`The median first response is ${overall} hours.${worst ? said` ${worst.dimension === "source" ? said`${org(worst.key)} leads wait` : said`For ${dimensionWord(worst.dimension)} ${org(worst.key)} the wait is`} ${worst.hours} hours.` : ""} Our working targets are ${RESPONSE_TARGET_HOURS} hours overall and ${RESPONSE_SEGMENT_HOURS} for any segment.`,
+      summary: named(said`The median first response is ${overall} hours.${worst ? said` ${worst.dimension === "source" ? said`${org(worst.key)} leads wait` : said`For ${dimensionWord(worst.dimension)} ${org(worst.key)} the wait is`} ${worst.hours} hours.` : ""} Our working targets are ${RESPONSE_TARGET_HOURS} hours overall and ${RESPONSE_SEGMENT_HOURS} for any segment.`, { targetHours: RESPONSE_TARGET_HOURS, segmentTargetHours: RESPONSE_SEGMENT_HOURS }),
       recommendation: said`Set a response rule by source, and route the slow ones to someone who can meet it.`,
       recommendationType: "change",
       severity: "medium",
@@ -164,7 +165,7 @@ const noResponse: Rule = {
     return {
       outcome: "issue",
       title: said`Leads are going unanswered`,
-      summary: said`Leads with no logged response after ${RESPONSE_GRACE_DAYS} days: ${result.hits} of ${result.n} (${result.rate}%).${worst ? said` Worst by ${dimensionWord(worst.dimension)}: ${org(worst.key)}, at ${worst.rate}%.` : ""}`,
+      summary: named(said`Leads with no logged response after ${RESPONSE_GRACE_DAYS} days: ${result.hits} of ${result.n} (${result.rate}%).${worst ? said` Worst by ${dimensionWord(worst.dimension)}: ${org(worst.key)}, at ${worst.rate}%.` : ""}`, { graceDays: RESPONSE_GRACE_DAYS, worstPct: worst?.rate }),
       recommendation: said`Check routing first: unassigned or queue-held leads are the usual cause.`,
       recommendationType: "change",
       severity: "medium",
@@ -307,7 +308,7 @@ const campaignReturn: Rule = {
     return {
       outcome: "issue",
       title: said`Some campaign spend isn't coming back`,
-      summary: said`${joinSaid(under.map((r) => said`${org(r.type)}`), ", ")} cost ${moneySaid(under.reduce((sum, r) => sum + r.cost, 0), ctx.calibration.currency)} and returned ${moneySaid(under.reduce((sum, r) => sum + r.returned, 0), ctx.calibration.currency)} in won deals from its leads.`,
+      summary: named(said`${joinSaid(under.map((r) => said`${org(r.type)}`), ", ")} cost ${moneySaid(under.reduce((sum, r) => sum + r.cost, 0), ctx.calibration.currency)} and returned ${moneySaid(under.reduce((sum, r) => sum + r.returned, 0), ctx.calibration.currency)} in won deals from its leads.`, { costMoney: under.reduce((sum, r) => sum + r.cost, 0), returnedMoney: under.reduce((sum, r) => sum + r.returned, 0) }),
       recommendation: said`Check the attribution first, because deals with contacts on a campaign aren't counted here. Then decide whether to keep this spend.`,
       recommendationType: "investigate",
       severity: "medium",
@@ -332,7 +333,7 @@ function groupByType<C extends { Type: string | null }>(campaigns: C[]): Array<[
 function funnelMetrics(ctx: Ctx): Metric[] {
   const shared = { domain: DOMAIN, exclusions: [] as string[], assumptions: [zoneNote(ctx)] };
   const definitions = {
-    conversion: { ...shared, id: "lead.conversion_rate", label: "Lead conversion", unit: "percent" as const, definition: `Leads converted, as a share of leads at least ${CONVERSION_AGE_DAYS} days old.` },
+    conversion: { ...shared, id: "lead.conversion_rate", label: "Lead conversion", unit: "percent" as const, definition: named(`Leads converted, as a share of leads at least ${CONVERSION_AGE_DAYS} days old.`, { conversionAgeDays: CONVERSION_AGE_DAYS }) },
     response: { ...shared, id: "lead.median_response_hours", label: "First response time", unit: "count" as const, definition: "Median hours from a lead's creation to its first task, event or status change. The unit is hours." },
     wonPerLead: { ...shared, id: "lead.won_per_lead", label: "Won per lead", unit: "currency" as const, definition: "Amount of won deals converted from leads, divided by leads." },
   };

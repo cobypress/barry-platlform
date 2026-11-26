@@ -18,12 +18,21 @@ type Entry = { text: string; values: Record<string, number> };
 /** The sentences named in the analysis running now, or null outside one. Analyses run one at a time, synchronously. */
 let ledger: Entry[] | null = null;
 
-/** The text, unchanged, with the values it writes named for the strict check. Outside an analysis, only the text. */
+/**
+ * Sentences named outside any analysis: a rule's fixed title, made once when its
+ * module loads, with the constant it writes. Each text once, and only so many,
+ * since nothing is ever taken out.
+ */
+const fixed = new Map<string, Record<string, number>>();
+const FIXED_MAX = 5000;
+
+/** The text, unchanged, with the values it writes named for the strict check. */
 export function named<T extends string>(text: T, values: Readonly<Record<string, number | null | undefined>>): T {
-  if (!ledger) return text;
   const kept: Record<string, number> = {};
   for (const [name, value] of Object.entries(values)) if (typeof value === "number" && Number.isFinite(value)) kept[name] = value;
-  if (Object.keys(kept).length > 0) ledger.push({ text, values: kept });
+  if (Object.keys(kept).length === 0) return text;
+  if (ledger) ledger.push({ text, values: kept });
+  else if (fixed.size < FIXED_MAX && !fixed.has(text)) fixed.set(text, kept);
   return text;
 }
 
@@ -44,11 +53,11 @@ export function withNamedValues<T>(run: () => T): T {
  * A finding's or metric's own texts only, so another's never backs it.
  */
 export function namedIn(texts: ReadonlyArray<string | null | undefined>): Record<string, number> | null {
-  if (!ledger || ledger.length === 0) return null;
+  if (!ledger) return null;
   const own = texts.filter((t): t is string => typeof t === "string" && t !== "");
   const out: Record<string, number> = {};
   const seen = new Set<string>();
-  for (const entry of ledger) {
+  for (const entry of [...[...fixed].map(([text, values]) => ({ text, values })), ...ledger]) {
     if (seen.has(entry.text) || !own.some((t) => t.includes(entry.text))) continue;
     seen.add(entry.text);
     for (const [name, value] of Object.entries(entry.values)) {

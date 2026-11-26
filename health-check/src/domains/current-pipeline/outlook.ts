@@ -1,4 +1,5 @@
 import type { RuleContext } from "../../engine/rule.ts";
+import { named } from "../../engine/named.ts";
 import { org, said } from "../../engine/org-words.ts";
 import { stagesExtractor } from "../../extract/opportunities.ts";
 import type { Evidence, Metric, MetricSegment, SeriesPoint } from "../../schemas/index.ts";
@@ -168,7 +169,7 @@ export function deliveryOutlook(ctx: Ctx, data: Ready, deals: Deal[], evidence: 
   const noAmount = weighted.length - priced.length;
   const metrics: Metric[] = [];
   if (data.multiCurrency) metrics.push({ ...definitions.value, ...shared, exclusions, status: "not_measurable", reason: MULTI_CURRENCY });
-  else metrics.push({ ...definitions.value, ...shared, exclusions: [...exclusions, ...(noAmount ? [said`${noAmount} weighted open deals with no amount add nothing to value`] : [])], assumptions: [...assumptions, ...(currency === "XXX" ? [] : [said`Amounts in ${org(currency)}`])], status: "measured", ...build(valueOf) });
+  else metrics.push({ ...definitions.value, ...shared, exclusions: [...exclusions, ...(noAmount ? [named(said`${noAmount} weighted open deals with no amount add nothing to value`, { noAmount })] : [])], assumptions: [...assumptions, ...(currency === "XXX" ? [] : [said`Amounts in ${org(currency)}`])], status: "measured", ...build(valueOf) });
   metrics.push({ ...definitions.deals, ...shared, exclusions, assumptions, status: "measured", ...build(dealsOf) });
   return metrics;
 }

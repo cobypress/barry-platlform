@@ -1,4 +1,5 @@
 import type { RuleContext } from "../../engine/rule.ts";
+import { named } from "../../engine/named.ts";
 import { eng, joinSaid, org, passedOn, said, type Said } from "../../engine/org-words.ts";
 import { pct } from "../../engine/rule.ts";
 import { orgExtractor } from "../../extract/configuration.ts";
@@ -160,7 +161,7 @@ function winRate(ctx: Ctx, data: Ready): Metric[] {
     const value = valueRate(decided);
     if (value === null) metrics.push(notMeasurable(definitions.value, "Closed deals have no amounts."));
     else {
-      const assumptions = [...definitions.value.assumptions, ...(missingAmount > 0 ? [said`${missingAmount} closed deals have no amount and count as zero`] : [])];
+      const assumptions = [...definitions.value.assumptions, ...(missingAmount > 0 ? [named(said`${missingAmount} closed deals have no amount and count as zero`, { missingAmount, countedAs: 0 })] : [])];
       metrics.push(measured({ ...definitions.value, assumptions }, { value, n: decided.length, dateRange: ctx.window, segments: segment(decided, dims, minSample, valueRate) }));
     }
   }
@@ -424,7 +425,7 @@ function pointInTime(ctx: Ctx, data: Ready): Metric[] {
 
   const measuredPoints = countSeries.filter((p) => p.value !== null);
   if (measuredPoints.length === 0) return [notMeasurable(countDefinition, "No month end falls inside the stage history."), notMeasurable(valueDefinition, "No month end falls inside the stage history.")];
-  const exclusions = [...data.exclusions, ...(missingHistory ? [said`${missingHistory} deals with no stage history by the latest month end`] : [])];
+  const exclusions = [...data.exclusions, ...(missingHistory ? [named(said`${missingHistory} deals with no stage history by the latest month end`, { missingHistory })] : [])];
   const range: DateRange = { from: measuredPoints[0]!.date, to: measuredPoints.at(-1)!.date };
 
   const byStage = (rows: typeof latestOpen, calculate: (group: typeof latestOpen) => number): MetricSegment[] => {

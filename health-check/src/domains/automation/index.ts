@@ -1,4 +1,5 @@
 import { apexExtractor, metadataExtractor, scheduledJobsExtractor } from "../../extract/automation.ts";
+import { named } from "../../engine/named.ts";
 import { componentChangesExtractor } from "../../extract/component-changes.ts";
 import { customObjectsExtractor, recordCountsExtractor } from "../../extract/configuration.ts";
 import { notSized, plural, type Rule, type RuleResult } from "../../engine/rule.ts";
@@ -256,7 +257,7 @@ const undocumentedAutomation: Rule = {
     const worst = [...present].sort((a, b) => b.missing / b.total - a.missing / a.total)[0]!;
     const facts = { total, missing, rate };
     // The kinds are our own fixed names.
-    const breakdown = joinSaid(present.map((g) => said`${eng(g.kind)}: ${g.missing} of ${g.total}`), ", ");
+    const breakdown = joinSaid(present.map((g) => named(said`${eng(g.kind)}: ${g.missing} of ${g.total}`, { missing: g.missing, of: g.total })), ", ");
     if (rate <= UNDOCUMENTED_LIMIT && worst.missing / worst.total <= 0.8) {
       return { outcome: "pass", summary: said`Automation with no description or comment: ${missing} of ${total} (${rate}%). ${breakdown}.`, evidence, segmentsChecked: segments, facts };
     }

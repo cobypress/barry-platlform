@@ -211,8 +211,8 @@ const noRecentActivity = dealRule({
     return d.LastActivityDate === null || d.LastActivityDate < cutoff;
   },
   // Titled by its test, as two other checks find quiet deals by theirs (night 3 reading pass, item 16).
-  issueTitle: said`Open deals with no activity in ${STALE_ACTIVITY_DAYS} days`,
-  sentence: (hits, n, rate) => said`Open deals with no logged activity in ${STALE_ACTIVITY_DAYS} days: ${hits} of ${n} (${rate}%).`,
+  issueTitle: named(said`Open deals with no activity in ${STALE_ACTIVITY_DAYS} days`, { staleActivityDays: STALE_ACTIVITY_DAYS }),
+  sentence: (hits, n, rate) => named(said`Open deals with no logged activity in ${STALE_ACTIVITY_DAYS} days: ${hits} of ${n} (${rate}%).`, { staleActivityDays: STALE_ACTIVITY_DAYS }),
   recommendation: said`Review each quiet deal: either re-engage it or close it. Check that activity is being captured before treating this as a rep problem.`,
   effort: "S",
   owner: "Head of sales",
@@ -368,7 +368,7 @@ const inactiveRecordOwners: Rule = {
       outcome: "issue",
       title: said`Customer records belong to people who've left`,
       // The objects are our own fixed three.
-      summary: said`Accounts, contacts and leads with an inactive owner: ${strandedTotal} of ${total} (${joinSaid(objects.map((o) => said`${o}: ${stranded[o]!} of ${totals[o]!}`), ", ")}).`,
+      summary: said`Accounts, contacts and leads with an inactive owner: ${strandedTotal} of ${total} (${joinSaid(objects.map((o) => named(said`${o}: ${stranded[o]!} of ${totals[o]!}`, { stranded: stranded[o]!, of: totals[o]! })), ", ")}).`,
       recommendation: said`Reassign these records in bulk, and make reassignment part of your leaver process.`,
       recommendationType: "change",
       severity: "medium",
@@ -455,7 +455,7 @@ const staleLeads: Rule = {
     return {
       outcome: "issue",
       title: said`Leads are going unworked`,
-      summary: said`Open leads older than ${STALE_ACTIVITY_DAYS} days with no logged activity: ${stale.data} of ${open.data} (${rate}%).${worst ? said` The worst source is ${org(worst.source)}, at ${pct(worst.stale, worst.open)}%.` : ""}`,
+      summary: named(said`Open leads older than ${STALE_ACTIVITY_DAYS} days with no logged activity: ${stale.data} of ${open.data} (${rate}%).${worst ? said` The worst source is ${org(worst.source)}, at ${pct(worst.stale, worst.open)}%.` : ""}`, { staleActivityDays: STALE_ACTIVITY_DAYS, worstPct: worst ? pct(worst.stale, worst.open) : null }),
       recommendation: said`Agree a follow-up rule by source, and archive what's too old to work.`,
       recommendationType: "change",
       severity: "medium",
@@ -672,7 +672,7 @@ const recordTypeUse: Rule = {
     }
 
     const flagged = [...noRecords, ...noneRecent];
-    const named = (t: RecordTypeRow): string => `${t.Name} on ${labels.object(t.SobjectType)}`;
+    const typeName = (t: RecordTypeRow): string => `${t.Name} on ${labels.object(t.SobjectType)}`;
     const namedSaid = (t: RecordTypeRow): Said => said`${org(t.Name)} on ${org(labels.object(t.SobjectType))}`;
     const has = (n: number): Said => (n === 1 ? said`1 has` : said`${n} have`);
     const sentences = [
@@ -685,7 +685,7 @@ const recordTypeUse: Rule = {
     return {
       outcome: "issue",
       title,
-      summary: said`We could judge ${plural(judged.length, "record type")} of your own, on objects with at least ${RECORD_TYPE_MIN_RECENT} records made in the last 12 months. ${joinSaid(sentences, " ")} An active record type is still offered to anyone whose profile has it, and its page layouts and picklist values still have to be kept up.`,
+      summary: said`${named(said`We could judge ${plural(judged.length, "record type")} of your own, on objects with at least ${RECORD_TYPE_MIN_RECENT} records made in the last 12 months.`, { minRecent: RECORD_TYPE_MIN_RECENT, recentMonths: 12 })} ${joinSaid(sentences, " ")} An active record type is still offered to anyone whose profile has it, and its page layouts and picklist values still have to be kept up.`,
       recommendation: said`Deactivate ${plural(flagged.length, "record type")} once you've checked that no profile defaults to ${one ? "it" : "them"} and no flow, Apex or integration names ${one ? "it" : "them"}.`,
       blockedRecommendation: said`Review ${plural(flagged.length, "record type")} with the people who own ${owners}; we aren't recommending deactivating ${one ? "it" : "them"}, because we can't see which profiles default to ${one ? "it" : "them"} or which flows, Apex and integrations name ${one ? "it" : "them"}.`,
       recommendationType: "deactivate",
@@ -698,7 +698,7 @@ const recordTypeUse: Rule = {
       dependencies: ["Check which profiles default to each record type", "Check which flows, Apex and integrations name each record type"],
       guards: flagged.map((t) => recordTypeGuard(ctx, t, types.source)),
       segmentsChecked: segments,
-      subjects: flagged.map((t) => ({ type: "record type", label: named(t) })),
+      subjects: flagged.map((t) => ({ type: "record type", label: typeName(t) })),
       facts,
     };
   },

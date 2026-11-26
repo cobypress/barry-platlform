@@ -1,4 +1,5 @@
 import { pct, type RuleContext } from "../../engine/rule.ts";
+import { named } from "../../engine/named.ts";
 import { said, type Said } from "../../engine/org-words.ts";
 import { priorWinsExtractor, type PriorWinRow } from "../../extract/prior-wins.ts";
 import type { Sourced } from "../../extract/types.ts";
@@ -39,7 +40,7 @@ function stageWinRate(ctx: Ctx, data: Ready): Metric {
   const { minSample } = ctx.calibration;
   const closed = closedFromOpen(ctx, data);
   const neverOpen = data.deals.filter((d) => d.category !== "open" && d.category !== null && closedInWindow(d, ctx.window)).length - closed.length;
-  const exclusions = [...definition.exclusions, ...(neverOpen > 0 ? [said`${neverOpen} deals with no recorded open stage`] : [])];
+  const exclusions = [...definition.exclusions, ...(neverOpen > 0 ? [named(said`${neverOpen} deals with no recorded open stage`, { neverOpen })] : [])];
   if (closed.length < minSample) return notMeasurable({ ...definition, exclusions }, thinReason(closed.length, "closed deals with stage history", minSample));
   const rates = stageWinRates(ctx, data);
   const stages: MetricSegment[] = [...rates].map(([stage, cohort]) => ({ dimension: "stage", key: stage, n: cohort.n, value: cohort.rate, notMeasurableReason: cohort.rate === null ? `${SEGMENT_NOTE} (${cohort.n} of ${minSample})` : null }));
@@ -170,7 +171,7 @@ function winSources(ctx: Ctx, data: Ready): Metric[] {
   if (won.length < minSample) return every.map((d) => notMeasurable(d, thinReason(won.length, "won deals", minSample)));
   const blank = won.filter((d) => d.Amount === null).length;
   if (tooManyBlank(won)) return every.map((d) => notMeasurable(d, said`${blank} of ${won.length} won deals have no amount, so shares of won value would mislead.`));
-  const blankNote = blank > 0 ? [said`${blank} won deals with no amount count as zero`] : [];
+  const blankNote = blank > 0 ? [named(said`${blank} won deals with no amount count as zero`, { blank, countedAs: 0 })] : [];
   const withAccount = won.filter((d) => d.AccountId);
   const noAccount = won.length - withAccount.length;
   const accountExclusions = noAccount > 0 ? [`${noAccount} won deals with no account`] : [];
@@ -247,7 +248,7 @@ function lostFrom(ctx: Ctx, data: Ready): Metric[] {
   const all = data.deals.filter((d) => (d.category === "lost" || d.category === "no_decision") && closedInWindow(d, ctx.window));
   const lost = all.filter((d) => stageLeftFrom(d, data) !== null);
   const neverOpen = all.length - lost.length;
-  const exclusions = [...countDefinition.exclusions, ...(neverOpen > 0 ? [said`${neverOpen} deals with no recorded open stage`] : [])];
+  const exclusions = [...countDefinition.exclusions, ...(neverOpen > 0 ? [named(said`${neverOpen} deals with no recorded open stage`, { neverOpen })] : [])];
   if (lost.length < minSample) return [countDefinition, valueDefinition].map((d) => notMeasurable({ ...d, exclusions }, thinReason(lost.length, "lost and no decision deals with stage history", minSample)));
   const order = (stage: string): number => data.stages.orderOf(stage) ?? Number.MAX_SAFE_INTEGER;
   const byStage = [...groupBy(lost, (d) => stageLeftFrom(d, data)!)].sort(([a], [b]) => order(a) - order(b) || a.localeCompare(b));
@@ -264,7 +265,7 @@ function lostFrom(ctx: Ctx, data: Ready): Metric[] {
   else if (tooManyBlank(lost)) metrics.push(notMeasurable({ ...valueDefinition, exclusions }, said`${lost.filter((d) => d.Amount === null).length} of ${lost.length} lost deals have no amount, so the value lost would mislead.`));
   else {
     const blank = lost.filter((d) => d.Amount === null).length;
-    metrics.push(measured({ ...valueDefinition, exclusions, assumptions: [...valueDefinition.assumptions, ...(blank ? [said`${blank} lost deals with no amount count as zero`] : [])] }, { value: total(lost), n: lost.length, dateRange: ctx.window, segments: byStage.map(([key, group]) => ({ dimension: "stage left", key, n: group.length, value: total(group), notMeasurableReason: null })) }));
+    metrics.push(measured({ ...valueDefinition, exclusions, assumptions: [...valueDefinition.assumptions, ...(blank ? [named(said`${blank} lost deals with no amount count as zero`, { blank, countedAs: 0 })] : [])] }, { value: total(lost), n: lost.length, dateRange: ctx.window, segments: byStage.map(([key, group]) => ({ dimension: "stage left", key, n: group.length, value: total(group), notMeasurableReason: null })) }));
   }
   return metrics;
 }
@@ -276,7 +277,7 @@ function closeDateReliability(ctx: Ctx, data: Ready): Metric[] {
   if (data.unmapped.finalStages.length > 0) return [shareDefinition, lateDefinition].map((d) => notMeasurable(d, unmappedReason("stages", data.unmapped.finalStages)));
   const won = wonFromOpen(ctx, data);
   const neverOpen = wonIn(ctx, data).length - won.length;
-  const exclusions = [...shareDefinition.exclusions, ...(neverOpen > 0 ? [said`${neverOpen} won deals with no recorded open stage`] : [])];
+  const exclusions = [...shareDefinition.exclusions, ...(neverOpen > 0 ? [named(said`${neverOpen} won deals with no recorded open stage`, { neverOpen })] : [])];
   if (won.length < minSample) return [shareDefinition, lateDefinition].map((d) => notMeasurable({ ...d, exclusions }, thinReason(won.length, "won deals with stage history", minSample)));
   const dims = dimensions(ctx);
   delete dims["closed quarter"];

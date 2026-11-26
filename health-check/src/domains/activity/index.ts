@@ -1,4 +1,5 @@
 import { activityExtractor } from "../../extract/activity.ts";
+import { named } from "../../engine/named.ts";
 import { schemaExtractor } from "../../extract/configuration.ts";
 import { opportunitiesExtractor, stagesExtractor } from "../../extract/opportunities.ts";
 import { daysBefore } from "../../extract/types.ts";
@@ -258,7 +259,7 @@ const repActivity: Rule = {
     return {
       outcome: "issue",
       title: said`Some reps are logging far less than their peers`,
-      summary: said`${plural(low.length, "rep")} logged under ${REP_FLOOR_SHARE * 100}% of the typical ${typical} activities per open deal in the last ${RECENT_DAYS} days. This may be a logging gap rather than a performance one.`,
+      summary: named(said`${plural(low.length, "rep")} logged under ${REP_FLOOR_SHARE * 100}% of the typical ${typical} activities per open deal in the last ${RECENT_DAYS} days. This may be a logging gap rather than a performance one.`, { floorPct: REP_FLOOR_SHARE * 100, recentDays: RECENT_DAYS }),
       recommendation: said`Check their email and calendar connections first, then look at how they're working these deals.`,
       recommendationType: "investigate",
       severity: "medium",

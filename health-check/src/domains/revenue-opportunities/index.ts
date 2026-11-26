@@ -1,4 +1,5 @@
 import { schemaExtractor } from "../../extract/configuration.ts";
+import { named } from "../../engine/named.ts";
 import { opportunitiesExtractor, stagesExtractor, wonAccountsExtractor } from "../../extract/opportunities.ts";
 import { daysBefore, monthsBefore } from "../../extract/types.ts";
 import { usersExtractor } from "../../extract/users.ts";
@@ -56,15 +57,15 @@ const stalledDeals: Rule = {
     const evidence: Evidence[] = [{ ...data.evidence[0]!, count: stalled.length, dateRange: { from: ctx.window.to, to: ctx.window.to }, exclusions: data.exclusions, note: `Open deals with no stage change and no activity in ${STALLED_DAYS} days` }];
     if (open.length === 0) return { outcome: "pass", summary: said`There are no open deals to check.`, evidence, segmentExemptReason: "There are no deals to segment." };
     const segmentsChecked = dealSegments(ctx, open);
-    if (stalled.length < MIN_DEALS) return { outcome: "pass", summary: said`${plural(stalled.length, "open deal")} of ${open.length} ${stalled.length === 1 ? "has" : "have"} stalled for ${STALLED_DAYS} days, under the ${MIN_DEALS} we'd call a pattern.`, evidence, segmentsChecked, facts: { stalled: stalled.length, open: open.length } };
+    if (stalled.length < MIN_DEALS) return { outcome: "pass", summary: named(said`${plural(stalled.length, "open deal")} of ${open.length} ${stalled.length === 1 ? "has" : "have"} stalled for ${STALLED_DAYS} days, under the ${MIN_DEALS} we'd call a pattern.`, { stalledDays: STALLED_DAYS, minDeals: MIN_DEALS }), evidence, segmentsChecked, facts: { stalled: stalled.length, open: open.length } };
     const amount = total(stalled);
     const situation = SITUATIONS.inStageFor(STALLED_DAYS, data);
     const value = potentialRevenue(ctx, data, stalled, () => situation);
     return {
       outcome: "issue",
       // Titled by its test, as two other checks find quiet deals by theirs (night 3 reading pass, item 16).
-      title: said`Open deals with no stage change or activity in ${STALLED_DAYS} days`,
-      summary: said`${plural(stalled.length, "open deal")} of ${open.length} (${pct(stalled.length, open.length)}%) haven't changed stage or had activity in ${STALLED_DAYS} days.`,
+      title: named(said`Open deals with no stage change or activity in ${STALLED_DAYS} days`, { stalledDays: STALLED_DAYS }),
+      summary: named(said`${plural(stalled.length, "open deal")} of ${open.length} (${pct(stalled.length, open.length)}%) haven't changed stage or had activity in ${STALLED_DAYS} days.`, { stalledPct: pct(stalled.length, open.length), stalledDays: STALLED_DAYS }),
       recommendation: said`Give each owner a date to re-engage or close these. The ones that come back are the cheapest revenue you have.`,
       recommendationType: "change",
       severity: "medium",
@@ -166,7 +167,7 @@ const dormantAccounts: Rule = {
     return {
       outcome: "issue",
       title: said`Past customers have gone quiet`,
-      summary: said`${plural(dormant.length, "account")} of ${accounts.data.length} that have bought from you have nothing open and no activity in ${dormantDays} days.${stranded ? said` ${stranded} of them belong to inactive users, so nobody owns the relationship.` : ""}`,
+      summary: named(said`${plural(dormant.length, "account")} of ${accounts.data.length} that have bought from you have nothing open and no activity in ${dormantDays} days.${stranded ? said` ${stranded} of them belong to inactive users, so nobody owns the relationship.` : ""}`, { dormantDays }),
       recommendation: said`Agree who owns these accounts, and start with a light check-in rather than a pitch.`,
       recommendationType: "investigate",
       severity: "medium",

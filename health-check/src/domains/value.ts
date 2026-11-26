@@ -1,4 +1,5 @@
 import { eng, orgWordsOf, said, type Said } from "../engine/org-words.ts";
+import { named } from "../engine/named.ts";
 import { moneySaid } from "../engine/said-forms.ts";
 import { notSized, type RuleContext } from "../engine/rule.ts";
 import type { Metric, Value } from "../schemas/index.ts";
@@ -45,7 +46,7 @@ export function atOwnLeadReturn(ctx: Pick<RuleContext, "metrics" | "calibration"
     amount: Math.round(leads * rate.value),
     unit: ctx.calibration.currency,
     period: options.period,
-    assumptions: [said`${leads} leads at your own average of ${moneySaid(rate.value, ctx.calibration.currency)} won per lead, measured on ${rate.n} leads`, options.caveat],
+    assumptions: [named(said`${leads} leads at your own average of ${moneySaid(rate.value, ctx.calibration.currency)} won per lead, measured on ${rate.n} leads`, { leads, perLeadMoney: rate.value, measuredOn: rate.n }), options.caveat],
   };
 }
 

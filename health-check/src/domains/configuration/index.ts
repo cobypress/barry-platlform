@@ -1,4 +1,5 @@
 import { metadataExtractor, apexExtractor } from "../../extract/automation.ts";
+import { named as valued } from "../../engine/named.ts";
 import { componentChangesExtractor } from "../../extract/component-changes.ts";
 import {
   CORE_OBJECTS,
@@ -71,7 +72,7 @@ const customFieldSprawl: Rule = {
         outcome: "issue",
         title: said`Core objects carry a heavy custom field load`,
         // The objects are our own fixed four, named by API name.
-        summary: said`${joinSaid(over.map(([o, n]) => said`${o} has ${n} custom fields`), "; ")}. We use ${FIELD_SPRAWL_LIMIT} as a working limit: past it, page layouts and reports get harder to keep clean and users stop filling fields in.`,
+        summary: valued(said`${joinSaid(over.map(([o, n]) => said`${o} has ${n} custom fields`), "; ")}. We use ${FIELD_SPRAWL_LIMIT} as a working limit: past it, page layouts and reports get harder to keep clean and users stop filling fields in.`, { fieldLimit: FIELD_SPRAWL_LIMIT }),
         recommendation: said`Review these objects with the field usage findings and agree which fields still earn their place.`,
         recommendationType: "investigate",
         severity: "medium",
@@ -136,7 +137,7 @@ const unusedCustomFields: Rule = {
         outcome: "issue",
         key: object,
         title: said`Custom fields on ${org(named)} are almost never filled in`,
-        summary: said`Of ${plural(scan.data.fields.length, "scanned custom field")} on ${org(named)}, ${unused.length} ${unused.length === 1 ? "is" : "are"} filled on under ${UNUSED_FILL_LIMIT}% of records, both overall and on records from the last 12 months.`,
+        summary: valued(said`Of ${plural(scan.data.fields.length, "scanned custom field")} on ${org(named)}, ${unused.length} ${unused.length === 1 ? "is" : "are"} filled on under ${UNUSED_FILL_LIMIT}% of records, both overall and on records from the last 12 months.`, { fillPct: UNUSED_FILL_LIMIT, recentMonths: 12 }),
         recommendation: said`Remove ${plural(unused.length, "field")} from ${org(named)} once the data is archived.`,
         blockedRecommendation: said`Review ${plural(unused.length, "field")} with the people who own ${org(named)}. We aren't recommending removal, because not every dependency check could pass.`,
         recommendationType: "remove",
@@ -219,7 +220,7 @@ const undocumentedFields: Rule = {
     return {
       outcome: "issue",
       title: said`Most custom fields don't say what they're for`,
-      summary: said`Custom fields with neither help text nor a description: ${bare.length} of ${fields.length} (${rate}%), most on ${joinSaid(byObject.slice(0, 3).map((x) => said`${org(labels.object(x.o))} (${x.n})`), ", ")}. Users see no explanation when they fill these in, and whoever maintains the org can't tell what each one is for.`,
+      summary: said`Custom fields with neither help text nor a description: ${bare.length} of ${fields.length} (${rate}%), most on ${joinSaid(byObject.slice(0, 3).map((x) => valued(said`${org(labels.object(x.o))} (${x.n})`, { bare: x.n })), ", ")}. Users see no explanation when they fill these in, and whoever maintains the org can't tell what each one is for.`,
       recommendation: said`Add help text to the fields people fill in and a description to every field you keep, and retire the ones nobody can explain.`,
       recommendationType: "change",
       severity: "low",

@@ -1,4 +1,5 @@
 import { fieldDescribeExtractor, missingFieldReason } from "../../extract/fields.ts";
+import { named } from "../../engine/named.ts";
 import { schemaExtractor } from "../../extract/configuration.ts";
 import { forecastExtractor, quotasExtractor, revenueForecastType, type ForecastItemRow } from "../../extract/forecast.ts";
 import { opportunitiesExtractor, stagesExtractor } from "../../extract/opportunities.ts";
@@ -250,7 +251,7 @@ const commitAtRisk = shareRule({
     return commitScope(ctx, open, (d) => d.CloseDate < today || d.LastActivityDate === null || d.LastActivityDate < quietDay || pushesOf(d, fiscal).length >= REPEAT_PUSHES);
   },
   issueTitle: said`Your Commit forecast includes deals showing warning signs`,
-  sentence: (hits, n, rate) => said`Deals in Commit that are past their close date, quiet for ${QUIET_DAYS} days, or pushed ${REPEAT_PUSHES} or more times: ${hits} of ${n} (${rate}%).`,
+  sentence: (hits, n, rate) => named(said`Deals in Commit that are past their close date, quiet for ${QUIET_DAYS} days, or pushed ${REPEAT_PUSHES} or more times: ${hits} of ${n} (${rate}%).`, { quietDays: QUIET_DAYS, repeatPushes: REPEAT_PUSHES }),
   recommendation: said`Review each one before the next forecast call, and move it out of Commit unless there's a dated reason to keep it.`,
   owner: "Head of sales",
   sized: true,

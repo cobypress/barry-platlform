@@ -1,4 +1,5 @@
 import { loginActivityExtractor, type LoginActivity, type LoginChannel } from "../../extract/adoption.ts";
+import { named } from "../../engine/named.ts";
 import { userKinds } from "../user-kinds.ts";
 import { daysBefore } from "../../extract/types.ts";
 import { reportsExtractor, usersExtractor, type UserRow } from "../../extract/users.ts";
@@ -120,13 +121,13 @@ const knowsLightning = (u: UserRow): boolean => typeof u.UserPreferencesLightnin
 
 type Definition = Pick<Metric, "id" | "label" | "unit" | "definition">;
 const DEF = {
-  daily: { id: "adoption.daily_active_users", label: "Daily active users", unit: "count", definition: `People who logged in on an average working day, over the last ${RECENT_DAYS} days. API sessions don't count.` },
-  weekly: { id: "adoption.weekly_active_users", label: "Weekly active users", unit: "count", definition: `People who logged in in an average week, over the last ${RECENT_DAYS} days.` },
+  daily: { id: "adoption.daily_active_users", label: "Daily active users", unit: "count", definition: named(`People who logged in on an average working day, over the last ${RECENT_DAYS} days. API sessions don't count.`, { recentDays: RECENT_DAYS }) },
+  weekly: { id: "adoption.weekly_active_users", label: "Weekly active users", unit: "count", definition: named(`People who logged in in an average week, over the last ${RECENT_DAYS} days.`, { recentDays: RECENT_DAYS }) },
   monthly: { id: "adoption.monthly_active_users", label: "Monthly active users", unit: "count", definition: "People who logged in during the last full month, with each month the login history covers." },
   share: { id: "adoption.monthly_active_share", label: "Users active last month", unit: "percent", definition: "People who logged in during the last full month, as a share of active users." },
   channels: { id: "adoption.mobile_login_share", label: "Logins through the mobile app", unit: "percent", definition: "Successful logins through the Salesforce mobile app, as a share of all successful logins in the window, with every channel's share." },
   lightning: { id: "adoption.lightning_share", label: "Users on Lightning", unit: "percent", definition: "Active users set to use Lightning Experience, as a share of active users." },
-  reports: { id: "adoption.reports_run_recently", label: "Reports run recently", unit: "percent", definition: `Reports run in the last ${REPORT_RECENT_DAYS} days, as a share of all reports we can see.` },
+  reports: { id: "adoption.reports_run_recently", label: "Reports run recently", unit: "percent", definition: named(`Reports run in the last ${REPORT_RECENT_DAYS} days, as a share of all reports we can see.`, { reportRecentDays: REPORT_RECENT_DAYS }) },
 } satisfies Record<string, Definition>;
 
 /** Segments of the monthly metric holding the group that fell most, one per month, filed under this and the group's name. */
@@ -178,7 +179,7 @@ function activeMetrics(ctx: Ctx, data: Extract<Loaded, { status: "ok" }>): Metri
   const assumptions = ["Days are in UTC", `Working days are Monday to Friday`];
   const out: Metric[] = [
     measured(DEF.daily, evidence, daily(users), users.length, groups.map((g) => groupSegment(g, daily(g.users))), { assumptions, stats: { workingDays: working.length } }),
-    measured(DEF.weekly, evidence, weekly(users), users.length, groups.map((g) => groupSegment(g, weekly(g.users))), { assumptions: ["Days are in UTC", "Weeks are the last four runs of 7 days before the run"] }),
+    measured(DEF.weekly, evidence, weekly(users), users.length, groups.map((g) => groupSegment(g, weekly(g.users))), { assumptions: ["Days are in UTC", named("Weeks are the last four runs of 7 days before the run", { weeks: 4, weekDays: 7 })] }),
   ];
 
   const months = coveredMonths(activity, ctx.now);
@@ -324,12 +325,12 @@ const fallingAdoption: Rule = {
     if (!whole && falls.length === 0) {
       return { outcome: "pass", summary: said`Monthly active users haven't fallen ${FALL_SHARE}% or more from an earlier peak ${window}, in the org or in any profile or role of ${MIN_GROUP} people or more.`, evidence, segmentsChecked: segments, facts: { months: months.length } };
     }
-    const line = (f: Fall): Said => said`${f.words}, from ${f.peak} in ${org(f.peakMonth)} to ${f.now} in ${org(last)} (down ${f.drop}%)`;
+    const line = (f: Fall): Said => named(said`${f.words}, from ${f.peak} in ${org(f.peakMonth)} to ${f.now} in ${org(last)} (down ${f.drop}%)`, { peak: f.peak, now: f.now, dropPct: f.drop });
     const all = [...(whole ? [whole] : []), ...falls];
     return {
       outcome: "issue",
       title: whole ? said`Fewer people are using Salesforce` : said`Fewer people are using Salesforce in some teams`,
-      summary: said`Monthly active users have fallen ${FALL_SHARE}% or more from their peak: ${joinSaid(all.map(line), "; ")}.`,
+      summary: said`${named(said`Monthly active users have fallen ${FALL_SHARE}% or more from their peak`, { fallPct: FALL_SHARE })}: ${joinSaid(all.map(line), "; ")}.`,
       recommendation: said`Ask the people who've stopped why. Fix what gets in their way, and make Salesforce the place the team's meetings and figures come from.`,
       recommendationType: "investigate",
       severity: whole ? "high" : "medium",
@@ -368,7 +369,7 @@ const lowEngagement: Rule = {
     return {
       outcome: "issue",
       title: said`Some teams barely use Salesforce`,
-      summary: said`In these groups, most people logged in on fewer than ${BARELY_DAYS} of the last ${RECENT_DAYS} days: ${joinSaid(low.map((x) => said`${x.g.dimension} ${org(x.g.key)}, ${x.barely} of ${x.g.users.length}`), "; ")}.`,
+      summary: said`${named(said`In these groups, most people logged in on fewer than ${BARELY_DAYS} of the last ${RECENT_DAYS} days`, { barelyDays: BARELY_DAYS, recentDays: RECENT_DAYS })}: ${joinSaid(low.map((x) => named(said`${x.g.dimension} ${org(x.g.key)}, ${x.barely} of ${x.g.users.length}`, { barely: x.barely, of: x.g.users.length })), "; ")}.`,
       recommendation: said`Find out what these teams use instead of Salesforce, and bring that work into it: their pipeline, their reports, and their next steps.`,
       recommendationType: "investigate",
       severity: "medium",

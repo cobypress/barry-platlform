@@ -1,4 +1,5 @@
 import { fieldDescribeExtractor } from "../../extract/fields.ts";
+import { named as valued } from "../../engine/named.ts";
 import { apexExtractor, metadataExtractor, scheduledJobsExtractor } from "../../extract/automation.ts";
 import { componentChangesExtractor } from "../../extract/component-changes.ts";
 import { orgExtractor, recordCountsExtractor, schemaExtractor } from "../../extract/configuration.ts";
@@ -102,7 +103,7 @@ function reclaimFindings(ctx: RuleContext, candidates: UserRow[], describe: Recl
       // An automatic run asks no one, so there's no person's reason to quote (DECISIONS.md 693).
       reason: manual.answer
         ? said`Whether ${plural(unanswered.length, "user")} can be released can't be measured, because the Default Workflow User step was skipped: ${org(String(manual.answer.skipReason))}`
-        : said`Whether ${plural(unanswered.length, "user")} can be released can't be measured, because the Default Workflow User can't be read by API, and on an automatic run nobody is asked for it.`,
+        : valued(said`Whether ${plural(unanswered.length, "user")} can be released can't be measured, because the Default Workflow User can't be read by API, and on an automatic run nobody is asked for it.`, { unanswered: unanswered.length }),
       evidence: [manual.evidence],
       manualStepIds,
     });
@@ -246,7 +247,7 @@ const unassignedSeats: Rule = {
     return {
       outcome: "issue",
       title: said`You're paying for seats nobody holds`,
-      summary: said`Unassigned seats: ${seats}. ${joinSaid(spare.map((l) => said`${l.TotalLicenses - l.UsedLicenses} of ${l.TotalLicenses} ${org(l.Name)}`), "; ")}.`,
+      summary: said`Unassigned seats: ${seats}. ${joinSaid(spare.map((l) => valued(said`${l.TotalLicenses - l.UsedLicenses} of ${l.TotalLicenses} ${org(l.Name)}`, { spare: l.TotalLicenses - l.UsedLicenses, of: l.TotalLicenses })), "; ")}.`,
       recommendation: said`Reduce these seats at your next renewal, keeping whatever headroom your hiring plan needs.`,
       recommendationType: "change",
       severity: "medium",
@@ -309,7 +310,7 @@ const packageSeats: Rule = {
         };
     const parts = [
       unused.length ? said`${joinSaid(unused.map((p) => said`${named(p)} (${plural(p.AllowedLicenses, "seat")})`), ", ")} ${unused.length === 1 ? "has" : "have"} nobody assigned at all` : null,
-      spare.length ? said`${joinSaid(spare.map((p) => said`${named(p)} has ${idle(p)} of ${p.AllowedLicenses} seats unassigned`), "; ")}` : null,
+      spare.length ? said`${joinSaid(spare.map((p) => valued(said`${named(p)} has ${idle(p)} of ${p.AllowedLicenses} seats unassigned`, { idle: idle(p), of: p.AllowedLicenses })), "; ")}` : null,
     ].filter((part): part is Said => part !== null);
     return {
       outcome: "issue",
@@ -382,7 +383,7 @@ const dormantUsers = dormantRule(
   "Licensed users who've stopped logging in",
   "dormant",
   said`dormant users`,
-  (days) => said`haven't logged in for ${days} days`,
+  (days) => valued(said`haven't logged in for ${days} days`, { dormantDays: days }),
   (n, days) => said`${n === 1 ? "One more user's" : said`${n} more users'`} last-login date is over ${days} days old, but the login log shows ${n === 1 ? "them" : "each of them"} logging in since, so they aren't counted.`,
 );
 
@@ -421,7 +422,7 @@ const unusedReports: Rule = {
     return {
       outcome: "issue",
       title: said`Most reports aren't being used`,
-      summary: said`${unused.length} of ${settled.length} reports (${share}%) haven't been run in ${REPORT_RECENT_DAYS} days, so people will struggle to find the ones that matter.`,
+      summary: valued(said`${unused.length} of ${settled.length} reports (${share}%) haven't been run in ${REPORT_RECENT_DAYS} days, so people will struggle to find the ones that matter.`, { reportRecentDays: REPORT_RECENT_DAYS }),
       recommendation: said`Agree a core report set by team and archive the rest to a clearly labelled folder.`,
       recommendationType: "investigate",
       severity: "low",

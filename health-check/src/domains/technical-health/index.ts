@@ -1,4 +1,5 @@
 import { apexExtractor, metadataExtractor, type ApexClassRow, type ApexTriggerRow } from "../../extract/automation.ts";
+import { named } from "../../engine/named.ts";
 import { componentChangesExtractor } from "../../extract/component-changes.ts";
 import { customObjectsExtractor, orgExtractor, recordCountsExtractor } from "../../extract/configuration.ts";
 import { apiLimitsExtractor } from "../../extract/integrations.ts";
@@ -80,7 +81,7 @@ const oldApiVersions: Rule = {
     return {
       outcome: "issue",
       title: said`Some automation is on very old API versions`,
-      summary: said`Components on an API version older than ${floor}, more than ${API_VERSIONS_BEHIND} versions behind the newest used here: ${joinSaid(KINDS.filter((k) => old[k] > 0).map((k) => said`${k}: ${old[k]}`), ", ")}. Salesforce retires old versions over time.`,
+      summary: named(said`Components on an API version older than ${floor}, more than ${API_VERSIONS_BEHIND} versions behind the newest used here: ${joinSaid(KINDS.filter((k) => old[k] > 0).map((k) => said`${k}: ${old[k]}`), ", ")}. Salesforce retires old versions over time.`, { versionsBehind: API_VERSIONS_BEHIND }),
       recommendation: said`Bring these components forward as part of your next release cycle.`,
       recommendationType: "change",
       severity: "medium",
@@ -446,7 +447,7 @@ const storageUse: Rule = {
     return {
       outcome: "issue",
       title: past ? said`Storage is past the allowance` : said`Storage is close to the allowance`,
-      summary: said`${sentence} Past the allowance, Salesforce can stop new records or files being saved until space is freed or more is bought.${largest.length ? said` The objects with the most records: ${joinSaid(largest.map((o) => said`${org(labelsOf(ctx).object(o.name))} (${grouped(o.count)})`), ", ")}.` : ""}`,
+      summary: said`${sentence} Past the allowance, Salesforce can stop new records or files being saved until space is freed or more is bought.${largest.length ? said` The objects with the most records: ${joinSaid(largest.map((o) => named(said`${org(labelsOf(ctx).object(o.name))} (${grouped(o.count)})`, { records: o.count })), ", ")}.` : ""}`,
       recommendation: past
         ? said`Archive or delete what you no longer need, starting with the largest objects and old files, and arrange extra storage now, because you are past the allowance.`
         : said`Archive or delete what you no longer need, starting with the largest objects and old files, and plan any extra storage before you reach the limit.`,

@@ -164,7 +164,7 @@ function stageLines(ctx: RuleContext, data: Ready): Map<string, number> {
 function leftOutSentence(noLine: number, noEntry: number): Said | undefined {
   const n = noLine + noEntry;
   if (n === 0) return undefined;
-  const lead = said`${n === 1 ? "One more open deal" : said`${n} more open deals`} couldn't be compared`;
+  const lead = named(said`${n === 1 ? "One more open deal" : said`${n} more open deals`} couldn't be compared`, { leftOut: n, noLine, noEntry });
   const line = (k: number) => said`${k === 1 ? "a stage" : "stages"} with too few won deals to set a line`;
   const entry = (k: number) => said`history that doesn't show when ${k === 1 ? "it" : "they"} entered ${k === 1 ? "its" : "their"} stage`;
   if (!noEntry) return said`${lead}, as ${n === 1 ? "it's" : "they're"} in ${line(n)}.`;
@@ -196,7 +196,7 @@ const stuckInStage = shareRule({
     };
   },
   issueTitle: said`Deals are sitting in stages for longer than your wins do`,
-  sentence: (hits, n, rate) => said`Open deals that have been in their stage longer than three quarters of your won deals took: ${hits} of ${n} (${rate}%).`,
+  sentence: (hits, n, rate) => named(said`Open deals that have been in their stage longer than three quarters of your won deals took: ${hits} of ${n} (${rate}%).`, { wonWithinPct: STUCK_PERCENTILE * 100 }),
   recommendation: said`Go through these in pipeline reviews, and either move each deal on with a dated next step or close it.`,
   owner: "Head of sales",
   sized: true,
@@ -225,8 +225,8 @@ const staleDeals = shareRule({
     };
   },
   // Titled by its test, as two other checks find quiet deals by theirs (night 3 reading pass, item 16).
-  issueTitle: said`Open deals with no stage change or activity in ${QUIET_DAYS} days`,
-  sentence: (hits, n, rate) => said`Open deals with no stage change and no logged activity in ${QUIET_DAYS} days: ${hits} of ${n} (${rate}%).`,
+  issueTitle: named(said`Open deals with no stage change or activity in ${QUIET_DAYS} days`, { quietDays: QUIET_DAYS }),
+  sentence: (hits, n, rate) => named(said`Open deals with no stage change and no logged activity in ${QUIET_DAYS} days: ${hits} of ${n} (${rate}%).`, { quietDays: QUIET_DAYS }),
   recommendation: said`Check that activity is being captured, then re-engage these deals or close them.`,
   owner: "Head of sales",
   sized: (_ctx, data) => SITUATIONS.inStageFor(QUIET_DAYS, data),
@@ -447,7 +447,7 @@ function currentMetrics(ctx: Ctx): Metric[] {
   const loaded = openDeals(ctx);
   const definitions = {
     count: { id: "current.open_deals", domain: DOMAIN, label: "Open deals", unit: "count" as const, definition: "Deals in a stage the calibration calls open, today." },
-    value: { id: "current.open_pipeline", domain: DOMAIN, label: "Open pipeline", unit: "currency" as const, definition: "Total Amount of open deals today. A deal with no amount counts as zero." },
+    value: { id: "current.open_pipeline", domain: DOMAIN, label: "Open pipeline", unit: "currency" as const, definition: named("Total Amount of open deals today. A deal with no amount counts as zero.", { countedAs: 0 }) },
     age: { id: "current.median_days_in_stage", domain: DOMAIN, label: "Days in current stage", unit: "days" as const, definition: "Median days open deals have been in their current stage." },
   };
   const shared = { exclusions: [] as string[], assumptions: [zoneNote(ctx)] };
