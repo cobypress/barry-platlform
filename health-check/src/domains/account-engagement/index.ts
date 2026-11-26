@@ -111,8 +111,9 @@ const unworkedHandovers: Rule = {
     const facts = { handed: handed.length, unworked: unworked.length, rate, days: UNWORKED_DAYS, staleDays: STALE_DAYS };
     const evidence = read.evidence;
     if (handed.length === 0) return { outcome: "pass", summary: said`No open lead synced from Account Engagement is owned by a salesperson.`, evidence, segmentExemptReason: "There are no handed-over leads to segment.", facts };
-    // Rule 4: a source nobody works can hide under well-worked ones, so each source is checked before it passes.
-    const bySource = segmentRate(handed, isUnworked, { "lead source": (l) => l.LeadSource ?? "No source" }, { segmentLimit: UNWORKED_SHARE, minSegment: MIN_SOURCE });
+    // Rule 4: a source nobody works can hide under well-worked ones, so each source is checked before it passes. An empty
+    // source is no source: as a segment key it would fail the schema and stop the run (DECISIONS.md 770).
+    const bySource = segmentRate(handed, isUnworked, { "lead source": (l) => (l.LeadSource === null || l.LeadSource === "" ? "No source" : l.LeadSource) }, { segmentLimit: UNWORKED_SHARE, minSegment: MIN_SOURCE });
     const segments = bySource.segmentsChecked;
     const worst = bySource.hotspots[0];
     if ((unworked.length === 0 || (rate < UNWORKED_SHARE && !worst)) && read.truncated) return { outcome: "not_measurable", reason: cutOff(read.rows.length), evidence };

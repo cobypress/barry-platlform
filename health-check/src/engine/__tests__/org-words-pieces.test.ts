@@ -846,6 +846,8 @@ const SIGNED_OFF: string[] = [
   // Numbers: counts, rates, limits and constants the rule works out (each typed number).
   // The lead journey (DECISIONS.md 770), behind HC_LEAD_JOURNEY. Numbers: counts, rates, days and constants the rules work out, each typed number;
   // sentences said made (daySaid, periodSaid, plural over literal nouns, andList of org words, stillOpen, who, within, NOT_A_CAUSE, smallestTellable's number).
+  "src/domains/lead-funnel/journey.ts: daySaid(from)",
+  'src/domains/lead-funnel/journey.ts: plural(early, "lead")',
   "src/domains/lead-funnel/journey.ts: LAG_SHARE",
   "src/domains/lead-funnel/journey.ts: LAG_SHARE",
   "src/domains/lead-funnel/journey.ts: closedCount",
