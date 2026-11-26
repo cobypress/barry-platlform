@@ -8,7 +8,7 @@ import { expectRunStores } from "../engine/org-words.ts";
 import { HEALTH_CHECK_QUEUE, HEAVY_QUEUE, lostRecorder, redisConnection, runQueuer, startQueueWorker, type BullModule } from "../worker/bullmq.ts";
 import { defaultLintTempBase, findPmd, PMD_TIME_LIMIT_MS, PMD_VERSION, sweepLintTemp } from "../extract/lint/pmd.ts";
 import { GoogleDrive } from "../worker/drive.ts";
-import { readWorkerEnv, WORKER_ENV } from "../worker/env.ts";
+import { areaReasonsStartLine, readWorkerEnv, WORKER_ENV } from "../worker/env.ts";
 import { automaticStartLine } from "../worker/automatic.ts";
 import { stageModelStartLine, stageNamesStartLine } from "../worker/stage-answer.ts";
 import { leadJourneyStartLine } from "../worker/env.ts";
@@ -127,6 +127,7 @@ export async function workerCommand(
     stageNames: config.stageNames,
     stageNamesModel: config.stageNamesModel,
     stageNamesModelConsole: config.stageNamesModelConsole,
+    areaReasons: config.areaReasons,
     leadJourney: config.leadJourney,
     codeLint: "found" in pmd ? { pmd: pmd.found } : { pmd: null, pmdMissing: pmd.missing },
     queueRun: runQueuer(queue),
@@ -170,6 +171,8 @@ export async function workerCommand(
   log(stageNamesStartLine(config.stageNames));
   // And the model's reading of what the rule leaves undecided (DECISIONS.md 766).
   log(stageModelStartLine(config.stageNames, config.stageNamesModel, narrative !== undefined, config.stageNamesModelConsole));
+  // And the areas' own reasons (DECISIONS.md 769).
+  log(areaReasonsStartLine(config.areaReasons));
   // The lead journey (DECISIONS.md 770), said at every start so turning it on or off shows in the log.
   log(leadJourneyStartLine(config.leadJourney));
   // Said at every start, so a deploy that installs it shows in the log.

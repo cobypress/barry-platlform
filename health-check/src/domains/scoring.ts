@@ -1,5 +1,7 @@
 import { RULE_SET_VERSION } from "../config.ts";
 import { Score, type Finding } from "../schemas/index.ts";
+import { passedOn, said } from "../engine/org-words.ts";
+import { editionIsWhy } from "../salesforce/refusal-words.ts";
 
 // Every rule counted is worth the same maximum. A pass earns all of it, and an
 // issue earns what's left after its weight. So severity still counts when a
@@ -64,7 +66,82 @@ const NOTHING_IN_USE: Record<string, (notInUse: string[]) => string | null> = {
 
 const issueWeight = (f: Finding): number => SEVERITY_WEIGHTS[f.severity] * CONFIDENCE_FACTORS[f.confidence];
 
-export function scoreDomain(domain: string, findings: Finding[], ruleSetVersion: string = RULE_SET_VERSION): Score {
+/** How a score is worded: HC_AREA_REASONS on gives an unscored area its own checks' reasons (DECISIONS.md 769). Off or absent, as before. */
+export type ScoreOptions = { areaReasons?: boolean };
+
+const NONE_MEASURED = "We couldn't measure this area.";
+const TOO_LITTLE = "Too little of this area could be measured to score it fairly.";
+/** The two reasons an unscored area gave before 769, either of which its checks' reasons may take the place of or follow. */
+export const AREA_REASON_TODAY: readonly string[] = [NONE_MEASURED, TOO_LITTLE];
+/** Past this many characters a second reason is not said beside the first: the area points to its checks instead. */
+export const SHORT_REASON = 100;
+
+/** One part of an area's reason: words of ours, or a reason its checks gave, with the findings that gave it. */
+export type AreaReasonPart = { text: string; findingIds: string[] };
+
+/**
+ * An unscored area's reason from its own checks' reasons (DECISIONS.md 769),
+ * or null where they give none, for the reason as it was. Only checks the
+ * score counts, and only those with no result at all: the reasons each gives,
+ * once a check. Ranked by the edition first (710: its words are never put
+ * after another's), then by how many checks give it, then by the first check
+ * to give it, so the same findings always say the same. Every check's reason
+ * is said as the check says it, never reworded: one reason alone; two, when
+ * each is short; else the first and a sentence pointing to the rest. Where
+ * some checks were measured, the first reason is added only when most of the
+ * unmeasured checks give it.
+ */
+export function areaReasonParts(domain: string, findings: Finding[], today: string): AreaReasonPart[] | null {
+  const rules = new Map<string, Finding[]>();
+  for (const f of findings) if (f.domain === domain && !notScored(f.ruleId)) rules.set(f.ruleId, [...(rules.get(f.ruleId) ?? []), f]);
+  const open = [...rules.values()].filter((group) => group.every((f) => f.status === "not_measurable"));
+  const tally = new Map<string, { checks: number; first: number; findingIds: string[] }>();
+  open.forEach((group, i) => {
+    for (const reason of new Set(group.flatMap((f) => (f.notMeasurableReason ? [f.notMeasurableReason] : [])))) {
+      const held = tally.get(reason) ?? { checks: 0, first: i, findingIds: [] };
+      held.checks++;
+      held.findingIds.push(...group.filter((f) => f.notMeasurableReason === reason).map((f) => f.id));
+      tally.set(reason, held);
+    }
+  });
+  if (tally.size === 0) return null;
+  const byChecks = ([a, x]: [string, { checks: number; first: number }], [b, y]: [string, { checks: number; first: number }]) => y.checks - x.checks || x.first - y.first;
+  const part = ([text, held]: [string, { findingIds: string[] }]): AreaReasonPart => ({ text, findingIds: held.findingIds });
+  // Some checks measured: the reason more than half the unmeasured checks give, by count alone, so an edition's
+  // reason one check gives never hides the one most give (review of 769). One the edition gave leads only when it is that.
+  if (today === TOO_LITTLE) {
+    const most = [...tally].sort(byChecks)[0]!;
+    return most[1].checks * 2 > open.length ? [{ text: TOO_LITTLE, findingIds: [] }, part(most)] : null;
+  }
+  // Nothing measured: the edition's reason first (710), then by count.
+  const ranked = [...tally].sort((x, y) => Number(editionIsWhy(y[0])) - Number(editionIsWhy(x[0])) || byChecks(x, y));
+  const [lead] = ranked[0]!;
+  const first = part(ranked[0]!);
+  if (ranked.length === 1) return [first];
+  if (ranked.length === 2 && lead.length <= SHORT_REASON && ranked[1]![0].length <= SHORT_REASON) return [first, part(ranked[1]!)];
+  // The other checks, counted as checks, not readings: one check can give several reasons. With none, the first reason
+  // alone; never a count, which the number check would have to trace.
+  const rest = open.filter((group) => !group.some((f) => f.notMeasurableReason === lead)).length;
+  if (rest === 0) return [first];
+  return [first, { text: rest === 1 ? "We couldn't measure another check in this area either, and it gives its own reason." : "We couldn't measure other checks in this area either, and they give their own reasons.", findingIds: [] }];
+}
+
+/** The reason an area gave before 769 and the parts its own checks' reasons now make, or null for a reason not made so (DECISIONS.md 769). */
+export function areaReasonFrom(domain: string, findings: Finding[], reason: string): { today: string; parts: AreaReasonPart[] } | null {
+  for (const today of AREA_REASON_TODAY) {
+    const parts = areaReasonParts(domain, findings, today);
+    if (parts && parts.map((p) => p.text).join(" ") === reason) return { today, parts };
+  }
+  return null;
+}
+
+/** The parts as one text, as the area's score says it. */
+function areaReasonOf(parts: AreaReasonPart[]): string {
+  const [a, b] = parts;
+  return b ? said`${passedOn(a!.text)} ${passedOn(b.text)}` : said`${passedOn(a!.text)}`;
+}
+
+export function scoreDomain(domain: string, findings: Finding[], ruleSetVersion: string = RULE_SET_VERSION, options: ScoreOptions = {}): Score {
   const notMeasurable = (reason: string): Score => Score.parse({ status: "not_measurable", domain, ruleSetVersion, reason });
   const own = findings.filter((f) => f.domain === domain && !notScored(f.ruleId));
   if (own.length === 0) return notMeasurable("We couldn't assess this area.");
@@ -91,20 +168,25 @@ export function scoreDomain(domain: string, findings: Finding[], ruleSetVersion:
   const unscored = (reason: string): Score => {
     const notInUse = [...rules].filter(([, group]) => group.every((f) => f.status === "not_measurable" && f.notMeasurableKind === "not_in_use")).map(([ruleId]) => ruleId);
     const rest = [...rules].filter(([ruleId]) => !notInUse.includes(ruleId));
-    if (notInUse.length === 0 || !rest.every(([, group]) => group.every((f) => f.status === "passed"))) return notMeasurable(reason);
+    if (notInUse.length === 0 || !rest.every(([, group]) => group.every((f) => f.status === "passed"))) {
+      // HC_AREA_REASONS on: why, from the area's own checks (DECISIONS.md 769). Where they give none, as before.
+      const parts = options.areaReasons === true ? areaReasonParts(domain, findings, reason) : null;
+      if (parts) return notMeasurable(areaReasonOf(parts));
+      return notMeasurable(reason);
+    }
     const words = NOTHING_IN_USE[domain]?.(notInUse) ?? (rest.length === 0 ? "Nothing this area checks is in use in your org, so there is nothing to score." : "Most of what this area checks isn't in use in your org, and the rest passed, so there is too little to score.");
     return Score.parse({ status: "not_measurable", domain, ruleSetVersion, reason: words, notMeasurableKind: "not_in_use" });
   };
-  if (rulesCounted === 0) return unscored("We couldn't measure this area.");
+  if (rulesCounted === 0) return unscored(NONE_MEASURED);
   // Rule 5 for scores. On a real org, one calibration check scored historic
   // pipeline 100 while every pipeline metric was not measurable.
-  if (rulesCounted < MIN_RULES_SCORED || rulesCounted * 2 < rules.size) return unscored("Too little of this area could be measured to score it fairly.");
+  if (rulesCounted < MIN_RULES_SCORED || rulesCounted * 2 < rules.size) return unscored(TOO_LITTLE);
   return Score.parse({ status: "measured", domain, score: Math.round((earned / (RULE_MAXIMUM * rulesCounted)) * 100), ruleSetVersion, weights: WEIGHTS, findingIds: counted });
 }
 
 /** One score per domain, in the order given. A domain with no findings still gets a row. */
-export function scoreDomains(domains: string[], findings: Finding[], ruleSetVersion: string = RULE_SET_VERSION): Score[] {
-  return domains.map((domain) => scoreDomain(domain, findings, ruleSetVersion));
+export function scoreDomains(domains: string[], findings: Finding[], ruleSetVersion: string = RULE_SET_VERSION, options: ScoreOptions = {}): Score[] {
+  return domains.map((domain) => scoreDomain(domain, findings, ruleSetVersion, options));
 }
 
 // The Barometer score: one figure for the whole org, from the area scores,
