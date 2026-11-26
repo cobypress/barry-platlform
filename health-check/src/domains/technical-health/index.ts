@@ -368,9 +368,9 @@ const classicLeftovers: Rule = {
       return { outcome: "pass", summary: named(said`No JavaScript buttons or s-controls, and all ${plural(pages.data.length, "Visualforce page")} ${pages.data.length === 1 ? "is" : "are"} marked available in Lightning Experience.`, { data: pages.data.length }), evidence, segmentsChecked: segments, facts };
     }
     const parts: Said[] = [
-      ...(javascript.length ? [said`${plural(javascript.length, "JavaScript button or link", "JavaScript buttons and links")}`] : []),
-      ...(controls.length ? [said`${plural(controls.length, "s-control")}`] : []),
-      ...(classicPages.length ? [said`${plural(classicPages.length, "Visualforce page")} not marked available in Lightning Experience`] : []),
+      ...(javascript.length ? [named(said`${plural(javascript.length, "JavaScript button or link", "JavaScript buttons and links")}`, { javascript: javascript.length })] : []),
+      ...(controls.length ? [named(said`${plural(controls.length, "s-control")}`, { controls: controls.length })] : []),
+      ...(classicPages.length ? [named(said`${plural(classicPages.length, "Visualforce page")} not marked available in Lightning Experience`, { classicPages: classicPages.length })] : []),
     ];
     const breaks = javascript.length + controls.length > 0;
     const told = said`${andList(parts)}.${breaks ? " Lightning Experience doesn't run JavaScript buttons or s-controls, so anyone who works in it can't use them." : ""}`;

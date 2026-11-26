@@ -360,8 +360,8 @@ export function probabilityMetrics(ctx: Ctx): Metric[] {
   const assumptions = [
     ...HOW,
     ...stages.filter((s) => s.lagDays !== null && s.to !== null).map((s) => valued(said`${org(s.stage)}: 90% of the closed deals that reached it had closed within ${s.lagDays!} days, so its period ends on ${daySaid(s.to!)}`, { lagDays: [s.lagDays!, "day"] })),
-    ...(beforeHistory ? [said`${beforeHistory} deals created before your stage history starts are left out, since it can't show every stage they were in`] : []),
-    said`A stage is named only when at least ${minSample} of those deals have closed, ${MIN_EACH_OUTCOME} won and ${MIN_EACH_OUTCOME} lost, its probability is ${WIN_GAP} points or more from the won share, and outside the range chance could give it across the ${plural(tested, "stage")} we could test`,
+    ...(beforeHistory ? [valued(said`${beforeHistory} deals created before your stage history starts are left out, since it can't show every stage they were in`, { beforeHistory })] : []),
+    valued(said`A stage is named only when at least ${minSample} of those deals have closed, ${MIN_EACH_OUTCOME} won and ${MIN_EACH_OUTCOME} lost, its probability is ${WIN_GAP} points or more from the won share, and outside the range chance could give it across the ${plural(tested, "stage")} we could test`, { minSample, minEachOutcome: MIN_EACH_OUTCOME, minEachOutcome2: MIN_EACH_OUTCOME, winGap: [WIN_GAP, "points"], tested }),
   ];
   const segments: MetricSegment[] = [];
   const stats: Record<string, number> = { deals: deals.length, beforeHistory, stages: stages.length, tested, named: stages.filter((s) => s.named).length, z: loaded.z };

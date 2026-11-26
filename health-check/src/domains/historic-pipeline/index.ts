@@ -142,7 +142,7 @@ function divergenceValue(ctx: RuleContext, metric: Extract<Metric, { status: "me
     amount: Math.round((amount * points) / 100),
     unit: ctx.calibration.currency,
     period: said`in wins the gap may have cost, ${eng(ctx.window.from)} to ${eng(ctx.window.to)}`,
-    assumptions: [named(said`${deals.length} won and lost deals in this segment, with a total Amount of ${moneySaid(amount, ctx.calibration.currency)}`, { deals: deals.length, amountMoney: amount }), said`The gap of ${Math.round(points * 10) / 10} points to your overall win rate of ${metric.value}%`, said`Assumes these deals could win as often as the rest. Deal mix or territory may explain part of the gap, so treat this as a ceiling`],
+    assumptions: [named(said`${deals.length} won and lost deals in this segment, with a total Amount of ${moneySaid(amount, ctx.calibration.currency)}`, { deals: deals.length, amountMoney: amount }), named(said`The gap of ${Math.round(points * 10) / 10} points to your overall win rate of ${metric.value}%`, { value: [metric.value, "percent"] }), said`Assumes these deals could win as often as the rest. Deal mix or territory may explain part of the gap, so treat this as a ceiling`],
   };
 }
 

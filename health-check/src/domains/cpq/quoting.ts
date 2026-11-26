@@ -139,7 +139,7 @@ const discountLeakage: Rule = {
             // The value model reads the start of this to put it over 12 months (value/model.ts, OVER_WINDOW).
             period: said`in discount beyond what peers gave, ${eng(ctx.window.from)} to ${eng(ctx.window.to)}, a potential figure`,
             assumptions: [
-              said`${plural(excess.size, "won deal")} in the teams and reps named, each counted once, at the most it went past its peers' median`,
+              valued(said`${plural(excess.size, "won deal")} in the teams and reps named, each counted once, at the most it went past its peers' median`, { size: excess.size }),
               said`Each deal's discount beyond its peers' median, applied to its quote's list amount`,
               said`Measured from your own quotes. It's potential: it assumes those deals would still have been won at your median discount, which nobody can know`,
             ],
@@ -149,7 +149,7 @@ const discountLeakage: Rule = {
       outcome: "issue",
       // Singular when one is named, so the title matches the summary (night 3 reading pass).
       title: flagged.length === 1 ? said`${flagged[0]!.dimension === "rep" ? "One rep discounts" : "One team discounts"} deeper than peers without winning more` : said`Some teams and reps discount deeper without winning more`,
-      summary: valued(said`${opening} ${andList(flagged.slice(0, MAX_LISTED).map((f) => valued(said`${org(f.key)} discounts ${f.median}% against ${f.peerMedian}% for ${f.against}, and wins ${f.rate}% of closed deals against ${f.peerRate}%`, { median: [f.median, "percent"], peerMedian: [f.peerMedian, "percent"], rate: [f.rate, "percent"], peerRate: [f.peerRate, "percent"] })))}${flagged.length > MAX_LISTED ? said`, and ${flagged.length - MAX_LISTED} more` : ""}. That's at least ${DISCOUNT_GAP} points deeper, without winning more often.`, { discountGap: [DISCOUNT_GAP, "points"] }),
+      summary: valued(said`${opening} ${andList(flagged.slice(0, MAX_LISTED).map((f) => said`${org(f.key)} discounts ${f.median}% against ${f.peerMedian}% for ${f.against}, and wins ${f.rate}% of closed deals against ${f.peerRate}%`))}${flagged.length > MAX_LISTED ? said`, and ${flagged.length - MAX_LISTED} more` : ""}. That's at least ${DISCOUNT_GAP} points deeper, without winning more often.`, { discountGap: [DISCOUNT_GAP, "points"] }),
       recommendation: said`Agree a discount policy with limits by deal size, send anything deeper through approval, and review these deals against it in pipeline meetings.`,
       recommendationType: "change",
       severity: "high",

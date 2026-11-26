@@ -258,7 +258,7 @@ function lightningMetric(ctx: Ctx): Metric {
   const unread = everyone.length - who.length;
   const classic = who.length - on(who);
   const stats = { lightning: on(who), classic, classicShare: pct(classic, who.length) };
-  return measured(DEF.lightning, evidence, pct(on(who), who.length), who.length, profiles.map((g) => groupSegment(g, pct(on(g.users), g.users.length))), unread ? { stats, exclusions: [...EXCLUSIONS, said`${plural(unread, "user")} whose setting couldn't be read`] } : { stats });
+  return measured(DEF.lightning, evidence, pct(on(who), who.length), who.length, profiles.map((g) => groupSegment(g, pct(on(g.users), g.users.length))), unread ? { stats, exclusions: [...EXCLUSIONS, named(said`${plural(unread, "user")} whose setting couldn't be read`, { unread })] } : { stats });
 }
 
 function reportsMetric(ctx: Ctx): Metric {

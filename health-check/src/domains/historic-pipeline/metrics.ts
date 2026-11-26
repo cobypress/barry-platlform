@@ -204,7 +204,7 @@ function stageConversion(ctx: Ctx, data: Ready): Metric[] {
   };
   const withStages = closed.filter((d) => furthest(d) !== null);
   const neverOpen = closed.length - withStages.length;
-  const exclusions = [...definition.exclusions, ...(neverOpen ? [said`${neverOpen} deals with no recorded open stage`] : [])];
+  const exclusions = [...definition.exclusions, ...(neverOpen ? [named(said`${neverOpen} deals with no recorded open stage`, { neverOpen })] : [])];
   const { minSample } = ctx.calibration;
   if (withStages.length < minSample) return [notMeasurable({ ...definition, exclusions }, named(said`${withStages.length} closed deals with stage history is below the calibrated minimum of ${minSample}.`, { withStages: withStages.length, minSample }))];
 
@@ -251,7 +251,7 @@ function salesCycle(ctx: Ctx, data: Ready): Metric[] {
       unit: "days",
       // Each whole, so the digest knows it as the engine's own text (DECISIONS.md 693).
       definition: outcome === "won" ? "Median days from creation to final close, for won deals closed in the window. The close comes from stage history, or CloseDate where there is none." : "Median days from creation to final close, for lost deals closed in the window. The close comes from stage history, or CloseDate where there is none.",
-      assumptions: salesCycleAssumptionDays ? [said`The calibration assumes a sales cycle of ${salesCycleAssumptionDays} days`] : [],
+      assumptions: salesCycleAssumptionDays ? [named(said`The calibration assumes a sales cycle of ${salesCycleAssumptionDays} days`, { salesCycleAssumptionDays: [salesCycleAssumptionDays, "day"] })] : [],
     });
     if (data.unmapped.finalStages.length > 0) return notMeasurable(definition, unmappedReason("stages", data.unmapped.finalStages));
     // Lost deals here leave no decision out (DECISIONS.md 600).
@@ -263,7 +263,7 @@ function salesCycle(ctx: Ctx, data: Ready): Metric[] {
     // to measure: it's a data load, and counting it as 0 days flatters the median.
     const deals = inWindow.filter((d) => (d.history.length === 0 || hasOpenStage(d, data)) && rawDays(d) >= -1);
     const unusable = inWindow.length - deals.length;
-    const exclusions = [...definition.exclusions, ...(unusable ? [said`${unusable} deals created already closed, or closed before they were created`] : [])];
+    const exclusions = [...definition.exclusions, ...(unusable ? [named(said`${unusable} deals created already closed, or closed before they were created`, { unusable })] : [])];
     if (deals.length < minSample) return notMeasurable({ ...definition, exclusions }, named(said`${deals.length} ${outcome} deals is below the calibrated minimum of ${minSample}.`, { deals: deals.length, minSample }));
     const days = (d: Deal): number => Math.max(0, rawDays(d));
     const all = deals.map(days);
@@ -309,7 +309,7 @@ function slippage(ctx: Ctx, data: Ready): Metric[] {
   // A deal that was never open had no close date to slip.
   const withHistory = deals.filter((d) => hasOpenStage(d, data));
   const missing = deals.length - withHistory.length;
-  const exclusions = [...data.exclusions, ...(missing ? [said`${missing} deals with no recorded open stage`] : [])];
+  const exclusions = [...data.exclusions, ...(missing ? [named(said`${missing} deals with no recorded open stage`, { missing })] : [])];
   if (withHistory.length < minSample) {
     const reason = named(said`${withHistory.length} closed deals with history is below the calibrated minimum of ${minSample}.`, { withHistory: withHistory.length, minSample });
     return [rateDefinition, quarterDefinition, daysDefinition].map((d) => notMeasurable({ ...d, exclusions }, reason));

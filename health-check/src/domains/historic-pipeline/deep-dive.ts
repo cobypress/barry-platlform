@@ -21,6 +21,8 @@ type Definition = Pick<Base, "id" | "label" | "definition" | "unit"> & { assumpt
 const DAY = 86_400_000;
 const QUARTERS = 8;
 const TOP_ACCOUNTS = [1, 3, 5, 10];
+/** The accounts the top share counts: its label and definition say how many, and are named with it (DECISIONS.md 772). */
+const TOP_SHARE = 10;
 const MULTI_CURRENCY = "The org is multi-currency, and amounts can't be added until historic rates are supplied.";
 
 const thinReason = (n: number, noun: "closed deals with stage history" | "won deals" | "lost and no decision deals with stage history" | "won deals with stage history", minSample: number): Said => named(said`${n} ${noun} is below the calibrated minimum of ${minSample}.`, { n, minSample });
@@ -162,7 +164,7 @@ function winSources(ctx: Ctx, data: Ready): Metric[] {
     repeat: base(ctx, data, { id: "historic.repeat_win_share", label: "Won value from repeat customers", unit: "percent", definition: "Amount won in the window on accounts that had won before, as a share of won Amount on accounts." }),
     type: base(ctx, data, { id: "historic.won_value_by_type", label: "Won value by type", unit: "currency", definition: "Total Amount of deals won in the window, by the deal's Type." }),
     source: base(ctx, data, { id: "historic.won_value_by_source", label: "Won value by lead source", unit: "currency", definition: "Total Amount of deals won in the window, by the deal's Lead Source." }),
-    top: base(ctx, data, { id: "historic.top_account_share", label: "Won value from the top 10 accounts", unit: "percent", definition: "Share of won Amount on accounts that the 10 accounts with the most hold. Accounts are tokens, never names." }),
+    top: base(ctx, data, { id: "historic.top_account_share", label: named("Won value from the top 10 accounts", { topShare: TOP_SHARE }), unit: "percent", definition: named("Share of won Amount on accounts that the 10 accounts with the most hold. Accounts are tokens, never names.", { topShare: TOP_SHARE }) }),
   };
   const every = Object.values(definitions);
   if (data.unmapped.finalStages.length > 0) return every.map((d) => notMeasurable(d, unmappedReason("stages", data.unmapped.finalStages)));
@@ -221,7 +223,7 @@ function winSources(ctx: Ctx, data: Ready): Metric[] {
   const accountTotal = byAccount.reduce((sum, a) => sum + a.amount, 0);
   if (accountTotal === 0) metrics.push(notMeasurable(definitions.top, "Won deals on accounts have no amounts."));
   else {
-    const top = Math.min(10, byAccount.length);
+    const top = Math.min(TOP_SHARE, byAccount.length);
     const cumulative: MetricSegment[] = TOP_ACCOUNTS.filter((k) => k <= byAccount.length).map((k) => ({ dimension: "accounts", key: k === 1 ? "Top account" : `Top ${k} accounts`, n: byAccount.slice(0, k).reduce((sum, a) => sum + a.deals, 0), value: pct(byAccount.slice(0, k).reduce((sum, a) => sum + a.amount, 0), accountTotal), notMeasurableReason: null }));
     // The name isn't read, so a token restores to the account's id for the consultant to look up.
     const accounts: MetricSegment[] = byAccount.slice(0, top).map((a) => ({ dimension: "account", key: ctx.pseudonyms.label("account", a.id, a.id), n: a.deals, value: pct(a.amount, accountTotal), notMeasurableReason: null }));

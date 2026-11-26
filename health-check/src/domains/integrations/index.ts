@@ -281,7 +281,7 @@ const integrationLicences: Rule = {
               period: "per year",
               assumptions: [
                 ...[...new Map(prices.filter(isPriced).map((p) => [p.licence, p])).values()].map((p) => said`${seatsSaid(prices.filter((x) => isPriced(x) && x.licence === p.licence).length, p.licence)} at ${p.note}`),
-                said`${spare} ${INTEGRATION_LICENCE} ${spare === 1 ? "licence" : "licences"} unassigned now, so ${movable} of the accounts can move without buying any`,
+                valued(said`${spare} ${INTEGRATION_LICENCE} ${spare === 1 ? "licence" : "licences"} unassigned now, so ${movable} of the accounts can move without buying any`, { spare, movable }),
                 said`Assumes the freed seats can be reduced at renewal`,
               ],
             };

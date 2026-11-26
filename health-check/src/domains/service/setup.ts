@@ -152,7 +152,7 @@ const queueSprawl: Rule = {
     const segmentsChecked: SegmentCheck[] = [{ dimension: "queue", segments: queues.length }, { dimension: "agent", segments: perAgent.size }];
     const facts = { queues: queues.length, empty: empty.length, agents: perAgent.size, spread, limit: QUEUES_PER_AGENT };
     if (!empty.length && !spread) return { outcome: "pass", summary: valued(said`All ${queues.length} case queues have members, and no agent is in more than ${QUEUES_PER_AGENT}.`, { queues: queues.length, queuesPerAgent: QUEUES_PER_AGENT }), evidence, segmentsChecked, facts };
-    const parts: Said[] = [...(empty.length ? [said`${empty.length} of ${queues.length} case queues ${hasHave(empty.length)} no members, so cases routed there wait for nobody`] : []), ...(spread ? [said`${plural(spread, "agent")} ${isAre(spread)} in more than ${QUEUES_PER_AGENT} case queues, too many to watch`] : [])];
+    const parts: Said[] = [...(empty.length ? [valued(said`${empty.length} of ${queues.length} case queues ${hasHave(empty.length)} no members, so cases routed there wait for nobody`, { empty: empty.length, queues: queues.length })] : []), ...(spread ? [valued(said`${plural(spread, "agent")} ${isAre(spread)} in more than ${QUEUES_PER_AGENT} case queues, too many to watch`, { spread, queuesPerAgent: QUEUES_PER_AGENT })] : [])];
     return {
       outcome: "issue",
       title: empty.length ? said`Some case queues have nobody in them` : said`Agents are spread across too many queues`,
@@ -265,7 +265,7 @@ const agentLicences: Rule = {
     const edition = org.status === "ok" ? (org.data[0]?.OrganizationType ?? null) : null;
     const price = costPerSeat(SERVICE_SEAT, { calibration: ctx.calibration, edition, now: ctx.now });
     const value: Value = isPriced(price)
-      ? { kind: "licence_cost", amount: Math.round(price.annual * wasted), unit: price.currency, period: "per year", assumptions: [said`${plural(wasted, "Service Cloud seat")} at ${price.note}`] }
+      ? { kind: "licence_cost", amount: Math.round(price.annual * wasted), unit: price.currency, period: "per year", assumptions: [valued(said`${plural(wasted, "Service Cloud seat")} at ${price.note}`, { wasted })] }
       : notSized(said`A Service Cloud seat has no price: ${price.reason}`);
     return {
       outcome: "issue",
@@ -417,9 +417,9 @@ const macros: Rule = {
       return { outcome: "pass", summary: valued(said`${list.data.length} macros, ${unusedMacros === null ? "with use we couldn't read" : said`${unusedMacros} unused in ${months} months`}, and none that work only in Classic.`, { data: list.data.length }), evidence, segmentsChecked, facts };
     }
     const parts: Said[] = [
-      ...(cluttered ? [said`${unusedMacros!} of ${list.data.length} macros (${unusedShare!}%) ${unusedMacros === 1 ? "wasn't" : "weren't"} used in ${months} months`] : []),
-      ...(classic ? [said`${classic} ${classic === 1 ? "macro works" : "macros work"} only in Classic`] : []),
-      ...(unusedText !== null && quickText.status === "ok" && unusedText ? [said`${unusedText} of ${quickText.data.length} quick text entries ${unusedText === 1 ? "wasn't" : "weren't"} used`] : []),
+      ...(cluttered ? [valued(said`${unusedMacros!} of ${list.data.length} macros (${unusedShare!}%) ${unusedMacros === 1 ? "wasn't" : "weren't"} used in ${months} months`, { unusedMacros: unusedMacros!, data: list.data.length, unusedShare: [unusedShare!, "percent"], months: [months, "month"] })] : []),
+      ...(classic ? [valued(said`${classic} ${classic === 1 ? "macro works" : "macros work"} only in Classic`, { classic })] : []),
+      ...(unusedText !== null && quickText.status === "ok" && unusedText ? [valued(said`${unusedText} of ${quickText.data.length} quick text entries ${unusedText === 1 ? "wasn't" : "weren't"} used`, { unusedText, data: quickText.data.length })] : []),
     ];
     return {
       outcome: "issue",

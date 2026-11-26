@@ -231,7 +231,7 @@ function commitScope(ctx: RuleContext, open: Deal[], isHit: (d: Deal) => boolean
     deals: result.commit.filter((d) => !closed.has(d.Id)),
     isHit,
     evidence: result.evidence,
-    exclusions: [said`${plural(left, "deal")} closed since this run's date, whose forecast category then can't be read`],
+    exclusions: [named(said`${plural(left, "deal")} closed since this run's date, whose forecast category then can't be read`, { left })],
     leftOut: said`${left === 1 ? "One deal open at this run's date and closed since is" : said`${left} deals open at this run's date and closed since are`} left out, as we can't read the forecast category ${left === 1 ? "it" : "they"} had then.`,
   };
 }

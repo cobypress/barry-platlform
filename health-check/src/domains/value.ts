@@ -62,6 +62,6 @@ export function calibratedHours(ctx: Pick<RuleContext, "calibration">, key: Upke
     amount: Math.round((count * minutes) / 6) / 10,
     unit: "hours",
     period: "per year",
-    assumptions: [said`${count} of them at ${minutes} minutes a year each, agreed in the calibration`],
+    assumptions: [named(said`${count} of them at ${minutes} minutes a year each, agreed in the calibration`, { count, minutes: [minutes, "minute"] })],
   };
 }

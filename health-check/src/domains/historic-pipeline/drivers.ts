@@ -115,9 +115,9 @@ export function driverMetrics(ctx: Ctx): Metric[] {
     said`${eng(FACTOR_NOTE)}`,
     "Logged activity means the deal has a last activity date: at least one task or event was logged against it",
     ...(p.expected.length ? [expectedNote(p)] : []),
-    ...(line === null ? [] : [said`A long cycle is longer than ${line} days from creation to close, the time 75% of won deals closed within`]),
+    ...(line === null ? [] : [named(said`A long cycle is longer than ${line} days from creation to close, the time 75% of won deals closed within`, { line: [line, "day"] })]),
   ];
-  const exclusions = [...data.exclusions, ...(noDecision ? [said`${noDecision} no decision deals, which the win rate leaves out`] : [])];
+  const exclusions = [...data.exclusions, ...(noDecision ? [named(said`${noDecision} no decision deals, which the win rate leaves out`, { noDecision })] : [])];
   const b = { ...base(ctx, data, { ...definition, assumptions }), exclusions };
   if (deals.length < minSample) return [notMeasurable(b, named(said`${deals.length} won and lost deals with stage history is below the calibrated minimum of ${minSample}.`, { deals: deals.length, minSample }))];
 
