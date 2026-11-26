@@ -180,10 +180,11 @@ describe("open cases stuck in a status (C1)", () => {
 
   test("a stay not yet ended counts as the longest: an open case in a status no case has left sets no line", () => {
     // Every case made in the period that reached Waiting is still there, so no line can be set for Waiting.
-    const specs: CaseSpec[] = [...quick(300), ...Array.from({ length: 12 }, (_, i): CaseSpec => ({ made: 60 + i, steps: [["Working", 0.5], ["Waiting", 1]] })), { made: 3, steps: [["Working", 0.5], ["Waiting", 1]] }];
+    // More than the minimum of stays there, none ended: counted as the longest, so no line, and the open cases in it are left out.
+    const specs: CaseSpec[] = [...quick(300), ...Array.from({ length: 25 }, (_, i): CaseSpec => ({ made: 60 + i, steps: [["Working", 0.5], ["Waiting", 1]] })), { made: 3, steps: [["Working", 0.5], ["Waiting", 1]] }];
     const f = one(on(specs), "svc.stuck-in-status");
     const open = f.evidence.at(-1)!;
-    assert.ok(open.exclusions.some((e) => /^13 open cases in a status too few cases made .* spent time in, or left, to set a line$/.test(e)), open.exclusions.join(" | "));
+    assert.ok(open.exclusions.some((e) => /^26 open cases in a status too few cases made .* spent time in, or left, to set a line$/.test(e)), open.exclusions.join(" | "));
   });
 
   test("not measurable reads the period's minimum, and a pass says no segment is over the line", () => {
