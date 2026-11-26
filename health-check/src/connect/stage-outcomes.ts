@@ -54,15 +54,17 @@ export function parseStageAnswer(value: unknown): StageAnswer | "malformed" {
   return { outcomes, ignored };
 }
 
-/** Where a machine-set stage's meaning came from (DECISIONS.md 756): the customer's answer, or its name by our rule. */
+/** Where a machine-set stage's meaning came from (DECISIONS.md 756, 766): the customer's answer, its name by our rule, or its name by a model. */
 export type StageFrom = NonNullable<CalibratedStage["from"]>;
 
 /** A stage the customer's answer set: lost or no decision, marked as theirs. */
 export const fromCustomer = (s: Pick<CalibratedStage, "category" | "from">): boolean => s.from === "customer" && (s.category === "lost" || s.category === "no_decision");
 /** A stage read from its name by our rule: lost or no decision, marked so. */
 export const fromName = (s: Pick<CalibratedStage, "category" | "from">): boolean => s.from === "name" && (s.category === "lost" || s.category === "no_decision");
-/** Set by the machine from the customer's answer or the name rule, so ours to set again. Anything else is a person's word or Salesforce's. */
-export const machineSet = (s: Pick<CalibratedStage, "category" | "from">): boolean => fromCustomer(s) || fromName(s);
+/** A stage a model read from its name where our rule couldn't (DECISIONS.md 766): lost or no decision, marked so. */
+export const fromModel = (s: Pick<CalibratedStage, "category" | "from">): boolean => s.from === "model" && (s.category === "lost" || s.category === "no_decision");
+/** Set by the machine from the customer's answer, the name rule or a model, so ours to set again. Anything else is a person's word or Salesforce's. */
+export const machineSet = (s: Pick<CalibratedStage, "category" | "from">): boolean => fromCustomer(s) || fromName(s) || fromModel(s);
 
 /** A calibration's own stages, without those the machine set: a person's word or Salesforce's, which neither an answer nor a name changes. */
 export const namedByOthers = (stages: readonly CalibratedStage[]): CalibratedStage[] => stages.filter((s) => !machineSet(s));

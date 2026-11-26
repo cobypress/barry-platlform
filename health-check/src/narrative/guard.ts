@@ -4,6 +4,7 @@ import { redactSecrets } from "../privacy/secrets.ts";
 import { isSignInFailure, type NarrativeClient, type NarrativeReply, type NarrativeRequest } from "./client.ts";
 import { APEX_SUMMARY_PROMPT } from "./apex-prompt.ts";
 import { AUTOMATIC_SYSTEM_PROMPT, SYSTEM_PROMPT } from "./prompt.ts";
+import { STAGE_NAMES_SYSTEM_PROMPT } from "./stage-prompt.ts";
 import { safeDetail } from "./sign-in.ts";
 
 // Rule 7: nothing that leaves for Claude may hold a real name. Findings already
@@ -40,7 +41,8 @@ export function holdsNameOrSecret(text: string, pseudonyms: Pseudonymiser): bool
 // can route around the guard by putting text there.
 // The second is the Apex summaries' own (DECISIONS.md 492), the only one Apex code goes with.
 // The third is an automatic run's (DECISIONS.md 693), the first with its opening said for no review.
-export const SYSTEM_PROMPTS: ReadonlySet<string> = new Set([SYSTEM_PROMPT, APEX_SUMMARY_PROMPT, AUTOMATIC_SYSTEM_PROMPT]);
+// The fourth reads closed stages' names the name rule left undecided (DECISIONS.md 766), the only one stage names go with alone.
+export const SYSTEM_PROMPTS: ReadonlySet<string> = new Set([SYSTEM_PROMPT, APEX_SUMMARY_PROMPT, AUTOMATIC_SYSTEM_PROMPT, STAGE_NAMES_SYSTEM_PROMPT]);
 
 /** A prompt the last check wouldn't send. The message names tokens, never the text it found. */
 export class PromptRefused extends Error {

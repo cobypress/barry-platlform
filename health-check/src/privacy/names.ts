@@ -60,6 +60,13 @@ const DIMINUTIVES: Record<string, string[]> = {
 const FORMAL_OF = new Map<string, string[]>();
 for (const [formal, nicknames] of Object.entries(DIMINUTIVES)) for (const n of nicknames) FORMAL_OF.set(n, [...(FORMAL_OF.get(n) ?? []), formal]);
 
+/**
+ * Every given name and nickname above, lower case. For text with no run's names
+ * to check against, such as a stage name on its way to a model at connect
+ * (DECISIONS.md 766): a word here is taken as a person's, and the text isn't sent.
+ */
+export const GIVEN_NAMES: ReadonlySet<string> = new Set(Object.entries(DIMINUTIVES).flatMap(([formal, nicknames]) => [formal, ...nicknames]));
+
 // ---------------------------------------------------------------------------
 // Folding. Matching runs on a folded copy of the text: accents and other marks
 // dropped, compatibility forms such as full-width letters made plain, invisible

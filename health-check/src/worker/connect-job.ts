@@ -7,6 +7,7 @@ import type { Calibration } from "../schemas/calibration.ts";
 import { readOrgStages, StoreError, type OrgStage } from "../connect/org-stages.ts";
 import { readOrgCurrency, type OrgCurrency } from "../connect/org-currency.ts";
 import { fromCustomer, fromName, parseStageAnswer, type StageAnswer } from "../connect/stage-outcomes.ts";
+import { withModelReadings } from "./stage-model.ts";
 import { checkReadOnlyUser, permissionNote, type ReadOnlyCheck } from "../connect/read-only-check.ts";
 import { ApiBudget } from "../salesforce/budget.ts";
 import { NoApiAccessError, SalesforceClient } from "../salesforce/client.ts";
@@ -353,9 +354,11 @@ async function calibrateAndQueue(runId: string, stages: OrgStage[] | null, curre
   }
   logCurrency(runId, built.calibration, answered, log);
   logStageAnswer(runId, built.calibration, stageAnswer, log);
+  // Below the customer and the word rule, a model reads what is still undecided (DECISIONS.md 766); off, the calibration as built.
+  const calibration = await withModelReadings(runId, built.calibration, stages, deps, log);
   let saved: Awaited<ReturnType<WorkerDeps["store"]["saveCalibration"]>>;
   try {
-    saved = await deps.store.saveCalibration(runId, built.calibration);
+    saved = await deps.store.saveCalibration(runId, calibration);
   } catch (err) {
     // A StoreError's words are the store's own, naming no value; anything else by its kind alone.
     const reason = err instanceof StoreError ? err.message : "an unexpected error";
@@ -570,9 +573,10 @@ export async function recalibrateForRunAgain(runId: string, name: string, runOrg
   }
   logCurrency(runId, built.calibration, answered, log);
   logStageAnswer(runId, built.calibration, stageAnswer, log);
+  const calibration = await withModelReadings(runId, built.calibration, read.stages, deps, log);
   let saved: Awaited<ReturnType<WorkerDeps["store"]["saveCalibration"]>>;
   try {
-    saved = await deps.store.saveCalibration(runId, built.calibration);
+    saved = await deps.store.saveCalibration(runId, calibration);
   } catch (err) {
     const reason = err instanceof StoreError ? err.message : "an unexpected error";
     log(`Automatic run ${runId}'s calibration couldn't be saved when it was run again: ${reason}.`);
@@ -584,7 +588,7 @@ export async function recalibrateForRunAgain(runId: string, name: string, runOrg
   }
   // "exists": another delivery wrote one between the reads; the caller reads the run again and goes on with that one.
   log(`Automatic run ${runId} had no calibration, so its org was read again and one was ${saved === "saved" ? "built and saved" : "found saved meanwhile"} before it was run again.`);
-  return { kind: "calibrated", calibration: built.calibration };
+  return { kind: "calibrated", calibration };
 }
 
 export const SCAN_EVERY_DAYS = 30;

@@ -6,7 +6,7 @@ import type { Calibration, Evidence, StageCategory } from "../../schemas/index.t
 import { joinSaid, org, said, type Said } from "../../engine/org-words.ts";
 import { andList } from "../../engine/said-forms.ts";
 import { orderFromOrg } from "../../connect/auto-calibration.ts";
-import { fromName, machineSet } from "../../connect/stage-outcomes.ts";
+import { fromModel, fromName, machineSet } from "../../connect/stage-outcomes.ts";
 
 export type Deal = OpportunityRow & {
   category: StageCategory | null;
@@ -105,6 +105,18 @@ export function namedStagesNote(named: Array<{ stage: string; category: StageCat
     : said`We've assumed what some stages mean from their names, and you can tell us if any is wrong: ${andList(items)}.`;
 }
 
+/**
+ * The assumption for stages a model read from their names where our word rule
+ * couldn't (DECISIONS.md 766), said apart from the rule's so the customer knows
+ * it was AI's reading, and never that a person checked it.
+ */
+export function modelStagesNote(read: Array<{ stage: string; category: StageCategory }>): Said {
+  const items = read.map((s) => (s.category === "lost" ? said`${org(s.stage)} as lost` : said`${org(s.stage)} as no decision`));
+  return read.length === 1
+    ? said`We've used AI to read what one stage means from its name, and you can tell us if it's wrong: ${andList(items)}.`
+    : said`We've used AI to read what some stages mean from their names, and you can tell us if any is wrong: ${andList(items)}.`;
+}
+
 /** Stage names, as the org named them, joined with commas. */
 const stageList = (stages: string[]): Said => joinSaid(stages.map((s) => said`${org(s)}`), ", ");
 
@@ -173,6 +185,8 @@ export type PipelineData =
       recordTypes?: number;
       /** Stages those deals used whose lost or no decision we read from their names (DECISIONS.md 756), with it: set only when there are any. */
       readByName?: Array<{ stage: string; category: StageCategory }>;
+      /** Stages a model read from their names (DECISIONS.md 766), as readByName. */
+      readByModel?: Array<{ stage: string; category: StageCategory }>;
       /** The calibration was read from the org's settings, for an automatic run (DECISIONS.md 693): set only then. */
       fromOrgSettings?: true;
     };
@@ -306,6 +320,9 @@ function buildPipeline(ctx: Omit<RuleContext, "metrics">): PipelineData {
   // Only on a calibration read from the org's settings, and only where the run's own flags left the reading standing (stageMap).
   const byNameStages = new Set(ctx.calibration.source === "org_settings" ? ctx.calibration.stages.filter(fromName).map((s) => s.name) : []);
   const readByName = [...used].filter((s) => byNameStages.has(s) && !stages.isInferred(s) && stages.categoryOf(s) !== null).sort().map((stage) => ({ stage, category: stages.categoryOf(stage)! }));
+  // A model's readings (DECISIONS.md 766) the same way, said in their own sentence.
+  const byModelStages = new Set(ctx.calibration.source === "org_settings" ? ctx.calibration.stages.filter(fromModel).map((s) => s.name) : []);
+  const readByModel = [...used].filter((s) => byModelStages.has(s) && !stages.isInferred(s) && stages.categoryOf(s) !== null).sort().map((stage) => ({ stage, category: stages.categoryOf(stage)! }));
 
   return {
     status: "ok",
@@ -324,6 +341,7 @@ function buildPipeline(ctx: Omit<RuleContext, "metrics">): PipelineData {
     recordTypes: new Set(deals.flatMap((d) => (d.RecordType === null ? [] : [d.RecordType]))).size,
     unsplitLost: [...new Set(deals.filter((d) => stages.isInferred(d.StageName) && d.category === "lost" && d.closedDay >= ctx.window.from && d.closedDay <= ctx.window.to).map((d) => d.StageName))].sort(),
     ...(readByName.length > 0 ? { readByName } : {}),
+    ...(readByModel.length > 0 ? { readByModel } : {}),
     ...(ctx.calibration.source === "org_settings" ? { fromOrgSettings: true as const } : {}),
   };
 }
@@ -334,11 +352,16 @@ function buildPipeline(ctx: Omit<RuleContext, "metrics">): PipelineData {
  * where it can be measured only because we read some stages from their names,
  * this is where the figure says so, and only such figures do (DECISIONS.md 756).
  */
-export function unsplitLostReason(data: { unsplitLost: string[]; fromOrgSettings?: boolean; readByName?: Array<{ stage: string; category: StageCategory }> }, ctx: Pick<RuleContext, "assume" | "assumeOn">, metrics?: readonly string[]): Said | null {
+export function unsplitLostReason(
+  data: { unsplitLost: string[]; fromOrgSettings?: boolean; readByName?: Array<{ stage: string; category: StageCategory }>; readByModel?: Array<{ stage: string; category: StageCategory }> },
+  ctx: Pick<RuleContext, "assume" | "assumeOn">,
+  metrics?: readonly string[],
+): Said | null {
   if (data.unsplitLost.length > 0) return unsplitReason(data.unsplitLost, data.fromOrgSettings === true);
-  if (!data.readByName) return null;
   // A metric builder names the metrics that split the two, so its others don't carry it.
-  if (metrics && ctx.assumeOn) ctx.assumeOn(metrics, namedStagesNote(data.readByName));
-  else ctx.assume?.(namedStagesNote(data.readByName));
+  const lean = (note: Said): void => (metrics && ctx.assumeOn ? ctx.assumeOn(metrics, note) : ctx.assume?.(note));
+  if (data.readByName) lean(namedStagesNote(data.readByName));
+  // A model's readings (DECISIONS.md 766), in their own sentence after the rule's.
+  if (data.readByModel) lean(modelStagesNote(data.readByModel));
   return null;
 }

@@ -37,7 +37,7 @@ export function loadExtracts(dir: string): Map<string, unknown> {
   return new Map(entries);
 }
 
-export function analyseExtracts(extracts: Map<string, unknown>, options: { answers?: ManualAnswer[]; calibration?: Calibration; now?: Date; window?: DateRange; modules?: DomainModule[]; markPeriods?: boolean; stageNames?: boolean } = {}): AnalysisOutput {
+export function analyseExtracts(extracts: Map<string, unknown>, options: { answers?: ManualAnswer[]; calibration?: Calibration; now?: Date; window?: DateRange; modules?: DomainModule[]; markPeriods?: boolean; stageNames?: boolean; stageNamesModel?: boolean } = {}): AnalysisOutput {
   const users = extracts.get(usersExtractor.id) as { status: string; data?: UserRow[] } | undefined;
   const directory = new Map((users?.data ?? []).map((u) => [u.Id, { name: u.Name, aliases: [u.Username, u.Email] }]));
   const pseudonyms = new Pseudonymiser();
@@ -53,6 +53,7 @@ export function analyseExtracts(extracts: Map<string, unknown>, options: { answe
     userDirectory: directory,
     markPeriods: options.markPeriods,
     stageNames: options.stageNames,
+    ...(options.stageNamesModel ? { stageNamesModel: true } : {}),
   });
 }
 

@@ -14,7 +14,7 @@ import { notMeasurableKind } from "./not-measurable.ts";
 import { INSIGHT_METRICS, INSIGHT_RULES } from "../domains/scoring.ts";
 import { joinSaid, markSentence, orgWordsOf, said, saidMade, textSha256, withOrgWords, type MarkedSentence, type Said } from "./org-words.ts";
 import { passedOnSpans } from "./passed-on.ts";
-import { fromName } from "../connect/stage-outcomes.ts";
+import { fromModel, fromName } from "../connect/stage-outcomes.ts";
 import type { IssueResult, ManualState, RecordList, Rule, RuleContext, RuleResult } from "./rule.ts";
 
 export type AnalysisInput = {
@@ -47,6 +47,12 @@ export type AnalysisInput = {
    * flags decide, whatever row a run or a copy of it still carries.
    */
   stageNames?: boolean;
+  /**
+   * HC_STAGE_NAMES_MODEL (DECISIONS.md 766): a stage read from its name by a
+   * model is used only with this and stageNames both on; otherwise it is set
+   * aside, as a name's reading is with stageNames off.
+   */
+  stageNamesModel?: boolean;
 };
 
 /** An issue's records, by finding. Worker-only: never part of a finding or anything sent on. */
@@ -373,14 +379,19 @@ export function analyse(input: AnalysisInput): AnalysisOutput {
 /** Set for one analysis whose digest is checked (DECISIONS.md 756): its findings keep a period's marks. Analyses run one at a time, synchronously. */
 let markingPeriods = false;
 
-/** A calibration read from the org's settings without the stages the name rule read (DECISIONS.md 756); any other, or one with none, as it is. */
-function withoutNameReadings(calibration: Calibration): Calibration {
-  if (calibration.source !== "org_settings" || !calibration.stages.some(fromName)) return calibration;
-  return { ...calibration, stages: calibration.stages.filter((s) => !fromName(s)) };
+/** A calibration read from the org's settings without the stages the name rule read (DECISIONS.md 756), or a model (766), as `drop` says; any other, or one with none, as it is. */
+function withoutNameReadings(calibration: Calibration, drop: (s: Calibration["stages"][number]) => boolean = fromName): Calibration {
+  if (calibration.source !== "org_settings" || !calibration.stages.some(drop)) return calibration;
+  return { ...calibration, stages: calibration.stages.filter((s) => !drop(s)) };
 }
 
 function analyseWithin(input: AnalysisInput): AnalysisOutput {
-  const calibration = input.stageNames === true ? input.calibration : withoutNameReadings(input.calibration);
+  const calibration =
+    input.stageNames !== true
+      ? withoutNameReadings(input.calibration, (s) => fromName(s) || fromModel(s))
+      : input.stageNamesModel === true
+        ? input.calibration
+        : withoutNameReadings(input.calibration, fromModel);
   const { modules, extracts, now, window, answers, pseudonyms, userDirectory, scope = "complete", unanswered = "ask" } = input;
   const raised = new Map<string, ManualStep>();
   let currentRule: string | null = null;
